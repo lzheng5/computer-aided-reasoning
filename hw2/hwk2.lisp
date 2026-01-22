@@ -318,6 +318,8 @@
 
 ;; Feel free to define helper functions as needed.
 
+;; [???] refactoring
+
 (definec saeval (e :saexpr a :assignment) :rat-err
   (match e
     (:rational e)
@@ -325,38 +327,38 @@
     (:usaexpr
      (('- e0) (match (saeval e0 a)
                 (:er *er*)
-                (v (- v))))
+                (v0 (- v0))))
      (('/ e0) (match (saeval e0 a)
                 ((:or :er 0) *er*)
-                (v (/ v)))))
+                (v0 (/ v0)))))
     (:bsaexpr
      ((e0 '+ e1) (match (saeval e0 a)
                    (:er *er*)
-                   (v1 (match (saeval e1 a)
+                   (v0 (match (saeval e1 a)
                          (:er *er*)
-                         (v2 (+ v1 v2))))))
+                         (v1 (+ v0 v1))))))
      ((e0 '- e1) (match (saeval e0 a)
                    (:er *er*)
-                   (v1 (match (saeval e1 a)
+                   (v0 (match (saeval e1 a)
                          (:er *er*)
-                         (v2 (- v1 v2))))))
+                         (v1 (- v0 v1))))))
      ((e0 '* e1) (match (saeval e0 a)
                    (:er *er*)
-                   (v1 (match (saeval e1 a)
+                   (v0 (match (saeval e1 a)
                          (:er *er*)
-                         (v2 (* v1 v2))))))
+                         (v1 (* v0 v1))))))
      ((e0 '/ e1) (match (saeval e0 a)
                    (:er *er*)
-                   (v1 (match (saeval e1 a)
+                   (v0 (match (saeval e1 a)
                          ((:or :er 0) *er*)
-                         (v2 (/ v1 v2))))))
+                         (v1 (/ v0 v1))))))
      ((e0 '^ e1) (match (saeval e0 a)
                    ((:or :er 0) *er*)
-                   (v1 (let ((v2 (saeval e1 a)))
-                         (match v2
-                           ((:t (and (integerp v2)
-                                     (not (< v2 0))))
-                            (expt v1 v2))
+                   (v0 (let ((v1 (saeval e1 a)))
+                         (match v1
+                           ((:t (and (integerp v1)
+                                     (not (< v1 0))))
+                            (expt v0 v1))
                            (& *er*)))))))))
 
 (check= (saeval '((x + y) - (- z))
@@ -554,16 +556,16 @@
       ((e0 '+ e1) (+ (aaeval e0 a) (aaeval e1 a)))
       ((e0 '- e1) (- (aaeval e0 a) (aaeval e1 a)))
       ((e0 '* e1) (* (aaeval e0 a) (aaeval e1 a)))
-      ((e0 '/ e1) (let ((v1 (aaeval e0 a)))
+      ((e0 '/ e1) (let ((v0 (aaeval e0 a)))
                     (match (aaeval e1 a)
                       (0 0)
-                      (v2 (/ v1 v2)))))
+                      (v1 (/ v0 v1)))))
       ((e0 'expt e1) (match (aaeval e0 a)
                        (0 0)
-                       (v1 (let ((v2 (aaeval e1 a)))
-                             (match v2
-                               ((:t (and (integerp v2) (not (< v2 0))))
-                                (expt v1 v2))
+                       (v0 (let ((v1 (aaeval e1 a)))
+                             (match v1
+                               ((:t (and (integerp v1) (not (< v1 0))))
+                                (expt v0 v1))
                                (& 1)))))))))
 
 ;; In the definition of aaeval, if there is a divide by 0, aaeval will
