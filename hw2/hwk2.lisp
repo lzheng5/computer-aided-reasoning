@@ -318,7 +318,17 @@
 
 ;; Feel free to define helper functions as needed.
 
-;; [???] refactoring
+;; Helper function: check if a rational is a non-negative integer
+;; Corresponds to is_non_negative_integer in the Coq formulation
+(definec non-negative-integerp (r :all) :boolean
+  (and (integerp r)
+       (not (< r 0))))
+
+;; Tests for non-negative-integerp
+(check= (non-negative-integerp 0) t)
+(check= (non-negative-integerp 5) t)
+(check= (non-negative-integerp -1) nil)
+(check= (non-negative-integerp 1/2) nil)
 
 (definec saeval (e :saexpr a :assignment) :rat-err
   (match e
@@ -356,8 +366,7 @@
                    ((:or :er 0) *er*)
                    (v0 (let ((v1 (saeval e1 a)))
                          (match v1
-                           ((:t (and (integerp v1)
-                                     (not (< v1 0))))
+                           ((:t (non-negative-integerp v1))
                             (expt v0 v1))
                            (& *er*)))))))))
 
@@ -564,7 +573,7 @@
                        (0 0)
                        (v0 (let ((v1 (aaeval e1 a)))
                              (match v1
-                               ((:t (and (integerp v1) (not (< v1 0))))
+                               ((:t (non-negative-integerp v1))
                                 (expt v0 v1))
                                (& 1)))))))))
 
@@ -605,4 +614,11 @@
 ;; provers include lean, acl2, coq, pvs, agda, isabelle, hol (and
 ;; variants), etc.
 
-...
+;; Observations:
+;; 0. It is a lot easier to work with rational numbers while developing in ACL2s.
+;; 1. ACL2s has better automations for properties based testing.
+;;    In Coq, we have to define the generators.
+;; 2. Coq is more explicit with constructors.
+;; 3. ACL2s `definec` has automatic termination checking, while Coq `Fixpoint` requires structural recursion to be evident.
+;; 4. ACL2s uses a singleton error type, whereas Coq uses a sum type (similar to Maybe/Option).
+;; 5. ACL2s integrated testing and proving in one framework, while Coq has them separated: QuickChick for testing, Coq for proving.
