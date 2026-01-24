@@ -74,13 +74,15 @@
     (:usaexpr
      ((op e0) (match (saeval e0 a)
                 (:er *er*)
-                (v0 (apply-uoper op v0)))))
+                (v0 (apply-uoper op v0))))
+     (& *er*))
     (:bsaexpr
      ((e0 op e1) (match (saeval e0 a)
                    (:er *er*)
                    (v0 (match (saeval e1 a)
                          (:er *er*)
-                         (v1 (apply-boper op v0 v1)))))))))
+                         (v1 (apply-boper op v0 v1))))))
+     (& *er*))))
 
 (property (a :assignment)
   (== (saeval 'x a) (saeval 'x a)))
@@ -177,7 +179,7 @@
 (property aa-sael-id (e :saexpr)
     (== (aa->sael (sael->aa e)) e))
 
-;; Apply a unary operator to a value 
+;; Apply a unary operator to a value
 (definec aapply-uoper (op :uoper v :rational) :rational
   (match op
     ('- (- v))
@@ -202,9 +204,11 @@
      (:rational e)
      (:var (lookup e a))
      (:uaaexpr
-      ((op e0) (aapply-uoper op (aaeval e0 a))))
+      ((op e0) (aapply-uoper op (aaeval e0 a)))
+      (& 0))
      (:baaexpr
-      ((e0 op e1) (aapply-baoper op (aaeval e0 a) (aaeval e1 a))))))
+      ((e0 op e1) (aapply-baoper op (aaeval e0 a) (aaeval e1 a)))
+      (& 0))))
 
 (property (e :saexpr a :assignment)
     (let ((v (saeval e a)))

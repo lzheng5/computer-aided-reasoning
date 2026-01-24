@@ -124,7 +124,7 @@ lemma distributivity:
 text \<open>Zero exponent always errors (base is 0)\<close>
 lemma zero_exponent_err:
   "saeval (BSaexpr (Rat 0) BExp x) a = None"
-  by simp
+  by (cases "saeval x a"; auto)
  
 text \<open>Non-zero divide cancellation: (x * y) / y = x when y \<noteq> 0\<close>
 lemma non_zero_divide_cancel:
@@ -222,7 +222,8 @@ next
 next
   case (BSaexpr e0 op e1)
   then show ?case
-    by (cases op) (auto split: option.splits if_splits)
+    by (cases op; cases "saeval e0 a"; cases "saeval e1 a") 
+       (auto split: option.splits if_splits)
 qed
 
 text \<open>When the translation's saeval succeeds, aaeval agrees\<close>
