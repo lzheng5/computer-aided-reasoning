@@ -1,0 +1,265 @@
+theory hwk2
+  imports Main "HOL.Rat" "HOL-Library.Monad_Syntax"
+begin
+
+section \<open>Simple Arithmetic Expression Language (SAEL)\<close>
+ 
+text \<open>
+  This is an Isabelle/HOL formalization of the ACL2s homework 2 solution.
+  It defines a simple arithmetic expression language with error handling
+  for division by zero and invalid exponentiation.
+\<close>
+ 
+subsection \<open>Data Type Definitions\<close>
+ 
+text \<open>Unary operators: negation and reciprocal\<close>
+datatype uoper = UNeg | URecip
+
+text \<open>Binary operators: addition, subtraction, multiplication, division, exponentiation\<close>
+datatype boper = BAdd | BSub | BMul | BDiv | BExp
+ 
+text \<open>Variables are represented as strings\<close>
+type_synonym var = string
+ 
+text \<open>Simple arithmetic expressions\<close>
+datatype saexpr =
+    Rat rat                          \<comment> \<open>Rational literal\<close>
+  | Var var                          \<comment> \<open>Variable\<close>
+  | USaexpr uoper saexpr             \<comment> \<open>Unary expression\<close>
+  | BSaexpr saexpr boper saexpr      \<comment> \<open>Binary expression\<close>
+ 
+text \<open>Assignment: mapping from variables to rationals\<close>
+type_synonym assignment = "(var \<times> rat) list"
+ 
+subsection \<open>Variable Lookup\<close>
+ 
+text \<open>Look up a variable in an assignment, defaulting to 1 if not found\<close>
+fun lookup :: "var \<Rightarrow> assignment \<Rightarrow> rat" where
+  "lookup v [] = 1"
+| "lookup v ((u, r) # a) = (if u = v then r else lookup v a)"
+ 
+subsection \<open>Expression Evaluation\<close>
+
+text \<open>Helper: convert rational to nat if it's a non-negative integer\<close>
+definition rat_to_nat :: "rat \<Rightarrow> nat option" where
+  "rat_to_nat r = (if r \<ge> 0 \<and> (\<exists>n. r = of_nat n)
+                   then Some (nat \<lfloor>r\<rfloor>)
+                   else None)"
+ 
+text \<open>Evaluate a simple arithmetic expression with error handling\<close>
+fun saeval :: "saexpr \<Rightarrow> assignment \<Rightarrow> rat option" where
+  "saeval (Rat r) a = Some r"
+| "saeval (Var v) a = Some (lookup v a)"
+| "saeval (USaexpr UNeg e0) a = do { v0 <- saeval e0 a; Some (- v0) }"
+| "saeval (USaexpr URecip e0) a =
+    (case saeval e0 a of
+       None \<Rightarrow> None
+     | Some v0 \<Rightarrow> if v0 = 0 then None else Some (inverse v0))"
+| "saeval (BSaexpr e0 BAdd e1) a =
+    (case saeval e0 a of
+       None \<Rightarrow> None
+     | Some v0 \<Rightarrow>
+         (case saeval e1 a of
+            None \<Rightarrow> None
+          | Some v1 \<Rightarrow> Some (v0 + v1)))"
+| "saeval (BSaexpr e0 BSub e1) a =
+    (case saeval e0 a of
+       None \<Rightarrow> None
+     | Some v0 \<Rightarrow>
+         (case saeval e1 a of
+            None \<Rightarrow> None
+          | Some v1 \<Rightarrow> Some (v0 - v1)))"
+| "saeval (BSaexpr e0 BMul e1) a =
+    (case saeval e0 a of
+       None \<Rightarrow> None
+     | Some v0 \<Rightarrow>
+         (case saeval e1 a of
+            None \<Rightarrow> None
+          | Some v1 \<Rightarrow> Some (v0 * v1)))"
+| "saeval (BSaexpr e0 BDiv e1) a =
+    (case saeval e0 a of
+       None \<Rightarrow> None
+     | Some v0 \<Rightarrow>
+         (case saeval e1 a of
+            None \<Rightarrow> None
+          | Some v1 \<Rightarrow> if v1 = 0 then None else Some (v0 / v1)))"
+| "saeval (BSaexpr e0 BExp e1) a =
+    (case saeval e0 a of
+       None \<Rightarrow> None
+     | Some v0 \<Rightarrow> if v0 = 0 then None else
+         (case saeval e1 a of
+            None \<Rightarrow> None
+          | Some v1 \<Rightarrow>
+              (case rat_to_nat v1 of
+                 None \<Rightarrow> None
+               | Some n \<Rightarrow> Some (v0 ^ n))))"
+ 
+subsection \<open>Properties of saeval\<close>
+ 
+text \<open>Evaluation is deterministic (trivial for functions)\<close>
+lemma saeval_deterministic: "saeval x a = saeval x a"
+  by simp
+
+text \<open>Double negation property\<close>
+lemma double_negation [simp]:
+  "saeval (USaexpr UNeg (USaexpr UNeg x)) a = saeval x a"
+  by (cases "saeval x a") auto
+
+lemma double_negation_var:
+  "saeval (USaexpr UNeg (USaexpr UNeg (Var x))) a = saeval (Var x) a"
+  by auto
+
+text \<open>Triple negation equals single negation\<close>
+lemma triple_negation:
+  "saeval (USaexpr UNeg (USaexpr UNeg (USaexpr UNeg (Var x)))) a =
+   saeval (USaexpr UNeg (Var x)) a"
+  by simp
+ 
+text \<open>x + (-y) = x - y\<close>
+lemma add_neg_is_sub [simp]:
+  "saeval (BSaexpr x BAdd (USaexpr UNeg y)) a =
+   saeval (BSaexpr x BSub y) a"
+  by (cases "saeval x a"; cases "saeval y a") auto
+ 
+text \<open>1 / (x / y) = y / x when y \<noteq> 0\<close>
+lemma recip_property:
+  assumes "saeval y a = Some vy"
+      and "vy \<noteq> 0"
+      and "saeval x a = Some vx"
+  shows "saeval (BSaexpr (Rat 1) BDiv (BSaexpr x BDiv y)) a =
+         saeval (BSaexpr y BDiv x) a"
+  using assms by (simp add: field_simps)
+
+text \<open>Distributivity: x * (y + z) = (x * y) + (x * z)\<close>
+lemma distributivity:
+  "saeval (BSaexpr x BMul (BSaexpr y BAdd z)) a =
+   saeval (BSaexpr (BSaexpr x BMul y) BAdd (BSaexpr x BMul z)) a"
+  by (cases "saeval x a"; cases "saeval y a"; cases "saeval z a") 
+     (auto simp: field_simps)
+ 
+text \<open>Zero exponent always errors (base is 0)\<close>
+lemma zero_exponent_err:
+  "saeval (BSaexpr (Rat 0) BExp x) a = None"
+  by simp
+ 
+text \<open>Non-zero divide cancellation: (x * y) / y = x when y \<noteq> 0\<close>
+lemma non_zero_divide_cancel:
+  assumes "saeval y a = Some vy"
+      and "vy \<noteq> 0"
+  shows "saeval (BSaexpr (BSaexpr (Rat x) BMul y) BDiv y) a = Some x"
+  using assms by simp
+ 
+subsection \<open>Alternative Arithmetic Expression (AAExpr) with expt notation\<close>
+ 
+text \<open>Binary operators for AA expressions use 'expt' instead of '^'\<close>
+datatype baoper = BAAdd | BASub | BAMul | BADiv | BAExpt
+ 
+text \<open>Alternative arithmetic expressions\<close>
+datatype aaexpr =
+    ARat rat
+  | AVar var
+  | UAaexpr uoper aaexpr
+  | BAaexpr aaexpr baoper aaexpr
+
+subsection \<open>Translation Functions\<close>
+ 
+text \<open>Convert SAEL to AA expression\<close>
+fun sael_to_aa :: "saexpr \<Rightarrow> aaexpr" where
+  "sael_to_aa (Rat r) = ARat r"
+| "sael_to_aa (Var v) = AVar v"
+| "sael_to_aa (USaexpr op e) = UAaexpr op (sael_to_aa e)"
+| "sael_to_aa (BSaexpr e0 BAdd e1) = BAaexpr (sael_to_aa e0) BAAdd (sael_to_aa e1)"
+| "sael_to_aa (BSaexpr e0 BSub e1) = BAaexpr (sael_to_aa e0) BASub (sael_to_aa e1)"
+| "sael_to_aa (BSaexpr e0 BMul e1) = BAaexpr (sael_to_aa e0) BAMul (sael_to_aa e1)"
+| "sael_to_aa (BSaexpr e0 BDiv e1) = BAaexpr (sael_to_aa e0) BADiv (sael_to_aa e1)"
+| "sael_to_aa (BSaexpr e0 BExp e1) = BAaexpr (sael_to_aa e0) BAExpt (sael_to_aa e1)"
+ 
+text \<open>Convert AA expression to SAEL\<close>
+fun aa_to_sael :: "aaexpr \<Rightarrow> saexpr" where
+  "aa_to_sael (ARat r) = Rat r"
+| "aa_to_sael (AVar v) = Var v"
+| "aa_to_sael (UAaexpr op e) = USaexpr op (aa_to_sael e)"
+| "aa_to_sael (BAaexpr e0 BAAdd e1) = BSaexpr (aa_to_sael e0) BAdd (aa_to_sael e1)"
+| "aa_to_sael (BAaexpr e0 BASub e1) = BSaexpr (aa_to_sael e0) BSub (aa_to_sael e1)"
+| "aa_to_sael (BAaexpr e0 BAMul e1) = BSaexpr (aa_to_sael e0) BMul (aa_to_sael e1)"
+| "aa_to_sael (BAaexpr e0 BADiv e1) = BSaexpr (aa_to_sael e0) BDiv (aa_to_sael e1)"
+| "aa_to_sael (BAaexpr e0 BAExpt e1) = BSaexpr (aa_to_sael e0) BExp (aa_to_sael e1)"
+ 
+text \<open>Round-trip property: sael_to_aa \<circ> aa_to_sael = id\<close>
+lemma sael_aa_id: "sael_to_aa (aa_to_sael e) = e"
+  (* by (induction e rule: aa_to_sael.induct) auto *)
+  apply (induct_tac e rule: aa_to_sael.induct, auto)
+  done
+  
+text \<open>Round-trip property: aa_to_sael \<circ> sael_to_aa = id\<close>
+lemma aa_sael_id: "aa_to_sael (sael_to_aa e) = e"
+  apply (induct_tac e rule: sael_to_aa.induct, auto) 
+  done
+
+subsection \<open>AA Expression Evaluation (Total, No Errors)\<close>
+ 
+text \<open>Evaluate AA expression (total function, returns 0 or 1 for error cases)\<close>
+fun aaeval :: "aaexpr \<Rightarrow> assignment \<Rightarrow> rat" where
+  "aaeval (ARat r) a = r"
+| "aaeval (AVar v) a = lookup v a"
+| "aaeval (UAaexpr UNeg e0) a = - (aaeval e0 a)"
+| "aaeval (UAaexpr URecip e0) a =
+    (let v = aaeval e0 a in if v = 0 then 0 else inverse v)"
+| "aaeval (BAaexpr e0 BAAdd e1) a = aaeval e0 a + aaeval e1 a"
+| "aaeval (BAaexpr e0 BASub e1) a = aaeval e0 a - aaeval e1 a"
+| "aaeval (BAaexpr e0 BAMul e1) a = aaeval e0 a * aaeval e1 a"
+| "aaeval (BAaexpr e0 BADiv e1) a =
+    (let v0 = aaeval e0 a; 
+         v1 = aaeval e1 a in
+     if v1 = 0 then 0 else v0 / v1)"
+| "aaeval (BAaexpr e0 BAExpt e1) a =
+    (let v0 = aaeval e0 a in
+     if v0 = 0 then 0
+     else let v1 = aaeval e1 a in
+       (case rat_to_nat v1 of
+          None \<Rightarrow> 1
+        | Some n \<Rightarrow> v0 ^ n))"
+ 
+subsection \<open>Equivalence Between saeval and aaeval\<close>
+
+text \<open>When saeval succeeds, aaeval produces the same result\<close>
+lemma saeval_aaeval_equiv:
+  assumes "saeval e a = Some v"
+  shows "aaeval (sael_to_aa e) a = v"
+  using assms
+proof (induction e arbitrary: v)
+  case (Rat r)
+  then show ?case by simp
+next
+  case (Var x)
+  then show ?case by simp
+next
+  case (USaexpr op e0)
+  then show ?case
+    by (cases op; cases "saeval e0 a")        
+       (auto split: option.splits if_splits)
+next
+  case (BSaexpr e0 op e1)
+  then show ?case
+    by (cases op) (auto split: option.splits if_splits)
+qed
+
+text \<open>When the translation's saeval succeeds, aaeval agrees\<close>
+lemma aaeval_saeval_equiv:
+  assumes "saeval (aa_to_sael e) a = Some v"
+  shows "aaeval e a = v"
+proof -
+  have "aaeval (sael_to_aa (aa_to_sael e)) a = v"
+    using assms saeval_aaeval_equiv by blast
+  then show ?thesis
+    using sael_aa_id by simp
+qed
+
+lemma aaeval_saeval_equiv2:
+  assumes "saeval (aa_to_sael e) a = Some v"
+  shows "aaeval e a = v"
+  using assms saeval_aaeval_equiv sael_aa_id 
+  (* sledgehammer *)
+  by metis
+
+end
