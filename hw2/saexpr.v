@@ -22,7 +22,7 @@ From QuickChick Require Import QuickChick.
 Import QcDefaultNotation. Open Scope qc_scope.
 Set Warnings "-extraction-opaque-accessed,-extraction".
 
-From Hammer Require Import Tactics Reflect.
+From Hammer Require Import Hammer Tactics Reflect.
 
 (* Variable type - represented as strings *)
 Definition var : Type := string.
@@ -96,8 +96,9 @@ Proof.
   unfold Qlt_bool.
   breflect.
   split; intros.
-  - apply Qnot_le_lt.
-    sauto use: Qle_antisym.
+  - sfirstorder use: QOrder.le_antisym, QOrder.not_ge_lt.
+    (*apply Qnot_le_lt.
+    sauto use: Qle_antisym. *)
   - sauto use: Qlt_leneq.
 Qed.
 
@@ -424,11 +425,11 @@ Time Elapsed: 0.292207s
 (* Example tests *)
 Example test1 : saeval (SBinary (SVar "x") Plus (SVar "y"))
                        [("x"%string, 2); ("y"%string, 3)] = Val 5.
-Proof. reflexivity. Qed.
+Proof. auto. Qed.
 
 Example test2 : saeval (SBinary (SRat 1) Div (SRat 0)) [] = Err.
-Proof. reflexivity. Qed.
+Proof. auto. Qed.
 
 Example test3 : aaeval (ABinary (AVar "x") Plus (AVar "y"))
                        [("x"%string, 2); ("y"%string, 3)] = 5.
-Proof. reflexivity. Qed.
+Proof. auto. Qed.
