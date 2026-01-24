@@ -617,11 +617,16 @@
 ;; provers include lean, acl2, coq, pvs, agda, isabelle, hol (and
 ;; variants), etc.
 
+;; I used AI tools (Claude Sonnet/Opus 4.5) to generate the corresonding formalizations for HOL and Coq.
+;; The Coq file only contains quick check properties (no proofs).
+
 ;; Observations:
-;; 0. It is a lot easier to work with rational numbers while developing in ACL2s.
+;; 0. It is a lot easier to work with rational numbers while developing in ACL2s and HOL than Coq.
 ;; 1. ACL2s has better automations for properties based testing.
 ;;    In Coq, we have to define the generators.
-;; 2. Coq is more explicit with constructors.
-;; 3. ACL2s `definec` has automatic termination checking, while Coq `Fixpoint` requires structural recursion to be evident.
-;; 4. ACL2s uses a singleton error type, whereas Coq uses a sum type (similar to Maybe/Option).
-;; 5. ACL2s integrated testing and proving in one framework, while Coq has them separated: QuickChick for testing, Coq for proving.
+;;    Not sure about HOL.
+;; 2. Contract checking is still slower than type checking.
+;; 3. ACL2s's termination checking can take quite long if not careful.
+;;    While HOL/Coq relies on explicit structural recursion and type checking, which is in general pretty fast.
+;; 4. ACL2s integrated testing and proving in one framework, while Coq has them separated: QuickChick for testing, Coq for proving.
+;; 5. Proof automation (for this assignment), ACL2s > HOL > Coq.
