@@ -178,11 +178,17 @@ fun aa_to_sael :: "aaexpr \<Rightarrow> saexpr" where
 | "aa_to_sael (BAaexpr e0 op e1) = BSaexpr (aa_to_sael e0) (baoper_to_boper op) (aa_to_sael e1)"
  
 text \<open>Round-trip property: sael_to_aa \<circ> aa_to_sael = id\<close>
-lemma sael_aa_id: "sael_to_aa (aa_to_sael e) = e"
+lemma baoper_boper_id [simp] : "boper_to_baoper (baoper_to_boper op) = op"
+  by (cases "op"; auto) 
+
+lemma boper_baoper_id [simp]: "baoper_to_boper (boper_to_baoper op) = op"
+  by (cases "op"; auto) 
+
+lemma sael_aa_id [simp] : "sael_to_aa (aa_to_sael e) = e"
   by (induction e rule: aa_to_sael.induct) auto
   
 text \<open>Round-trip property: aa_to_sael \<circ> sael_to_aa = id\<close>
-lemma aa_sael_id: "aa_to_sael (sael_to_aa e) = e"
+lemma aa_sael_id [simp] : "aa_to_sael (sael_to_aa e) = e"
   apply (induct_tac e rule: sael_to_aa.induct, auto) 
   done
 
