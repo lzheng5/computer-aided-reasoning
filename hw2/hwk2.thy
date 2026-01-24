@@ -146,28 +146,36 @@ datatype aaexpr =
   | BAaexpr aaexpr baoper aaexpr
 
 subsection \<open>Translation Functions\<close>
- 
+
+text \<open>Convert binary SAEL operator to AA operator\<close>
+fun boper_to_baoper :: "boper \<Rightarrow> baoper" where
+  "boper_to_baoper BAdd = BAAdd"
+| "boper_to_baoper BSub = BASub"
+| "boper_to_baoper BMul = BAMul"
+| "boper_to_baoper BDiv = BADiv"
+| "boper_to_baoper BExp = BAExpt"
+
+text \<open>Convert binary AA operator to SAEL operator\<close>
+fun baoper_to_boper :: "baoper \<Rightarrow> boper" where
+  "baoper_to_boper BAAdd = BAdd"
+| "baoper_to_boper BASub = BSub"
+| "baoper_to_boper BAMul = BMul"
+| "baoper_to_boper BADiv = BDiv"
+| "baoper_to_boper BAExpt = BExp"
+
 text \<open>Convert SAEL to AA expression\<close>
 fun sael_to_aa :: "saexpr \<Rightarrow> aaexpr" where
   "sael_to_aa (Rat r) = ARat r"
 | "sael_to_aa (Var v) = AVar v"
 | "sael_to_aa (USaexpr op e) = UAaexpr op (sael_to_aa e)"
-| "sael_to_aa (BSaexpr e0 BAdd e1) = BAaexpr (sael_to_aa e0) BAAdd (sael_to_aa e1)"
-| "sael_to_aa (BSaexpr e0 BSub e1) = BAaexpr (sael_to_aa e0) BASub (sael_to_aa e1)"
-| "sael_to_aa (BSaexpr e0 BMul e1) = BAaexpr (sael_to_aa e0) BAMul (sael_to_aa e1)"
-| "sael_to_aa (BSaexpr e0 BDiv e1) = BAaexpr (sael_to_aa e0) BADiv (sael_to_aa e1)"
-| "sael_to_aa (BSaexpr e0 BExp e1) = BAaexpr (sael_to_aa e0) BAExpt (sael_to_aa e1)"
+| "sael_to_aa (BSaexpr e0 op e1) = BAaexpr (sael_to_aa e0) (boper_to_baoper op) (sael_to_aa e1)"
  
 text \<open>Convert AA expression to SAEL\<close>
 fun aa_to_sael :: "aaexpr \<Rightarrow> saexpr" where
   "aa_to_sael (ARat r) = Rat r"
 | "aa_to_sael (AVar v) = Var v"
 | "aa_to_sael (UAaexpr op e) = USaexpr op (aa_to_sael e)"
-| "aa_to_sael (BAaexpr e0 BAAdd e1) = BSaexpr (aa_to_sael e0) BAdd (aa_to_sael e1)"
-| "aa_to_sael (BAaexpr e0 BASub e1) = BSaexpr (aa_to_sael e0) BSub (aa_to_sael e1)"
-| "aa_to_sael (BAaexpr e0 BAMul e1) = BSaexpr (aa_to_sael e0) BMul (aa_to_sael e1)"
-| "aa_to_sael (BAaexpr e0 BADiv e1) = BSaexpr (aa_to_sael e0) BDiv (aa_to_sael e1)"
-| "aa_to_sael (BAaexpr e0 BAExpt e1) = BSaexpr (aa_to_sael e0) BExp (aa_to_sael e1)"
+| "aa_to_sael (BAaexpr e0 op e1) = BSaexpr (aa_to_sael e0) (baoper_to_boper op) (aa_to_sael e1)"
  
 text \<open>Round-trip property: sael_to_aa \<circ> aa_to_sael = id\<close>
 lemma sael_aa_id: "sael_to_aa (aa_to_sael e) = e"
@@ -180,26 +188,26 @@ lemma aa_sael_id: "aa_to_sael (sael_to_aa e) = e"
 
 subsection \<open>AA Expression Evaluation (Total, No Errors)\<close>
 
-text \<open>Apply a unary operator to a value (total version)\<close>
-fun apply_uoper_total :: "uoper \<Rightarrow> rat \<Rightarrow> rat" where
-  "apply_uoper_total UNeg v = - v"
-| "apply_uoper_total URecip v = (if v = 0 then 0 else inverse v)"
+text \<open>Apply a unary operator to a value (total version for aaeval)\<close>
+fun aapply_uoper :: "uoper \<Rightarrow> rat \<Rightarrow> rat" where
+  "aapply_uoper UNeg v = - v"
+| "aapply_uoper URecip v = (if v = 0 then 0 else inverse v)"
 
-text \<open>Apply a binary AA operator to two values (total version)\<close>
-fun apply_baoper_total :: "baoper \<Rightarrow> rat \<Rightarrow> rat \<Rightarrow> rat" where
-  "apply_baoper_total BAAdd v0 v1 = v0 + v1"
-| "apply_baoper_total BASub v0 v1 = v0 - v1"
-| "apply_baoper_total BAMul v0 v1 = v0 * v1"
-| "apply_baoper_total BADiv v0 v1 = (if v1 = 0 then 0 else v0 / v1)"
-| "apply_baoper_total BAExpt v0 v1 = (if v0 = 0 then 0 else
+text \<open>Apply a binary AA operator to two values (total version for aaeval)\<close>
+fun aapply_baoper :: "baoper \<Rightarrow> rat \<Rightarrow> rat \<Rightarrow> rat" where
+  "aapply_baoper BAAdd v0 v1 = v0 + v1"
+| "aapply_baoper BASub v0 v1 = v0 - v1"
+| "aapply_baoper BAMul v0 v1 = v0 * v1"
+| "aapply_baoper BADiv v0 v1 = (if v1 = 0 then 0 else v0 / v1)"
+| "aapply_baoper BAExpt v0 v1 = (if v0 = 0 then 0 else
     (case rat_to_nat v1 of None \<Rightarrow> 1 | Some n \<Rightarrow> v0 ^ n))"
 
 text \<open>Evaluate AA expression (total function, returns 0 or 1 for error cases)\<close>
 fun aaeval :: "aaexpr \<Rightarrow> assignment \<Rightarrow> rat" where
   "aaeval (ARat r) a = r"
 | "aaeval (AVar v) a = lookup v a"
-| "aaeval (UAaexpr op e0) a = apply_uoper_total op (aaeval e0 a)"
-| "aaeval (BAaexpr e0 op e1) a = apply_baoper_total op (aaeval e0 a) (aaeval e1 a)"
+| "aaeval (UAaexpr op e0) a = aapply_uoper op (aaeval e0 a)"
+| "aaeval (BAaexpr e0 op e1) a = aapply_baoper op (aaeval e0 a) (aaeval e1 a)"
  
 subsection \<open>Equivalence Between saeval and aaeval\<close>
 
