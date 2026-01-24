@@ -48,46 +48,39 @@
            (rationalp x))
   :rule-classes (:rewrite :forward-chaining))
 
-;; [TODO] refactoring and speed up?
+;; Apply a unary operator to a value
+(definec apply-uoper (op :uoper v :rational) :rat-err
+  (match op
+    ('- (- v))
+    ('/ (if (== v 0) *er* (/ v)))))
+
+;; Apply a binary operator to two values
+(definec apply-boper (op :boper v0 :rational v1 :rational) :rat-err
+  (match op
+    ('+ (+ v0 v1))
+    ('- (- v0 v1))
+    ('* (* v0 v1))
+    ('/ (if (== v1 0) *er* (/ v0 v1)))
+    ('^ (if (== v0 0)
+            *er*
+            (if (non-negative-integerp v1)
+                (expt v0 v1)
+                *er*)))))
+
 (definec saeval (e :saexpr a :assignment) :rat-err
   (match e
     (:rational e)
     (:var (lookup e a))
     (:usaexpr
-     (('- e0) (match (saeval e0 a)
+     ((op e0) (match (saeval e0 a)
                 (:er *er*)
-                (v0 (- v0))))
-     (('/ e0) (match (saeval e0 a)
-                ((:or :er 0) *er*)
-                (v0 (/ v0)))))
+                (v0 (apply-uoper op v0)))))
     (:bsaexpr
-     ((e0 '+ e1) (match (saeval e0 a)
+     ((e0 op e1) (match (saeval e0 a)
                    (:er *er*)
                    (v0 (match (saeval e1 a)
                          (:er *er*)
-                         (v1 (+ v0 v1))))))
-     ((e0 '- e1) (match (saeval e0 a)
-                   (:er *er*)
-                   (v0 (match (saeval e1 a)
-                         (:er *er*)
-                         (v1 (- v0 v1))))))
-     ((e0 '* e1) (match (saeval e0 a)
-                   (:er *er*)
-                   (v0 (match (saeval e1 a)
-                         (:er *er*)
-                         (v1 (* v0 v1))))))
-     ((e0 '/ e1) (match (saeval e0 a)
-                   (:er *er*)
-                   (v0 (match (saeval e1 a)
-                         ((:or :er 0) *er*)
-                         (v1 (/ v0 v1))))))
-     ((e0 '^ e1) (match (saeval e0 a)
-                   ((:or :er 0) *er*)
-                   (v0 (let ((v1 (saeval e1 a)))
-                         (match v1
-                           ((:t (non-negative-integerp v1))
-                            (expt v0 v1))
-                           (& *er*)))))))))
+                         (v1 (apply-boper op v0 v1)))))))))
 
 (property (a :assignment)
   (== (saeval 'x a) (saeval 'x a)))
@@ -184,31 +177,34 @@
 (property aa-sael-id (e :saexpr)
     (== (aa->sael (sael->aa e)) e))
 
+;; Apply a unary operator to a value 
+(definec aapply-uoper (op :uoper v :rational) :rational
+  (match op
+    ('- (- v))
+    ('/ (if (== v 0) 0 (/ v)))))
+
+;; Apply a binary AA operator to two values
+(definec aapply-baoper (op :baoper v0 :rational v1 :rational) :rational
+  (match op
+    ('+ (+ v0 v1))
+    ('- (- v0 v1))
+    ('* (* v0 v1))
+    ('/ (if (== v1 0) 0 (/ v0 v1)))
+    ('expt (if (== v0 0)
+               0
+               (if (non-negative-integerp v1)
+                   (expt v0 v1)
+                   1)))))
+
 (set-guard-checking nil)
 (definec aaeval (e :aaexpr a :assignment) :rational
    (match e
      (:rational e)
      (:var (lookup e a))
      (:uaaexpr
-      (('- e0) (- (aaeval e0 a)))
-      (('/ e0) (match (aaeval e0 a)
-                 (0 0)
-                 (v (/ v)))))
+      ((op e0) (aapply-uoper op (aaeval e0 a))))
      (:baaexpr
-      ((e0 '+ e1) (+ (aaeval e0 a) (aaeval e1 a)))
-      ((e0 '- e1) (- (aaeval e0 a) (aaeval e1 a)))
-      ((e0 '* e1) (* (aaeval e0 a) (aaeval e1 a)))
-      ((e0 '/ e1) (let ((v0 (aaeval e0 a)))
-                    (match (aaeval e1 a)
-                      (0 0)
-                      (v1 (/ v0 v1)))))
-      ((e0 'expt e1) (match (aaeval e0 a)
-                       (0 0)
-                       (v0 (let ((v1 (aaeval e1 a)))
-                             (match v1
-                               ((:t (non-negative-integerp v1))
-                                (expt v0 v1))
-                               (& 1)))))))))
+      ((e0 op e1) (aapply-baoper op (aaeval e0 a) (aaeval e1 a))))))
 
 (property (e :saexpr a :assignment)
     (let ((v (saeval e a)))
