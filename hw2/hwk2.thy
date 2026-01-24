@@ -47,54 +47,36 @@ definition rat_to_nat :: "rat \<Rightarrow> nat option" where
   "rat_to_nat r = (if r \<ge> 0 \<and> (\<exists>n. r = of_nat n)
                    then Some (nat \<lfloor>r\<rfloor>)
                    else None)"
- 
+
+text \<open>Apply a unary operator to a value\<close>
+fun apply_uoper :: "uoper \<Rightarrow> rat \<Rightarrow> rat option" where
+  "apply_uoper UNeg v = Some (- v)"
+| "apply_uoper URecip v = (if v = 0 then None else Some (inverse v))"
+
+text \<open>Apply a binary operator to two values\<close>
+fun apply_boper :: "boper \<Rightarrow> rat \<Rightarrow> rat \<Rightarrow> rat option" where
+  "apply_boper BAdd v0 v1 = Some (v0 + v1)"
+| "apply_boper BSub v0 v1 = Some (v0 - v1)"
+| "apply_boper BMul v0 v1 = Some (v0 * v1)"
+| "apply_boper BDiv v0 v1 = (if v1 = 0 then None else Some (v0 / v1))"
+| "apply_boper BExp v0 v1 = (if v0 = 0 then None else do {
+    n \<leftarrow> rat_to_nat v1;
+    Some (v0 ^ n)
+  })"
+
 text \<open>Evaluate a simple arithmetic expression with error handling\<close>
 fun saeval :: "saexpr \<Rightarrow> assignment \<Rightarrow> rat option" where
   "saeval (Rat r) a = Some r"
 | "saeval (Var v) a = Some (lookup v a)"
-| "saeval (USaexpr UNeg e0) a = do { v0 <- saeval e0 a; Some (- v0) }"
-| "saeval (USaexpr URecip e0) a =
-    (case saeval e0 a of
-       None \<Rightarrow> None
-     | Some v0 \<Rightarrow> if v0 = 0 then None else Some (inverse v0))"
-| "saeval (BSaexpr e0 BAdd e1) a =
-    (case saeval e0 a of
-       None \<Rightarrow> None
-     | Some v0 \<Rightarrow>
-         (case saeval e1 a of
-            None \<Rightarrow> None
-          | Some v1 \<Rightarrow> Some (v0 + v1)))"
-| "saeval (BSaexpr e0 BSub e1) a =
-    (case saeval e0 a of
-       None \<Rightarrow> None
-     | Some v0 \<Rightarrow>
-         (case saeval e1 a of
-            None \<Rightarrow> None
-          | Some v1 \<Rightarrow> Some (v0 - v1)))"
-| "saeval (BSaexpr e0 BMul e1) a =
-    (case saeval e0 a of
-       None \<Rightarrow> None
-     | Some v0 \<Rightarrow>
-         (case saeval e1 a of
-            None \<Rightarrow> None
-          | Some v1 \<Rightarrow> Some (v0 * v1)))"
-| "saeval (BSaexpr e0 BDiv e1) a =
-    (case saeval e0 a of
-       None \<Rightarrow> None
-     | Some v0 \<Rightarrow>
-         (case saeval e1 a of
-            None \<Rightarrow> None
-          | Some v1 \<Rightarrow> if v1 = 0 then None else Some (v0 / v1)))"
-| "saeval (BSaexpr e0 BExp e1) a =
-    (case saeval e0 a of
-       None \<Rightarrow> None
-     | Some v0 \<Rightarrow> if v0 = 0 then None else
-         (case saeval e1 a of
-            None \<Rightarrow> None
-          | Some v1 \<Rightarrow>
-              (case rat_to_nat v1 of
-                 None \<Rightarrow> None
-               | Some n \<Rightarrow> Some (v0 ^ n))))"
+| "saeval (USaexpr op e0) a = do {
+    v0 \<leftarrow> saeval e0 a;
+    apply_uoper op v0
+  }"
+| "saeval (BSaexpr e0 op e1) a = do {
+    v0 \<leftarrow> saeval e0 a;
+    v1 \<leftarrow> saeval e1 a;
+    apply_boper op v0 v1
+  }"
  
 subsection \<open>Properties of saeval\<close>
  
@@ -197,28 +179,27 @@ lemma aa_sael_id: "aa_to_sael (sael_to_aa e) = e"
   done
 
 subsection \<open>AA Expression Evaluation (Total, No Errors)\<close>
- 
+
+text \<open>Apply a unary operator to a value (total version)\<close>
+fun apply_uoper_total :: "uoper \<Rightarrow> rat \<Rightarrow> rat" where
+  "apply_uoper_total UNeg v = - v"
+| "apply_uoper_total URecip v = (if v = 0 then 0 else inverse v)"
+
+text \<open>Apply a binary AA operator to two values (total version)\<close>
+fun apply_baoper_total :: "baoper \<Rightarrow> rat \<Rightarrow> rat \<Rightarrow> rat" where
+  "apply_baoper_total BAAdd v0 v1 = v0 + v1"
+| "apply_baoper_total BASub v0 v1 = v0 - v1"
+| "apply_baoper_total BAMul v0 v1 = v0 * v1"
+| "apply_baoper_total BADiv v0 v1 = (if v1 = 0 then 0 else v0 / v1)"
+| "apply_baoper_total BAExpt v0 v1 = (if v0 = 0 then 0 else
+    (case rat_to_nat v1 of None \<Rightarrow> 1 | Some n \<Rightarrow> v0 ^ n))"
+
 text \<open>Evaluate AA expression (total function, returns 0 or 1 for error cases)\<close>
 fun aaeval :: "aaexpr \<Rightarrow> assignment \<Rightarrow> rat" where
   "aaeval (ARat r) a = r"
 | "aaeval (AVar v) a = lookup v a"
-| "aaeval (UAaexpr UNeg e0) a = - (aaeval e0 a)"
-| "aaeval (UAaexpr URecip e0) a =
-    (let v = aaeval e0 a in if v = 0 then 0 else inverse v)"
-| "aaeval (BAaexpr e0 BAAdd e1) a = aaeval e0 a + aaeval e1 a"
-| "aaeval (BAaexpr e0 BASub e1) a = aaeval e0 a - aaeval e1 a"
-| "aaeval (BAaexpr e0 BAMul e1) a = aaeval e0 a * aaeval e1 a"
-| "aaeval (BAaexpr e0 BADiv e1) a =
-    (let v0 = aaeval e0 a; 
-         v1 = aaeval e1 a in
-     if v1 = 0 then 0 else v0 / v1)"
-| "aaeval (BAaexpr e0 BAExpt e1) a =
-    (let v0 = aaeval e0 a in
-     if v0 = 0 then 0
-     else let v1 = aaeval e1 a in
-       (case rat_to_nat v1 of
-          None \<Rightarrow> 1
-        | Some n \<Rightarrow> v0 ^ n))"
+| "aaeval (UAaexpr op e0) a = apply_uoper_total op (aaeval e0 a)"
+| "aaeval (BAaexpr e0 op e1) a = apply_baoper_total op (aaeval e0 a) (aaeval e1 a)"
  
 subsection \<open>Equivalence Between saeval and aaeval\<close>
 
