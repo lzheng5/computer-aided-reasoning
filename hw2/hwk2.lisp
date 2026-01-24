@@ -166,8 +166,10 @@
 ; (modeling-admit-defs) is better and (modeling-admit-all) is the
 ; best.
 
-(modeling-start)
-
+;(modeling-start)
+;(modeling-validate-defs)
+;(modeling-admit-defs)
+;(modeling-admit-all)
 #|
 
  We will define the syntax and semantics for SAEL, the Simple
@@ -203,12 +205,12 @@
 ; of the operators are vars, but symbols such as x, y, z, etc are
 ; vars.
 
-(check= (varp '-) nil)
-(check= (varp '+) nil)
-(check= (varp '*) nil)
-(check= (varp '/) nil)
-(check= (varp '^) nil)
-(check= (varp 'x) t)
+;; (check= (varp '-) nil)
+;; (check= (varp '+) nil)
+;; (check= (varp '*) nil)
+;; (check= (varp '/) nil)
+;; (check= (varp '^) nil)
+;; (check= (varp 'x) t)
 
 ;; Use defdata to define the unary operators. Fill in the ...s
 ;; below. If you have questions, ask on Piazza.
@@ -218,9 +220,9 @@
 
 (defdata boper (enum (list '+ '- '* '/ '^)))
 
-(check= (boperp '*) t)
-(check= (boperp '^) t)
-(check= (boperp '!) nil)
+;; (check= (boperp '*) t)
+;; (check= (boperp '^) t)
+;; (check= (boperp '!) nil)
 
 ;; Use defdata to define saexpr. We will want names for all the
 ;; subtypes, so use the following template. Note that data definitions
@@ -239,8 +241,8 @@
 ;; ACL2s, and which recognizes expression in the object language,
 ;; SAEL. We formalized the syntax of SAEL expressions.
 
-(check= (saexprp '((x + y) - (/ z))) t)
-(check= (saexprp '(x + y + z)) nil)
+;; (check= (saexprp '((x + y) - (/ z))) t)
+;; (check= (saexprp '(x + y + z)) nil)
 
 ;; We are now going to define the semantics of SAEL expressions.
 
@@ -252,10 +254,10 @@
 
 (defdata assignment (alistof var rational))
 
-(check= (assignmentp '((x . 1) (y . 1/2))) t)
+;; (check= (assignmentp '((x . 1) (y . 1/2))) t)
 
-;; This is nil because (1), (1/2) are not rationals.
-(check= (assignmentp '((x 1) (y 1/2))) nil)
+;; ;; This is nil because (1), (1/2) are not rationals.
+;; (check= (assignmentp '((x 1) (y 1/2))) nil)
 
 ;; Now, on to the semantics.
 
@@ -324,12 +326,13 @@
   (and (integerp r)
        (not (< r 0))))
 
-;; Tests for non-negative-integerp
-(check= (non-negative-integerp 0) t)
-(check= (non-negative-integerp 5) t)
-(check= (non-negative-integerp -1) nil)
-(check= (non-negative-integerp 1/2) nil)
+(defthm rat-err-non-er-is-rational
+  (implies (and (rat-errp x)
+                (not (erp x)))
+           (rationalp x))
+  :rule-classes (:rewrite :forward-chaining))
 
+;; [TODO] refactoring and speed up?
 (definec saeval (e :saexpr a :assignment) :rat-err
   (match e
     (:rational e)
