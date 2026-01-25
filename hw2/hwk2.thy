@@ -89,6 +89,10 @@ lemma double_negation [simp]:
   "saeval (USaexpr UNeg (USaexpr UNeg x)) a = saeval x a"
   by (cases "saeval x a") auto
 
+(* lemma double_negation_bad [simp]: *)
+(* "saeval (USaexpr UNeg (USaexpr UNeg x)) a = saeval (USaexpr UNeg x) a" *)
+(* nitpick *)
+
 lemma double_negation_var:
   "saeval (USaexpr UNeg (USaexpr UNeg (Var x))) a = saeval (Var x) a"
   by auto

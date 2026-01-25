@@ -1,8 +1,9 @@
-;; hwk2.lisp is the homework submission
+;; This file contains only code (easier to test).
+;; hwk2.lisp is the homework submission.
 
 (in-package "ACL2S")
 
-;(modeling-admit-all)
+(modeling-admit-all)
 
 ;; debugging
 ;(acl2s-defaults :set testing-enabled t)
@@ -38,15 +39,9 @@
 
 (defdata rat-err (or rational er))
 
-(definec non-negative-integerp (r :all) :boolean
-  (and (integerp r)
-       (not (< r 0))))
-
-(defthm rat-err-non-er-is-rational
-  (implies (and (rat-errp x)
-                (not (erp x)))
-           (rationalp x))
-  :rule-classes (:rewrite :forward-chaining))
+(property rat-err-non-er-is-rational (x :rat-err)
+  (implies (not (erp x))
+           (rationalp x)))
 
 ;; Apply a unary operator to a value
 (definec apply-uoper (op :uoper v :rational) :rat-err
@@ -63,7 +58,7 @@
     ('/ (if (== v1 0) *er* (/ v0 v1)))
     ('^ (if (== v0 0)
             *er*
-            (if (non-negative-integerp v1)
+            (if (natp v1)
                 (expt v0 v1)
                 *er*)))))
 
@@ -85,10 +80,10 @@
      (& *er*))))
 
 (property (a :assignment)
-  (== (saeval 'x a) (saeval 'x a)))
+    (== (saeval 'x a) (saeval 'x a)))
 
 (property (x :var a :assignment)
-  (== (saeval x a) (saeval x a)))
+    (== (saeval x a) (saeval x a)))
 
 (property double-negation (x :saexpr a :assignment)
   (== (saeval '(- (- x)) a)
@@ -147,6 +142,7 @@
   (uaaexpr (list uoper aaexpr))
   (baaexpr (list aaexpr baoper aaexpr)))
 
+;; [TODO] refactoring?
 (definec sael->aa (e :saexpr) :aaexpr
   (match e
     (:usaexpr
@@ -179,6 +175,8 @@
 (property aa-sael-id (e :saexpr)
     (== (aa->sael (sael->aa e)) e))
 
+(set-guard-checking nil)
+
 ;; Apply a unary operator to a value
 (definec aapply-uoper (op :uoper v :rational) :rational
   (match op
@@ -194,11 +192,10 @@
     ('/ (if (== v1 0) 0 (/ v0 v1)))
     ('expt (if (== v0 0)
                0
-               (if (non-negative-integerp v1)
+               (if (natp v1)
                    (expt v0 v1)
                    1)))))
 
-(set-guard-checking nil)
 (definec aaeval (e :aaexpr a :assignment) :rational
    (match e
      (:rational e)

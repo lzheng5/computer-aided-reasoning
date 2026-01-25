@@ -169,7 +169,8 @@
 ;(modeling-start)
 ;(modeling-validate-defs)
 ;(modeling-admit-defs)
-;(modeling-admit-all)
+(modeling-admit-all)
+
 #|
 
  We will define the syntax and semantics for SAEL, the Simple
@@ -322,56 +323,46 @@
 
 ;; Helper function: check if a rational is a non-negative integer
 ;; Corresponds to is_non_negative_integer in the Coq formulation
-(definec non-negative-integerp (r :all) :boolean
-  (and (integerp r)
-       (not (< r 0))))
 
-(defthm rat-err-non-er-is-rational
-  (implies (and (rat-errp x)
-                (not (erp x)))
-           (rationalp x))
-  :rule-classes (:rewrite :forward-chaining))
+(property rat-err-non-er-is-rational (x :rat-err)
+  (implies (not (erp x))
+           (rationalp x)))
 
-;; [TODO] refactoring and speed up?
+;; Apply a unary operator to a value
+(definec apply-uoper (op :uoper v :rational) :rat-err
+  (match op
+    ('- (- v))
+    ('/ (if (== v 0) *er* (/ v)))))
+
+;; Apply a binary operator to two values
+(definec apply-boper (op :boper v0 :rational v1 :rational) :rat-err
+  (match op
+    ('+ (+ v0 v1))
+    ('- (- v0 v1))
+    ('* (* v0 v1))
+    ('/ (if (== v1 0) *er* (/ v0 v1)))
+    ('^ (if (== v0 0)
+            *er*
+            (if (natp v1)
+                (expt v0 v1)
+                *er*)))))
+
 (definec saeval (e :saexpr a :assignment) :rat-err
   (match e
     (:rational e)
     (:var (lookup e a))
     (:usaexpr
-     (('- e0) (match (saeval e0 a)
+     ((op e0) (match (saeval e0 a)
                 (:er *er*)
-                (v0 (- v0))))
-     (('/ e0) (match (saeval e0 a)
-                ((:or :er 0) *er*)
-                (v0 (/ v0)))))
+                (v0 (apply-uoper op v0))))
+     (& *er*))
     (:bsaexpr
-     ((e0 '+ e1) (match (saeval e0 a)
+     ((e0 op e1) (match (saeval e0 a)
                    (:er *er*)
                    (v0 (match (saeval e1 a)
                          (:er *er*)
-                         (v1 (+ v0 v1))))))
-     ((e0 '- e1) (match (saeval e0 a)
-                   (:er *er*)
-                   (v0 (match (saeval e1 a)
-                         (:er *er*)
-                         (v1 (- v0 v1))))))
-     ((e0 '* e1) (match (saeval e0 a)
-                   (:er *er*)
-                   (v0 (match (saeval e1 a)
-                         (:er *er*)
-                         (v1 (* v0 v1))))))
-     ((e0 '/ e1) (match (saeval e0 a)
-                   (:er *er*)
-                   (v0 (match (saeval e1 a)
-                         ((:or :er 0) *er*)
-                         (v1 (/ v0 v1))))))
-     ((e0 '^ e1) (match (saeval e0 a)
-                   ((:or :er 0) *er*)
-                   (v0 (let ((v1 (saeval e1 a)))
-                         (match v1
-                           ((:t (non-negative-integerp v1))
-                            (expt v0 v1))
-                           (& *er*)))))))))
+                         (v1 (apply-boper op v0 v1))))))
+     (& *er*))))
 
 (check= (saeval '((x + y) - (- z))
                 '((y . 3/2) (z . 1/2)))
@@ -555,30 +546,35 @@
 ;; and semantics of ACL2s in ACL2s.
 
 (set-guard-checking nil)
+;; Apply a unary operator to a value
+(definec aapply-uoper (op :uoper v :rational) :rational
+  (match op
+    ('- (- v))
+    ('/ (if (== v 0) 0 (/ v)))))
+
+;; Apply a binary AA operator to two values
+(definec aapply-baoper (op :baoper v0 :rational v1 :rational) :rational
+  (match op
+    ('+ (+ v0 v1))
+    ('- (- v0 v1))
+    ('* (* v0 v1))
+    ('/ (if (== v1 0) 0 (/ v0 v1)))
+    ('expt (if (== v0 0)
+               0
+               (if (natp v1)
+                   (expt v0 v1)
+                   1)))))
+
 (definec aaeval (e :aaexpr a :assignment) :rational
    (match e
      (:rational e)
      (:var (lookup e a))
      (:uaaexpr
-      (('- e0) (- (aaeval e0 a)))
-      (('/ e0) (match (aaeval e0 a)
-                 (0 0)
-                 (v (/ v)))))
+      ((op e0) (aapply-uoper op (aaeval e0 a)))
+      (& 0))
      (:baaexpr
-      ((e0 '+ e1) (+ (aaeval e0 a) (aaeval e1 a)))
-      ((e0 '- e1) (- (aaeval e0 a) (aaeval e1 a)))
-      ((e0 '* e1) (* (aaeval e0 a) (aaeval e1 a)))
-      ((e0 '/ e1) (let ((v0 (aaeval e0 a)))
-                    (match (aaeval e1 a)
-                      (0 0)
-                      (v1 (/ v0 v1)))))
-      ((e0 'expt e1) (match (aaeval e0 a)
-                       (0 0)
-                       (v0 (let ((v1 (aaeval e1 a)))
-                             (match v1
-                               ((:t (non-negative-integerp v1))
-                                (expt v0 v1))
-                               (& 1)))))))))
+      ((e0 op e1) (aapply-baoper op (aaeval e0 a) (aaeval e1 a)))
+      (& 0))))
 
 ;; In the definition of aaeval, if there is a divide by 0, aaeval will
 ;; return 0. For (expt x y) where y=0 or not an integer, aaeval will
@@ -617,14 +613,13 @@
 ;; provers include lean, acl2, coq, pvs, agda, isabelle, hol (and
 ;; variants), etc.
 
-;; I used AI tools (Claude Sonnet/Opus 4.5) to generate the corresonding formalizations for HOL and Coq.
+;; I used AI tools (Claude Opus/Sonnet 4.5) to generate the corresonding formalizations for HOL and Coq.
 ;; The Coq file only contains quick check properties (no proofs).
 
 ;; Observations:
 ;; 0. It is a lot easier to work with rational numbers while developing in ACL2s and HOL than Coq.
-;; 1. ACL2s has better automations for properties based testing.
+;; 1. ACL2s and HOL has better automations for properties based testing.
 ;;    In Coq, we have to define the generators.
-;;    Not sure about HOL.
 ;; 2. Contract checking is still slower than type checking.
 ;; 3. ACL2s's termination checking can take quite long if not careful.
 ;;    While HOL/Coq relies on explicit structural recursion and type checking, which is in general pretty fast.
