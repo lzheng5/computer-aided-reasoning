@@ -1,8 +1,9 @@
-;; hwk2.lisp is the homework submission
+;; This file contains only code (easier to test).
+;; hwk2.lisp is the homework submission.
 
 (in-package "ACL2S")
 
-;(modeling-admit-all)
+(modeling-admit-all)
 
 ;; debugging
 ;(acl2s-defaults :set testing-enabled t)
@@ -38,62 +39,51 @@
 
 (defdata rat-err (or rational er))
 
-(definec non-negative-integerp (r :all) :boolean
-  (and (integerp r)
-       (not (< r 0))))
+(property rat-err-non-er-is-rational (x :rat-err)
+  (implies (not (erp x))
+           (rationalp x)))
 
-(defthm rat-err-non-er-is-rational
-  (implies (and (rat-errp x)
-                (not (erp x)))
-           (rationalp x))
-  :rule-classes (:rewrite :forward-chaining))
+;; Apply a unary operator to a value
+(definec apply-uoper (op :uoper v :rational) :rat-err
+  (match op
+    ('- (- v))
+    ('/ (if (== v 0) *er* (/ v)))))
 
-;; [TODO] refactoring and speed up?
+;; Apply a binary operator to two values
+(definec apply-boper (op :boper v0 :rational v1 :rational) :rat-err
+  (match op
+    ('+ (+ v0 v1))
+    ('- (- v0 v1))
+    ('* (* v0 v1))
+    ('/ (if (== v1 0) *er* (/ v0 v1)))
+    ('^ (if (== v0 0)
+            *er*
+            (if (natp v1)
+                (expt v0 v1)
+                *er*)))))
+
 (definec saeval (e :saexpr a :assignment) :rat-err
   (match e
     (:rational e)
     (:var (lookup e a))
     (:usaexpr
-     (('- e0) (match (saeval e0 a)
+     ((op e0) (match (saeval e0 a)
                 (:er *er*)
-                (v0 (- v0))))
-     (('/ e0) (match (saeval e0 a)
-                ((:or :er 0) *er*)
-                (v0 (/ v0)))))
+                (v0 (apply-uoper op v0))))
+     (& *er*))
     (:bsaexpr
-     ((e0 '+ e1) (match (saeval e0 a)
+     ((e0 op e1) (match (saeval e0 a)
                    (:er *er*)
                    (v0 (match (saeval e1 a)
                          (:er *er*)
-                         (v1 (+ v0 v1))))))
-     ((e0 '- e1) (match (saeval e0 a)
-                   (:er *er*)
-                   (v0 (match (saeval e1 a)
-                         (:er *er*)
-                         (v1 (- v0 v1))))))
-     ((e0 '* e1) (match (saeval e0 a)
-                   (:er *er*)
-                   (v0 (match (saeval e1 a)
-                         (:er *er*)
-                         (v1 (* v0 v1))))))
-     ((e0 '/ e1) (match (saeval e0 a)
-                   (:er *er*)
-                   (v0 (match (saeval e1 a)
-                         ((:or :er 0) *er*)
-                         (v1 (/ v0 v1))))))
-     ((e0 '^ e1) (match (saeval e0 a)
-                   ((:or :er 0) *er*)
-                   (v0 (let ((v1 (saeval e1 a)))
-                         (match v1
-                           ((:t (non-negative-integerp v1))
-                            (expt v0 v1))
-                           (& *er*)))))))))
+                         (v1 (apply-boper op v0 v1))))))
+     (& *er*))))
 
 (property (a :assignment)
-  (== (saeval 'x a) (saeval 'x a)))
+    (== (saeval 'x a) (saeval 'x a)))
 
 (property (x :var a :assignment)
-  (== (saeval x a) (saeval x a)))
+    (== (saeval x a) (saeval x a)))
 
 (property double-negation (x :saexpr a :assignment)
   (== (saeval '(- (- x)) a)
@@ -152,6 +142,7 @@
   (uaaexpr (list uoper aaexpr))
   (baaexpr (list aaexpr baoper aaexpr)))
 
+;; [TODO] refactoring?
 (definec sael->aa (e :saexpr) :aaexpr
   (match e
     (:usaexpr
@@ -185,30 +176,36 @@
     (== (aa->sael (sael->aa e)) e))
 
 (set-guard-checking nil)
+
+;; Apply a unary operator to a value
+(definec aapply-uoper (op :uoper v :rational) :rational
+  (match op
+    ('- (- v))
+    ('/ (if (== v 0) 0 (/ v)))))
+
+;; Apply a binary AA operator to two values
+(definec aapply-baoper (op :baoper v0 :rational v1 :rational) :rational
+  (match op
+    ('+ (+ v0 v1))
+    ('- (- v0 v1))
+    ('* (* v0 v1))
+    ('/ (if (== v1 0) 0 (/ v0 v1)))
+    ('expt (if (== v0 0)
+               0
+               (if (natp v1)
+                   (expt v0 v1)
+                   1)))))
+
 (definec aaeval (e :aaexpr a :assignment) :rational
    (match e
      (:rational e)
      (:var (lookup e a))
      (:uaaexpr
-      (('- e0) (- (aaeval e0 a)))
-      (('/ e0) (match (aaeval e0 a)
-                 (0 0)
-                 (v (/ v)))))
+      ((op e0) (aapply-uoper op (aaeval e0 a)))
+      (& 0))
      (:baaexpr
-      ((e0 '+ e1) (+ (aaeval e0 a) (aaeval e1 a)))
-      ((e0 '- e1) (- (aaeval e0 a) (aaeval e1 a)))
-      ((e0 '* e1) (* (aaeval e0 a) (aaeval e1 a)))
-      ((e0 '/ e1) (let ((v0 (aaeval e0 a)))
-                    (match (aaeval e1 a)
-                      (0 0)
-                      (v1 (/ v0 v1)))))
-      ((e0 'expt e1) (match (aaeval e0 a)
-                       (0 0)
-                       (v0 (let ((v1 (aaeval e1 a)))
-                             (match v1
-                               ((:t (non-negative-integerp v1))
-                                (expt v0 v1))
-                               (& 1)))))))))
+      ((e0 op e1) (aapply-baoper op (aaeval e0 a) (aaeval e1 a)))
+      (& 0))))
 
 (property (e :saexpr a :assignment)
     (let ((v (saeval e a)))
