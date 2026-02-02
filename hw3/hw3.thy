@@ -570,8 +570,8 @@ proof
     hence "(\<exists> m \<in> ?B . minimal_element ?B R m)" using HB Hwf wf_min by blast
     then obtain m where Hm : "minimal_element ?B R m" by blast 
     then obtain i where "m = s i" using Hm unfolding minimal_element_def by blast
-    hence HC : "(s (i + 1), m) \<in> R" using Hd unfolding infinite_decreasing_sequence_def by blast
-    hence "s (i + 1) = m" using Hm unfolding minimal_element_def by blast
+    hence HC : "(s (Suc i), m) \<in> R" using Hd unfolding infinite_decreasing_sequence_def by blast
+    hence "s (Suc i) = m" using Hm unfolding minimal_element_def by blast
     thus False using wf_irrefl Hwf wf_on_wf HC HS by metis
   qed
 qed
@@ -625,18 +625,67 @@ theorem wf_iff_no_infinite_decreasing_sequence :
 
 (* Ex 10 *) 
 (* Note this is slightly different from the [wf_trancl] *)
-lemma wf_on_trancl:
-  assumes Hwf : "wf_on A R"
+lemma wf_trancl_wf:
+  assumes HS : "R \<subseteq> A \<times> A" 
+    and Hwf : "wf_on A R"
   shows "wf_on A (R\<^sup>+)"
   unfolding wf_on_def 
-proof (intro allI impI ballI)
-  fix P x assume induction : "\<forall>z\<in>A. (\<forall>y\<in>A. (y, z) \<in> R\<^sup>+ \<longrightarrow> P y) \<longrightarrow> P z" and xA : "x \<in> A"
+proof (intro allI impI)
+  fix P assume IHRp : "\<forall>z\<in>A. (\<forall>y\<in>A. (y, z) \<in> R\<^sup>+ \<longrightarrow> P y) \<longrightarrow> P z"
+  from Hwf have HwfR : "\<forall> Q . (\<forall> x \<in> A. (\<forall> y \<in> A. (y, x) \<in> R \<longrightarrow> Q y) \<longrightarrow> Q x) \<longrightarrow> (\<forall> x \<in> A. Q x)" unfolding wf_on_def by blast
   
+  \<comment> \<open> key point: instantiate P with the right IH \<close>
+  let ?P = "\<lambda> z . (\<forall>w\<in>A. (w, z) \<in> R\<^sup>+ \<longrightarrow> P w)"
+  have Rind : "(\<forall> a \<in> A. (\<forall> b \<in> A. (b, a) \<in> R \<longrightarrow> ?P b) \<longrightarrow> ?P a) \<longrightarrow> (\<forall> a \<in> A. ?P a)" 
+    using HwfR [rule_format, where Q = "?P"] by blast
 
-  have "(\<forall>y\<in>A. (y, x) \<in> R\<^sup>+ \<longrightarrow> P y)"
-  proof (rule ballI, rule impI)
-    fix y assume yA : "y \<in> A" and yRx : "(y, x) \<in> R\<^sup>+"
-    thus "P y"
-    
+  (*  \<forall>a\<in>A. 
+          (\<forall>b\<in>A. (b, a) \<in> R \<longrightarrow> (\<forall>w\<in>A. (w, b) \<in> R\<^sup>+ \<longrightarrow> P w)) \<longrightarrow>
+          (\<forall>w\<in>A. (w, a) \<in> R\<^sup>+ \<longrightarrow> P w) *)
+  have "(\<forall> a \<in> A. (\<forall> b \<in> A. (b, a) \<in> R \<longrightarrow> ?P b) \<longrightarrow> ?P a)"
+  proof (intro ballI impI impI impI)
+    fix a w 
+    assume IH : "\<forall>b\<in>A. (b, a) \<in> R \<longrightarrow> (\<forall>w\<in>A. (w, b) \<in> R\<^sup>+ \<longrightarrow> P w)" 
+      and aA : "a \<in> A" and wA : "w \<in> A" and wRRa : "(w, a) \<in> R\<^sup>+"
+    from wRRa show "P w" 
+    proof (cases rule: tranclE)
+      case base
+      then show ?thesis 
+      using IH r_into_trancl wA IHRp by fastforce
+    next
+      case (step c)
+      then show ?thesis using IH wA HS by blast
+    qed
+  qed
+
+  (* \<forall>a\<in>A. \<forall>w\<in>A. (w, a) \<in> R\<^sup>+ \<longrightarrow> P w *)
+  hence "\<forall> a \<in> A. ?P a" using Rind by blast 
+  thus "\<forall> a \<in> A . P a" using IHRp by blast
+qed
+
+lemma trancl_wf_wf:
+  assumes HS : "R \<subseteq> A \<times> A" 
+    and Hwf : "wf_on A (R\<^sup>+)"
+  shows "wf_on A R"
+proof - 
+  have HRR : "(\<forall> B \<subseteq> A . B \<noteq> {} \<longrightarrow> (\<exists> m \<in> B . minimal_element B (R\<^sup>+) m))" using Hwf HS wf_min by blast 
+  have HR : "(\<forall> B \<subseteq> A . B \<noteq> {} \<longrightarrow> (\<exists> m \<in> B . minimal_element B R m))" 
+  proof (intro allI impI)
+    fix B assume HBA : "B \<subseteq> A" and HB : "B \<noteq> {}" 
+    with HRR obtain m where HmRR : "minimal_element B (R\<^sup>+) m" by blast
+    hence "minimal_element B R m" using r_into_trancl unfolding minimal_element_def by blast 
+    thus "\<exists>m\<in>B. minimal_element B R m" unfolding minimal_element_def by blast
+  qed
+
+  have "irrefl_on A (R\<^sup>+)" using irrefl_on_def wf_on_wf Hwf HS wf_irrefl
+    by (metis trancl_subset_Sigma)
+  hence "irrefl_on A R" by (meson HS Hwf irrefl_on_def r_into_trancl)  
+  thus ?thesis using min_wf HS HR by blast
+qed
+
+theorem wf_iff_transcl_wf : 
+  "R \<subseteq> A \<times> A \<Longrightarrow> 
+   (wf_on A (R\<^sup>+) \<longleftrightarrow> wf_on A R)"
+  by (metis trancl_wf_wf wf_trancl_wf)
 
 end
