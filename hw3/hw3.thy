@@ -552,7 +552,7 @@ theorem least_asym_iff_well_order :
 
 (* Ex 9 *)
 definition infinite_decreasing_sequence :: "'A rel \<Rightarrow> (nat \<Rightarrow> 'A) \<Rightarrow> bool" where 
-  "infinite_decreasing_sequence R s = (\<forall> i . (s (i + 1), s i) \<in> R)"
+  "infinite_decreasing_sequence R s = (\<forall> i . (s (Suc i), s i) \<in> R)"
 
 lemma wf_no_infinite_decreasing_sequence : 
   assumes HS : "R \<subseteq> A \<times> A" 
@@ -575,5 +575,68 @@ proof
     thus False using wf_irrefl Hwf wf_on_wf HC HS by metis
   qed
 qed
+
+lemma infinite_descreasing_sequence_irrefl : 
+  assumes Hno_seq : "\<not> (\<exists> (s :: nat \<Rightarrow> 'A) . infinite_decreasing_sequence R s)"
+  shows "irrefl_on A R"
+proof (rule ccontr)
+  assume "\<not> irrefl_on A R"
+  \<comment> \<open> key step: construct an infinite decreasing sequence from x \<close>
+  hence "\<exists> x \<in> A . (x, x) \<in> R" unfolding irrefl_on_def by blast
+  then obtain x where xRx : "(x, x) \<in> R" by blast 
+  hence "infinite_decreasing_sequence R (\<lambda> i . x)"
+    unfolding infinite_decreasing_sequence_def by blast
+  with Hno_seq show False by blast
+qed
+
+lemma no_infinite_decreasing_sequence_wf : 
+  assumes HS : "R \<subseteq> A \<times> A" 
+  and Hno_seq : "\<not> (\<exists> (s :: nat \<Rightarrow> 'A) . infinite_decreasing_sequence R s)"
+  shows "wf_on A R"
+proof (rule contrapos_np [OF Hno_seq])
+  assume "\<not> wf_on A R"
+  \<comment> \<open> key step: reasoning with the minimal element \<close>
+  hence "\<not> ((\<forall> B \<subseteq> A . B \<noteq> {} \<longrightarrow> (\<exists> m \<in> B . minimal_element B R m)) \<and> irrefl_on A R)" using min_wf by blast
+  hence "(\<exists> B \<subseteq> A . B \<noteq> {} \<and> (\<forall> m \<in> B . \<not> minimal_element B R m)) \<or> (\<not> irrefl_on A R)" by blast
+  thus "\<exists>s. infinite_decreasing_sequence R s"
+  proof 
+    assume "\<exists> B \<subseteq> A . B \<noteq> {} \<and> (\<forall> m \<in> B . \<not>  minimal_element B R m)"
+    then obtain B where HB : "B \<subseteq> A" and HnB : "B \<noteq> {}" and Hnm : "(\<forall> m \<in> B . \<not> minimal_element B R m)" by blast 
+    hence "\<exists> x \<in> B . \<not> minimal_element B R x" by blast
+    then obtain x where xB : "x \<in> B" and Hnx : "\<not> minimal_element B R x" by blast 
+    hence "\<forall> y \<in> B . \<exists> z \<in> B . (z, y) \<in> R" using Hnm unfolding minimal_element_def by blast
+    hence "\<exists>s. \<forall>n. s n \<in> B \<and> (s (Suc n), s n) \<in> R"
+      \<comment> \<open> key point: use [dependent_nat_choice] to construct an infinite decreasing sequence \<close>
+      using dependent_nat_choice[where P = "\<lambda> n x. x \<in> B" and Q = "\<lambda>n x y. (y, x) \<in> R"] xB by blast
+    then obtain s where Hs : "\<forall>n. s n \<in> B \<and> (s (Suc n), s n) \<in> R" by blast
+    hence "infinite_decreasing_sequence R s" 
+      unfolding infinite_decreasing_sequence_def by blast
+    thus "\<exists>s. infinite_decreasing_sequence R s" by blast
+  next 
+    assume "\<not> irrefl_on A R"
+    show ?thesis using \<open>\<not> irrefl_on A R\<close> infinite_descreasing_sequence_irrefl by blast
+  qed
+qed
+
+theorem wf_iff_no_infinite_decreasing_sequence : 
+ "R \<subseteq> A \<times> A \<Longrightarrow>
+  (wf_on A R \<longleftrightarrow> \<not> (\<exists> (s :: nat \<Rightarrow> 'A) . infinite_decreasing_sequence R s))"
+  by (metis no_infinite_decreasing_sequence_wf wf_no_infinite_decreasing_sequence)
+
+(* Ex 10 *) 
+(* Note this is slightly different from the [wf_trancl] *)
+lemma wf_on_trancl:
+  assumes Hwf : "wf_on A R"
+  shows "wf_on A (R\<^sup>+)"
+  unfolding wf_on_def 
+proof (intro allI impI ballI)
+  fix P x assume induction : "\<forall>z\<in>A. (\<forall>y\<in>A. (y, z) \<in> R\<^sup>+ \<longrightarrow> P y) \<longrightarrow> P z" and xA : "x \<in> A"
+  
+
+  have "(\<forall>y\<in>A. (y, x) \<in> R\<^sup>+ \<longrightarrow> P y)"
+  proof (rule ballI, rule impI)
+    fix y assume yA : "y \<in> A" and yRx : "(y, x) \<in> R\<^sup>+"
+    thus "P y"
+    
 
 end
