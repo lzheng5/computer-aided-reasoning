@@ -362,7 +362,45 @@ theorem wf_iff_min :
   using wf_min min_wf wf_irrefl wf_on_wf irrefl_on_def by metis
 
 (* 5.2 *) 
-(* [TODO] fix irrefl *)
+experiment
+begin
+
+(* [!] Note the definition given in the homework is inaccurate. *)
+definition "least_element A R m \<longleftrightarrow> (m \<in> A \<and> (\<forall> x \<in> A . (m, x) \<in> R))"
+
+(*
+  Counter Example 
+  Let A = {1, 2} and R = {} (the empty relation).
+  1. R is well-founded on A because there are no infinite descending chains.
+  2. R is irreflexive (irrefl_on A R).
+  3. Let B = A = {1, 2}. B is a non-empty subset of A.
+  4. For m = 1 to be the 'least_element', (1, 2) must be in R. It is not.
+  5. For m = 2 to be the 'least_element', (2, 1) must be in R. It is not.
+  Therefore, no least element exists in B.
+*)
+
+lemma strict_partial_order_counterexample:
+  fixes A :: "nat set" and R :: "nat rel"
+  defines "A \<equiv> {1, 2}"
+    and "R \<equiv> {}"
+  shows "irrefl_on A R"           (* Irreflexive *)
+    and "trans R"                 (* Transitive (vacuously) *)
+    and "wf_on A R"               (* Well-founded *)
+    and "\<exists> B \<subseteq> A. B \<noteq> {} \<and> \<not>(\<exists> m \<in> B. least_element B R m)"
+proof -
+  show "irrefl_on A R" unfolding irrefl_on_def R_def by blast
+  show "trans R" unfolding trans_def R_def by blast
+  show "wf_on A R" unfolding wf_on_def R_def by blast
+  
+  let ?B = "{1, 2}"
+  have "?B \<subseteq> A" unfolding A_def by simp
+  moreover have "\<not>(\<exists> m \<in> ?B. least_element ?B R m)"
+    unfolding least_element_def R_def by auto
+  ultimately show "\<exists> B \<subseteq> A. B \<noteq> {} \<and> \<not>(\<exists> m \<in> B. least_element B R m)" by blast
+qed
+
+end
+
 definition least_element :: "'A set \<Rightarrow> 'A rel \<Rightarrow> 'A \<Rightarrow> bool" where 
   "least_element A R m \<longleftrightarrow> (m \<in> A \<and> (\<forall> x \<in> A . x \<noteq> m \<longrightarrow> (m, x) \<in> R))"
 
