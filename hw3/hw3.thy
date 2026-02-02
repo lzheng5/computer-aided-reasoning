@@ -287,7 +287,7 @@ proof (intro allI impI)
   fix P
   assume IH : "(\<forall>x\<in>A. (\<forall>y\<in>A. (y, x) \<in> R \<longrightarrow> P y) \<longrightarrow> P x)"
 
-  (* Key step: instantiate B with "{z \<in> A . \<not> P z}" *)
+  \<comment> \<open> key step: instantiate B with "{z \<in> A . \<not> P z}" \<close>
   let ?B = "{z \<in> A . \<not> P z}" 
   let ?G = "\<forall> x \<in> A . P x"
   have "?B = {} \<or> ?B \<noteq> {}" by blast
@@ -306,7 +306,7 @@ proof (intro allI impI)
       show "P y" 
       proof (rule ccontr)
         assume HnPy : "\<not> (P y)"
-        (* Key step: derive (m, m) \<in> R ---> contradiction *)
+        \<comment> \<open> key step: derive (m, m) \<in> R ---> contradiction \<close>
         then have "(m, m) \<in> R" using yA yRm Hmin unfolding minimal_element_def by blast
         thus False using Hirrefl mB unfolding irrefl_on_def by blast
       qed
@@ -329,7 +329,7 @@ proof (intro allI impI)
   proof (rule ccontr)
     assume Hno_min : "\<not> ?G" 
 
-    (* Key step: instantiate P with "\<lambda>x. x \<notin> B" *) 
+    \<comment> \<open> key step: instantiate P with "\<lambda>x. x \<notin> B" \<close>
     from wf have IH: "(\<forall>x\<in>A. (\<forall>y\<in>A. (y, x) \<in> R \<longrightarrow> y \<notin> B) \<longrightarrow> x \<notin> B) \<longrightarrow> (\<forall>x\<in>A. x \<notin> B)"
       unfolding wf_on_def by (rule spec[of _ "\<lambda>x. x \<notin> B"])
 
@@ -343,7 +343,7 @@ proof (intro allI impI)
         have "minimal_element B R x"
           unfolding minimal_element_def using xA xB Hpred HS by blast
 
-        (* key step: derive x to be the min element ---> contradiction *) 
+        \<comment> \<open> key step: derive x to be the min element ---> contradiction \<close>
         hence ?G using xB by blast
         with Hno_min show False by contradiction
       qed 
@@ -549,5 +549,31 @@ theorem least_asym_iff_well_order :
   "well_order_on A R \<longleftrightarrow> (R \<subseteq> (A \<times> A) \<and> asym_on A R \<and> (\<forall> B \<subseteq> A . B \<noteq> {} \<longrightarrow> (\<exists> m \<in> B . least_element B R m)))"
   by (metis asym_on_iff_irrefl_on_if_trans_on hw3.well_order_on_def least_asym_well_order
       strict_total_order_iff_irrefl_trans_connected well_order_least)
+
+(* Ex 9 *)
+definition infinite_decreasing_sequence :: "'A rel \<Rightarrow> (nat \<Rightarrow> 'A) \<Rightarrow> bool" where 
+  "infinite_decreasing_sequence R s = (\<forall> i . (s (i + 1), s i) \<in> R)"
+
+lemma wf_no_infinite_decreasing_sequence : 
+  assumes HS : "R \<subseteq> A \<times> A" 
+    and Hwf : "wf_on A R"
+  shows "\<not> (\<exists> (s :: nat \<Rightarrow> 'A) . infinite_decreasing_sequence R s)"
+  (* Don't unfolding infinite_decreasing_sequence_def at this point ---> obtain will fail! *)
+proof 
+  assume "\<exists> (s :: nat \<Rightarrow> 'A) . infinite_decreasing_sequence R s"
+  then obtain s where Hd : "infinite_decreasing_sequence R s" by blast
+  then show False 
+  proof - 
+    let ?B = "range s" \<comment> \<open> key point \<close>
+    have HB : "?B \<subseteq> A" using Hd HS unfolding infinite_decreasing_sequence_def by blast
+    have "?B \<noteq> {}" using Hd HS HB unfolding infinite_decreasing_sequence_def by blast
+    hence "(\<exists> m \<in> ?B . minimal_element ?B R m)" using HB Hwf wf_min by blast
+    then obtain m where Hm : "minimal_element ?B R m" by blast 
+    then obtain i where "m = s i" using Hm unfolding minimal_element_def by blast
+    hence HC : "(s (i + 1), m) \<in> R" using Hd unfolding infinite_decreasing_sequence_def by blast
+    hence "s (i + 1) = m" using Hm unfolding minimal_element_def by blast
+    thus False using wf_irrefl Hwf wf_on_wf HC HS by metis
+  qed
+qed
 
 end
