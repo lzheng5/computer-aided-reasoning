@@ -620,7 +620,7 @@ qed
 
 theorem wf_iff_no_infinite_decreasing_sequence : 
  "R \<subseteq> A \<times> A \<Longrightarrow>
-  (wf_on A R \<longleftrightarrow> \<not> (\<exists> (s :: nat \<Rightarrow> 'A) . infinite_decreasing_sequence R s))"
+  (wf_on A R \<longleftrightarrow> \<not> (\<exists> s . infinite_decreasing_sequence R s))"
   by (metis no_infinite_decreasing_sequence_wf wf_no_infinite_decreasing_sequence)
 
 (* Ex 10 *) 
@@ -687,5 +687,22 @@ theorem wf_iff_transcl_wf :
   "R \<subseteq> A \<times> A \<Longrightarrow> 
    (wf_on A (R\<^sup>+) \<longleftrightarrow> wf_on A R)"
   by (metis trancl_wf_wf wf_trancl_wf)
+
+(* Ex 11 *) 
+definition lex_order :: "'A rel \<Rightarrow> 'A rel \<Rightarrow> ('A \<times> 'A) rel" where 
+  "lex_order Ra Rb = {((a, b), (c, d)). (a, c) \<in> Ra \<or> (a = c \<and> (b, d) \<in> Rb) }"
+
+lemma wf_lex_order : 
+  assumes HSa : "Ra \<subseteq> A \<times> A"
+    and HSb : "Rb \<subseteq> A \<times> A"
+    and HS  : "(lex_order Ra Rb) \<subseteq> (A \<times> A) \<times> (A \<times> A)"
+    and HRa : "wf_on A Ra" 
+    and HRb : "wf_on A Rb" 
+  shows "wf_on (A \<times> A) (lex_order Ra Rb)"
+proof (rule ccontr)
+  assume Hnot_wfRR : "\<not> wf_on (A \<times> A) (lex_order Ra Rb)"
+  hence "(\<exists> s . infinite_decreasing_sequence (lex_order Ra Rb) s)" 
+    using Hnot_wfRR HS wf_iff_no_infinite_decreasing_sequence by metis
+  oops
 
 end
