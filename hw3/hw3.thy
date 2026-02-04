@@ -236,6 +236,7 @@ lemma wf_on_wf :
   by (metis UNIV_I mem_Sigma_iff subset_eq)
 
 (* [TODO] The following proofs rely on wf_trancl, wf_irrefl, wf_asym *) 
+(* Reorder the following lemmas [wf_trancl_wf], [wf_on_irrefl], [wf_on_asym] *) 
 
 lemma wf_no_3_cycles : 
   "wf R \<Longrightarrow> (x, y) \<in> R \<Longrightarrow> (y, z) \<in> R \<Longrightarrow> (z, x) \<in> R \<Longrightarrow> False"
@@ -787,7 +788,7 @@ proof
   qed
 qed
 
-lemma infinite_descreasing_sequence_irrefl : 
+lemma no_infinite_descreasing_sequence_irrefl : 
   assumes Hno_seq : "\<not> (\<exists> (s :: nat \<Rightarrow> 'A) . infinite_decreasing_sequence R s)"
   shows "irrefl_on A R"
 proof (rule ccontr)
@@ -799,6 +800,18 @@ proof (rule ccontr)
     unfolding infinite_decreasing_sequence_def by blast
   with Hno_seq show False by blast
 qed
+
+lemma refl_not_irrefl : 
+  "A \<noteq> {} \<Longrightarrow> 
+   refl_on A R \<Longrightarrow> 
+   \<not> irrefl_on A R"
+  by (simp add: irrefl_on_def refl_on_def)
+
+lemma refl_infinite_descreasing_sequence : 
+  assumes HA : "A \<noteq> {}" 
+    and Hrefl : "refl_on A R"
+  shows "(\<exists> (s :: nat \<Rightarrow> 'A) . infinite_decreasing_sequence R s)"
+  by (metis no_infinite_descreasing_sequence_irrefl Hrefl HA refl_not_irrefl)
 
 lemma no_infinite_decreasing_sequence_wf : 
   assumes HS : "R \<subseteq> A \<times> A" 
@@ -825,7 +838,7 @@ proof (rule contrapos_np [OF Hno_seq])
     thus "\<exists>s. infinite_decreasing_sequence R s" by blast
   next 
     assume "\<not> irrefl_on A R"
-    show ?thesis using \<open>\<not> irrefl_on A R\<close> infinite_descreasing_sequence_irrefl by blast
+    show ?thesis using \<open>\<not> irrefl_on A R\<close> no_infinite_descreasing_sequence_irrefl by blast
   qed
 qed
 
@@ -834,8 +847,44 @@ theorem wf_iff_no_infinite_decreasing_sequence :
   (wf_on A R \<longleftrightarrow> \<not> (\<exists> s . infinite_decreasing_sequence R s))"
   by (metis no_infinite_decreasing_sequence_wf wf_no_infinite_decreasing_sequence)
 
+corollary wf_on_irrefl : 
+  "R \<subseteq> A \<times> A \<Longrightarrow> 
+   (wf_on A R \<longrightarrow> irrefl_on A R)" 
+  by (metis wf_no_infinite_decreasing_sequence no_infinite_descreasing_sequence_irrefl)
+
+lemma no_infinite_descreasing_sequence_asym : 
+  assumes Hno_seq : "\<not> (\<exists> (s :: nat \<Rightarrow> 'A) . infinite_decreasing_sequence R s)"
+  shows "asym_on A R"
+proof (rule ccontr)
+  assume "\<not> asym_on A R"
+  \<comment> \<open> key step: construct an infinite decreasing sequence from x and y \<close>
+  hence "\<exists> x \<in> A. \<exists> y \<in> A. (x, y) \<in> R \<and> (y, x) \<in> R" unfolding asym_on_def by blast
+  then obtain x and y where xRy : "(x, y) \<in> R" and yRx : "(y, x) \<in> R" by blast 
+  let ?s = "\<lambda> i . if even i then x else y"
+  have "infinite_decreasing_sequence R ?s"
+    unfolding infinite_decreasing_sequence_def 
+  proof (intro allI)
+    fix i 
+    show "(?s (Suc i), ?s i) \<in> R" 
+    proof (cases "even i")
+      case True
+      then show ?thesis using yRx by force
+    next
+      case False
+      then show ?thesis using xRy by force
+    qed
+  qed
+
+  with Hno_seq show False by blast
+qed 
+
+corollary wf_on_asym : 
+  "R \<subseteq> A \<times> A \<Longrightarrow> 
+   (wf_on A R \<longrightarrow> asym_on A R)" 
+  by (metis wf_no_infinite_decreasing_sequence no_infinite_descreasing_sequence_asym)
+
 (* Ex 10 *) 
-(* Note this is slightly different from the [wf_trancl] *)
+(* Note this is slightly different from [wf_trancl] *)
 lemma wf_trancl_wf:
   assumes HS : "R \<subseteq> A \<times> A" 
     and Hwf : "wf_on A R"
