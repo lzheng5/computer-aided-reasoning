@@ -336,13 +336,13 @@ proof (intro allI impI)
 
     have "\<forall> x \<in> A . (\<forall> y \<in> A . (y, x) \<in> R \<longrightarrow> y \<notin> B) \<longrightarrow> x \<notin> B"
     proof (intro ballI impI)
-      fix x assume xA : "x \<in> A" and Hpred : "(\<forall> y \<in> A . (y, x) \<in> R \<longrightarrow> y \<notin> B)"
+      fix x assume xA : "x \<in> A" and Hpredm : "(\<forall> y \<in> A . (y, x) \<in> R \<longrightarrow> y \<notin> B)"
       show "x \<notin> B"
       proof (* avoid (rule ccontr) *)
         assume xB : "x \<in> B"
 
         have "minimal_element B R x"
-          unfolding minimal_element_def using xA xB Hpred HS by blast
+          unfolding minimal_element_def using xA xB Hpredm HS by blast
 
         \<comment> \<open> key step: derive x to be the min element ---> contradiction \<close>
         hence ?G using xB by blast
@@ -962,7 +962,8 @@ lemma wf_lex_order :
 proof (rule ccontr)
   assume Hnot_wfRR : "\<not> wf_on (A \<times> A) (lex_order Ra Rb)"
   hence "(\<exists> s . infinite_decreasing_sequence (lex_order Ra Rb) s)" 
-    using Hnot_wfRR HS wf_iff_no_infinite_decreasing_sequence by metis
-  oops
+    using Hnot_wfRR HS no_infinite_decreasing_sequence_wf by metis
+  then obtain s where Hs : "infinite_decreasing_sequence (lex_order Ra Rb) s" by blast 
+  oops 
 
 end

@@ -3,11 +3,14 @@ imports ZF
 begin
 
 (* Lemma 5 *)
-definition pred :: "i\<Rightarrow>i\<Rightarrow>i" where 
-  "pred(i, x) \<equiv> { y \<in> i . y \<in> x }"
+definition pred :: "i \<Rightarrow> i \<Rightarrow> (i \<Rightarrow> o) \<Rightarrow>i" where 
+  "pred(x, a, r) \<equiv> { y \<in> a . r(y) }"
 
-lemma pred_Transset : 
-  assumes Hp : "\<forall> x \<in> i . x = pred(i, x)"
+abbreviation predm :: "i \<Rightarrow> i \<Rightarrow> i" where 
+  "predm(x, a) \<equiv> pred(x, a, \<lambda> y . y \<in> x)"
+
+lemma predm_Transset : 
+  assumes Hp : "\<forall> x \<in> i . x = predm(x, i)"
   shows   "Transset(i)"
   unfolding Transset_def subset_def
 proof (intro ballI ballI)
@@ -17,9 +20,9 @@ proof (intro ballI ballI)
   thus "w \<in> i" using CollectD1 by blast
 qed
 
-lemma Transset_pred : 
+lemma Transset_predm : 
   assumes Hp : "Transset(i)"
-  shows   "\<forall> x \<in> i . x = pred(i, x)"
+  shows   "\<forall> x \<in> i . x = predm(x, i)"
   unfolding pred_def 
 proof (intro ballI)
   fix x assume xi : "x \<in> i"
@@ -34,16 +37,16 @@ proof (intro ballI)
   qed
 qed
 
-theorem Transset_iff_pred : 
-  "Transset(i) \<longleftrightarrow> (\<forall> x \<in> i . x = pred(i, x))" 
-  using Transset_pred pred_Transset 
+theorem Transset_iff_predm : 
+  "Transset(i) \<longleftrightarrow> (\<forall> x \<in> i . x = predm(x, i))" 
+  using Transset_predm predm_Transset 
   by blast
 
 (* Transset is truly transitive *)
-definition set_trans :: "i\<Rightarrow>o" where 
+definition set_trans :: "i \<Rightarrow> o" where 
   "set_trans(i) \<equiv> (\<forall>b\<in>i. \<forall>a\<in>b. a \<in> i)"
 
-definition set_trans' :: "i\<Rightarrow>o" where 
+definition set_trans' :: "i \<Rightarrow> o" where 
   "set_trans'(i) \<equiv> (\<forall> a b. a \<in> b \<and> b \<in> i \<longrightarrow> a \<in> i)"
 
 lemma transset_trans : 
@@ -92,5 +95,9 @@ theorem ord_Union :
    Ord (\<Union> A)"
   unfolding Ord_def 
   using transset_Union by blast
+
+(* Lemma 10 *) 
+definition res :: "i \<Rightarrow> i \<Rightarrow> i \<Rightarrow> i" where 
+  "res(a, r, x) = restrict(r, pred(x, a, \<lambda> y . <y , x> \<in> r))"
 
 end
