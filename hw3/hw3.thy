@@ -550,6 +550,184 @@ theorem least_asym_iff_well_order :
   by (metis asym_on_iff_irrefl_on_if_trans_on hw3.well_order_on_def least_asym_well_order
       strict_total_order_iff_irrefl_trans_connected well_order_least)
 
+(* Ex 6 *)
+definition P_sets :: "'a set \<Rightarrow> ('a set \<Rightarrow> 'a rel \<Rightarrow> bool) \<Rightarrow> ('a rel) set" where 
+  "P_sets A P = { R \<in> Pow (A \<times> A). P A R }"
+
+definition closure_system :: "'a set \<Rightarrow> ('a rel) set \<Rightarrow> bool" where 
+  "closure_system A Ps = ((A \<times> A) \<in> Ps \<and> (\<forall> S. S \<subseteq> Ps \<and> S \<noteq> {} \<longrightarrow> \<Inter> S \<in> Ps))" 
+
+(* Ex 6.1 *)
+lemma refl_on_prod : 
+  "refl_on A (A \<times> A)"
+  unfolding refl_on_def 
+  by auto
+
+theorem refl_on_closure_system : 
+  shows "closure_system A (P_sets A refl_on)" 
+  unfolding closure_system_def P_sets_def 
+proof 
+  have "refl_on A (A \<times> A)" using refl_on_prod by blast
+  thus "A \<times> A \<in> {R \<in> Pow (A \<times> A). refl_on A R}" by blast
+next 
+  show "\<forall>S. S \<subseteq> {R \<in> Pow (A \<times> A). refl_on A R} \<and> S \<noteq> {} \<longrightarrow>
+            \<Inter> S \<in> {R \<in> Pow (A \<times> A). refl_on A R}"
+  proof (intro allI impI)
+    fix S assume H: "S \<subseteq> {R \<in> Pow (A \<times> A). refl_on A R} \<and> S \<noteq> {}"
+    hence HS: "S \<subseteq> {R \<in> Pow (A \<times> A). refl_on A R}" and HnS: "S \<noteq> {}" by auto
+    have "refl_on A (\<Inter> S)" 
+      unfolding refl_on_def 
+    proof (intro ballI InterI)
+      fix x X assume xA: "x \<in> A" and XS: "X \<in> S" 
+      hence "refl_on A X" using HS by blast
+      thus "(x, x) \<in> X" unfolding refl_on_def using xA by blast
+    qed
+    thus "\<Inter> S \<in> {R \<in> Pow (A \<times> A). refl_on A R}" using H by blast
+  qed
+qed
+
+(* Ex 6.2 *) 
+lemma not_irrefl_on_prod : 
+  assumes "A \<noteq> {}"
+  shows "\<not> irrefl_on A (A \<times> A)"
+  unfolding irrefl_on_def 
+proof 
+  assume H: "\<forall>x\<in>A. (x, x) \<notin> A \<times> A"
+  from assms obtain a where aA: "a \<in> A" by blast
+  hence "(a, a) \<in> A \<times> A" by simp
+  with H aA show False by blast
+qed
+
+theorem irrefl_on_closure_system : 
+  assumes HA : "A \<noteq> {}"
+  shows "\<not> closure_system A (P_sets A irrefl_on)" 
+  unfolding closure_system_def P_sets_def 
+proof
+  assume "A \<times> A \<in> {R \<in> Pow (A \<times> A). irrefl_on A R} \<and>
+          (\<forall>S. S \<subseteq> {R \<in> Pow (A \<times> A). irrefl_on A R} \<and> S \<noteq> {} \<longrightarrow>
+               \<Inter> S \<in> {R \<in> Pow (A \<times> A). irrefl_on A R})"
+  hence "A \<times> A \<in> {R \<in> Pow (A \<times> A). irrefl_on A R}" by blast 
+  hence "irrefl_on A (A \<times> A)" by blast
+  thus False using not_irrefl_on_prod HA by metis
+qed
+
+(* Ex 6.3 *) 
+lemma sym_on_prod : 
+  "sym_on A (A \<times> A)"
+  unfolding sym_on_def 
+  by auto
+
+theorem sym_on_closure_system : 
+  shows "closure_system A (P_sets A sym_on)" 
+  unfolding closure_system_def P_sets_def 
+proof
+  have "sym_on A (A \<times> A)" using sym_on_prod by blast  
+  thus "A \<times> A \<in> {R \<in> Pow (A \<times> A). sym_on A R}" by blast
+next 
+  show "\<forall>S. S \<subseteq> {R \<in> Pow (A \<times> A). sym_on A R} \<and> S \<noteq> {} \<longrightarrow>
+            \<Inter> S \<in> {R \<in> Pow (A \<times> A). sym_on A R}"
+  proof (intro allI impI)
+    fix S assume H: "S \<subseteq> {R \<in> Pow (A \<times> A). sym_on A R} \<and> S \<noteq> {}"
+    hence HS: "S \<subseteq> {R \<in> Pow (A \<times> A). sym_on A R}" and HnS: "S \<noteq> {}" by auto
+    have "sym_on A (\<Inter> S)" 
+      unfolding sym_on_def 
+    proof (intro ballI ballI impI InterI)
+      fix x y X assume xA: "x \<in> A" and yA: "y \<in> A"  and xyS : "(x, y) \<in> \<Inter> S" and XS : "X \<in> S"
+      hence HX : "sym_on A X" using HS by blast
+      have "(x, y) \<in> X" using xyS XS by blast
+      thus "(y, x) \<in> X" using yA xA HX unfolding sym_on_def by blast
+    qed
+    thus "\<Inter> S \<in> {R \<in> Pow (A \<times> A). sym_on A R}" using H by blast
+  qed
+qed    
+
+(* Ex 6.4 *) 
+lemma not_asym_on_prod : 
+  assumes "A \<noteq> {}"
+  shows "\<not> asym_on A (A \<times> A)"
+  unfolding asym_on_def 
+proof 
+  assume H: "\<forall>x\<in>A. \<forall>y\<in>A. (x, y) \<in> A \<times> A \<longrightarrow> (y, x) \<notin> A \<times> A"
+  from assms obtain a where aA: "a \<in> A" by blast
+  hence "(a, a) \<in> A \<times> A" by simp
+  with H aA show False by blast
+qed
+
+theorem asym_on_closure_system : 
+  assumes HA : "A \<noteq> {}"
+  shows "\<not> closure_system A (P_sets A asym_on)" 
+  unfolding closure_system_def P_sets_def 
+proof
+  assume "A \<times> A \<in> {R \<in> Pow (A \<times> A). asym_on A R} \<and>
+          (\<forall>S. S \<subseteq> {R \<in> Pow (A \<times> A). asym_on A R} \<and> S \<noteq> {} \<longrightarrow>
+               \<Inter> S \<in> {R \<in> Pow (A \<times> A). asym_on A R})"
+  hence "A \<times> A \<in> {R \<in> Pow (A \<times> A). asym_on A R}" by blast 
+  hence "asym_on A (A \<times> A)" by blast
+  thus False using not_asym_on_prod HA by metis
+qed
+
+(* Ex 6.5 *) 
+lemma not_antisym_on_prod : 
+  assumes "A \<noteq> {}"
+    and "\<forall> x . A \<noteq> {x}"
+  shows "\<not> antisym_on A (A \<times> A)"
+  unfolding antisym_on_def 
+proof 
+  assume H: "\<forall>x\<in>A. \<forall>y\<in>A. (x, y) \<in> A \<times> A \<longrightarrow> (y, x) \<in> A \<times> A \<longrightarrow> x = y"
+  from assms(1) obtain a where aA: "a \<in> A" by blast
+  from assms(2) have "A \<noteq> {a}" by blast
+  with aA obtain b where bA: "b \<in> A" and neq: "b \<noteq> a" by blast
+  hence "a = b" using aA H by simp
+  with neq show False by blast
+qed
+
+theorem antisym_on_closure_system : 
+  assumes HA0 : "A \<noteq> {}"
+    and HA1 : "\<forall> x . A \<noteq> {x}"
+  shows "\<not> closure_system A (P_sets A antisym_on)" 
+  unfolding closure_system_def P_sets_def 
+proof
+  assume "A \<times> A \<in> {R \<in> Pow (A \<times> A). antisym_on A R} \<and>
+          (\<forall>S. S \<subseteq> {R \<in> Pow (A \<times> A). antisym_on A R} \<and> S \<noteq> {} \<longrightarrow>
+               \<Inter> S \<in> {R \<in> Pow (A \<times> A). antisym_on A R})"
+  hence "A \<times> A \<in> {R \<in> Pow (A \<times> A). antisym_on A R}" by blast 
+  hence "antisym_on A (A \<times> A)" by blast
+  thus False using not_antisym_on_prod HA0 HA1 by metis
+qed
+
+(* Ex 6.6 *) 
+lemma trans_on_prod : 
+  "trans_on A (A \<times> A)"
+  unfolding trans_on_def 
+  by auto
+
+theorem trans_on_closure_system : 
+  shows "closure_system A (P_sets A trans_on)" 
+  unfolding closure_system_def P_sets_def 
+proof
+  have "trans_on A (A \<times> A)" using trans_on_prod by blast  
+  thus "A \<times> A \<in> {R \<in> Pow (A \<times> A). trans_on A R}" by blast
+next 
+  show "\<forall>S. S \<subseteq> {R \<in> Pow (A \<times> A). trans_on A R} \<and> S \<noteq> {} \<longrightarrow>
+            \<Inter> S \<in> {R \<in> Pow (A \<times> A). trans_on A R}"
+  proof (intro allI impI)
+    fix S assume H: "S \<subseteq> {R \<in> Pow (A \<times> A). trans_on A R} \<and> S \<noteq> {}"
+    hence HS: "S \<subseteq> {R \<in> Pow (A \<times> A). trans_on A R}" and HnS: "S \<noteq> {}" by auto
+    have "trans_on A (\<Inter> S)" 
+      unfolding trans_on_def 
+    proof (intro ballI ballI ballI impI impI InterI)
+      fix x y z X 
+      assume xA: "x \<in> A" and yA: "y \<in> A" and zA : "z \<in> A" 
+      and xyS : "(x, y) \<in> \<Inter> S" and yzS : "(y, z) \<in> \<Inter> S" and XS : "X \<in> S"
+      hence HX : "trans_on A X" using HS by blast
+      have xyX : "(x, y) \<in> X" using xyS XS by blast
+      have yzX : "(y, z) \<in> X" using yzS XS by blast
+      thus "(x, z) \<in> X" using yA xA zA HX xyX yzX unfolding trans_on_def by blast
+    qed
+    thus "\<Inter> S \<in> {R \<in> Pow (A \<times> A). trans_on A R}" using H by blast
+  qed
+qed    
+
 (* Ex 9 *)
 definition infinite_decreasing_sequence :: "'A rel \<Rightarrow> (nat \<Rightarrow> 'A) \<Rightarrow> bool" where 
   "infinite_decreasing_sequence R s = (\<forall> i . (s (Suc i), s i) \<in> R)"

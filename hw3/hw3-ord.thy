@@ -39,7 +39,7 @@ theorem Transset_iff_pred :
   using Transset_pred pred_Transset 
   by blast
 
-(* Transset set is a truly transitive set *)
+(* Transset is truly transitive *)
 definition set_trans :: "i\<Rightarrow>o" where 
   "set_trans(i) \<equiv> (\<forall>b\<in>i. \<forall>a\<in>b. a \<in> i)"
 
