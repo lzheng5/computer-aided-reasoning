@@ -3,11 +3,11 @@ imports ZF
 begin
 
 (* Lemma 5 *)
-definition pred :: "i \<Rightarrow> i \<Rightarrow> (i \<Rightarrow> o) \<Rightarrow>i" where 
-  "pred(x, a, r) \<equiv> { y \<in> a . r(y) }"
+definition pred :: "i \<Rightarrow> (i \<Rightarrow> o) \<Rightarrow>i" where 
+  "pred(a, r) \<equiv> { y \<in> a . r(y) }"
 
 abbreviation predm :: "i \<Rightarrow> i \<Rightarrow> i" where 
-  "predm(x, a) \<equiv> pred(x, a, \<lambda> y . y \<in> x)"
+  "predm(x, a) \<equiv> pred(a, \<lambda> y . y \<in> x)"
 
 lemma predm_Transset : 
   assumes Hp : "\<forall> x \<in> i . x = predm(x, i)"
@@ -97,7 +97,8 @@ theorem ord_Union :
   using transset_Union by blast
 
 (* Lemma 10 *) 
+(* Restrict r to the initial segment of x *)
 definition res :: "i \<Rightarrow> i \<Rightarrow> i \<Rightarrow> i" where 
-  "res(a, r, x) = restrict(r, pred(x, a, \<lambda> y . <y , x> \<in> r))"
+  "res(a, r, x) = restrict(r, pred(a, \<lambda> y . <y , x> \<in> r))"
 
 end
