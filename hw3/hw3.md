@@ -10,6 +10,8 @@ Since $R_1$ is WF, then $\exists N.\ \forall i \geq N.\ a_i = a_N$.
 
 Then for $i \geq N$: $b_i >_{R_2} b_{i+1}$, giving an infinite descending chain in $R_2$. Contradiction. ∎
 
+For an alternative direct proof, see [hw3.thy](hw3.thy). 
+
 **Theorem [Lex Order WF]:** If $R_1$, $R_2$, ... $R_n$ are well-founded, then $R_{lex}$ on $A_1 \times A_2 \times ... \times A_n$ is well-founded.
 
 **Proof:** By induction on `n` and the two case lemma ∎
