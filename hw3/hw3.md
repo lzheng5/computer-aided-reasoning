@@ -1,0 +1,61 @@
+# HW3 Solutions
+
+## Ex 11. 
+
+**Theorem [Two Relations Case]:** If $R_1$, $R_2$ are well-founded, then $R_{lex}$ on $A \times B$ is well-founded.
+
+**Proof:** Suppose not. Let $(a_0,b_0) >_{lex} (a_1,b_1) >_{lex} \cdots$ be infinite descending.
+
+Since $R_1$ is WF, then $\exists N.\ \forall i \geq N.\ a_i = a_N$.
+
+Then for $i \geq N$: $b_i >_{R_2} b_{i+1}$, giving an infinite descending chain in $R_2$. Contradiction. ∎
+
+**Theorem [Lex Order WF]:** If $R_1$, $R_2$, ... $R_n$ are well-founded, then $R_{lex}$ on $A_1 \times A_2 \times ... \times A_n$ is well-founded.
+
+**Proof:** By induction on `n` and the two case lemma ∎
+
+## Ex 12. 
+
+**Definition [Dictionary Order]:** Given relations $R_1, \ldots, R_n$ on sets $A_1, \ldots, A_n$, define $<_{dict}$ on $\bigcup_{k=1}^{n} (A_1 \times \cdots \times A_k)$ by:
+
+$$[] <_{dict} (b:bs)$$
+$$(a:as) <_{dict} (b:bs) \iff (a <_{R_1} b) \lor (a = b \land as <_{dict'} bs)$$
+
+where $<_{dict'}$ is the dictionary order on the tail using $R_2, \ldots, R_n$.
+
+**Theorem [Two Relations Case]:** If $R_1$, $R_2$ are well-founded, then $R_{dict}$ for $R_1$ and $R_2$ is well-founded.
+
+**Proof:** Similar to the two relations case for lex ordering. ∎
+
+**Theorem [Dictionary Order WF]:** If $R_1, R_2, \ldots, R_n$ are well-founded, then $R_{dict}$ on $\bigcup_{k=1}^{n} (A_1 \times \cdots \times A_k)$ is well-founded.
+
+**Proof:** Let $(a_1, a_2, ..., a_i)$ and $(a_1', a_2', ..., a_j')$ be in the domain for arbitrary $i$ and $j$, where $i \leq j$. 
+
+By induction on $i$ and the two case lemma for the dictionary ordering. ∎
+
+## Ex 13. 
+
+**Theorem:** $f$ defined by well-founded recursion is uniquely defined.
+
+**Proof:** Suppose $f$ and $g$ both satisfy the recursive equation. 
+  Show $f(x) = g(x)$ for all $x$ by WF induction:
+- **IH:** $f(y) = g(y)$ for all $y < x$, then 
+  $$ \{(y, f y) : y \leq x\} = \{(y, g y) : y \leq x\} $$
+- Since $f, g$ satisfy the same equation, then
+  $$f(x) = G(x, \{(y, f y) : y \leq x\}) = G(x, \{(y, g y) : y \leq x\}) = g(x)$$ 
+  ∎
+
+## Lemma 5 
+
+**Definition [Transset]:** A set $\alpha$ is a transset if $\forall \beta \in \alpha. \beta \subseteq \alpha$. 
+
+Note this is the property given in Definition 3. 
+
+**Lemma [Transset iff Pred]:** $\alpha$ is a transset iff $\forall \beta \in \alpha, \beta = s.\beta$.
+
+**Proof:** See `Transset_iff_pred ` in [hw3-ord.thy](hw3-ord.thy).∎
+
+**Theorem [Ord iff trans and well-ordered]:** $x$ is an ordinary iff $x$ is transitive and well-ordered by $\in$. 
+
+**Proof:** By definition of ord and previous lemma. ∎
+  
