@@ -557,6 +557,39 @@ definition P_sets :: "'a set \<Rightarrow> ('a set \<Rightarrow> 'a rel \<Righta
 definition closure_system :: "'a set \<Rightarrow> ('a rel) set \<Rightarrow> bool" where 
   "closure_system A Ps = ((A \<times> A) \<in> Ps \<and> (\<forall> S. S \<subseteq> Ps \<and> S \<noteq> {} \<longrightarrow> \<Inter> S \<in> Ps))" 
 
+definition P_closure :: "'a set \<Rightarrow> 'a rel \<Rightarrow> ('a rel) set \<Rightarrow> 'a rel" where 
+  "P_closure A R Ps = \<Inter> { P \<in> Ps . R \<subseteq> P }"
+
+theorem P_closure_in_closure_system : 
+  assumes HR: "R \<subseteq> A \<times> A"
+      and HCl: "closure_system A (P_sets A P)"
+  shows "P_closure A R (P_sets A P) \<in> P_sets A P"
+  unfolding P_closure_def
+proof -
+  let ?Ps = "P_sets A P"
+  let ?S = "{Pa \<in> ?Ps. R \<subseteq> Pa}"
+  
+  \<comment> \<open> Step 1: A \<times> A is in P_sets A P (top element) \<close>
+  from HCl have HAA: "(A \<times> A) \<in> ?Ps" 
+    unfolding closure_system_def by blast
+  
+  \<comment> \<open> Step 2: A \<times> A contains R, so it's in ?S \<close>
+  from HAA HR have "(A \<times> A) \<in> ?S" by blast
+  hence HneS: "?S \<noteq> {}" by blast
+  
+  \<comment> \<open> Step 3: ?S \<subseteq> ?Ps \<close>
+  have HsubS: "?S \<subseteq> ?Ps" by blast
+  
+  \<comment> \<open> Step 4: By closure system property, \<Inter> ?S \<in> ?Ps \<close>
+  from HCl have "\<forall>S. S \<subseteq> ?Ps \<and> S \<noteq> {} \<longrightarrow> \<Inter> S \<in> ?Ps"
+    unfolding closure_system_def by blast
+
+  \<comment> \<open> key point: instantiate S with ?S \<close>
+  with HsubS HneS have "\<Inter> ?S \<in> ?Ps" by blast
+  
+  thus "\<Inter> {Pa \<in> ?Ps. R \<subseteq> Pa} \<in> ?Ps" by blast
+qed
+
 (* Ex 6.1 *)
 lemma refl_on_prod : 
   "refl_on A (A \<times> A)"
