@@ -44,9 +44,12 @@ By induction on $i$ and the two case lemma for the dictionary ordering. ∎
 **Proof:** Suppose $f$ and $g$ both satisfy the recursive equation.
   Show $f(x) = g(x)$ for all $x$ by WF induction:
 - **IH:** $f(y) = g(y)$ for all $y < x$, then
-  $$ \{(y, f y) : y \leq x\} = \{(y, g y) : y \leq x\} $$
+  
+  $$ \lbrace(y, f y) : y \leq x\rbrace = \lbrace(y, g y) : y \leq x\rbrace $$
+
 - Since $f, g$ satisfy the same equation, then
-  $$f(x) = G(x, \{(y, f y) : y \leq x\}) = G(x, \{(y, g y) : y \leq x\}) = g(x)$$
+  
+  $$f(x) = G(x, \lbrace(y, f y) : y \leq x\rbrace) = G(x, \lbrace(y, g y) : y \leq x\rbrace) = g(x)$$
   ∎
 
 **Remark:** Consulted AI for proof ideas. 
@@ -76,7 +79,7 @@ Note this is the property given in Definition 3.
 **Proof:** Let $\langle S, A \rangle$ be a woset and $x \in S$. We prove the claim by contradiction.
 
 Assume $\langle S, A \rangle \cong \langle pred(x, A), res(A, x) \rangle$, i.e., there is some $f : S \to pred(x, A)$ such that $f$ is bijective and $f$ preserves ordering.
-Now consider the set $B = \{y \in S \mid f(y) \neq y\}$.
+Now consider the set $B = \lbrace y \in S \mid f(y) \neq y\rbrace$.
 
 - Case: $B = \emptyset$. Then $\forall y \in S. f y = y$. But $f x = x \notin pred(x, A)$. Contradiction. 
 - Case: $B \neq \emptyset$. Then, $B$ has a least element, $m$. Note
@@ -96,7 +99,7 @@ Now consider the set $B = \{y \in S \mid f(y) \neq y\}$.
 Then we get a mapping $f$ from $S$ to some ordinal $\alpha$ by the following construction.
 
 - Let $S\_0 = S$ and instantiate [*] with $S\_0$, we get some $m\_0$ that's the least element in $S\_0$. Let $f(m\_0) = 0$. 
-- Next, let $S\_1 = S\_0 - \{m\_0\}$ and we instantiate [*] with $S\_1$. Then we get some $m\_1$ that's the least in $S\_0$. Let $f(m\_1) = 1$. 
+- Next, let $S\_1 = S\_0 - \lbrace m\_0 \rbrace$ and we instantiate [*] with $S\_1$. Then we get some $m\_1$ that's the least in $S\_0$. Let $f(m\_1) = 1$. 
 - ...
 
 Since $f$ maps each element of $S$ deterministically, $f$ is a function from $S$ to $\alpha$.
