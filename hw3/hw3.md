@@ -4,11 +4,11 @@
 
 **Theorem [Two Relations Case]:** If $R_1$, $R_2$ are well-founded, then $R_{lex}$ on $A \times B$ is well-founded.
 
-**Proof:** Suppose not. Let $(a_0,b_0) >_{lex} (a_1,b_1) >_{lex} \cdots$ be infinite descending.
+**Proof:** Suppose not. Let $(a\_0,b\_0) >\_{lex} (a\_1,b\_1) >\_{lex} \cdots$ be infinite descending.
 
 Since $R_1$ is WF, then $\exists N.\ \forall i \geq N.\ a_i = a_N$.
 
-Then for $i \geq N$: $b_i >_{R_2} b_{i+1}$, giving an infinite descending chain in $R_2$. Contradiction. ∎
+Then for $i \geq N$: $b\_i >\_{R\_2} b\_{i+1}$, giving an infinite descending chain in $R\_2$. Contradiction. ∎
 
 **Remark:** Consulted AI for proof ideas. And for an alternative direct proof, see [hw3.thy](hw3.thy). 
 
