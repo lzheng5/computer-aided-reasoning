@@ -45,7 +45,7 @@ By induction on $i$ and the two case lemma for the dictionary ordering. ∎
   Show $f(x) = g(x)$ for all $x$ by WF induction:
 - **IH:** $f(y) = g(y)$ for all $y < x$, then
   
-  $$ \lbrace(y, f y) : y \leq x\rbrace = \lbrace(y, g y) : y \leq x\rbrace $$
+  $$\lbrace(y, f y) : y \leq x\rbrace = \lbrace(y, g y) : y \leq x\rbrace$$
 
 - Since $f, g$ satisfy the same equation, then
   
@@ -62,11 +62,11 @@ Note this is the property given in Definition 3.
 
 **Lemma [Transset iff Pred]:** $\alpha$ is a transset iff $\forall \beta \in \alpha, \beta = s.\beta$.
 
-**Proof:** See `Transset_iff_pred ` in [hw3-ord.thy](hw3-ord.thy).∎
+**Proof:** See `Transset_iff_pred` in [hw3-ord.thy](hw3-ord.thy).∎
 
 **Lemma [Transset iff Transitive]:** $\alpha$ is a transset iff $\alpha$ is transitive.
 
-**Proof:** See `Transset_iff_trans ` in [hw3-ord.thy](hw3-ord.thy).∎
+**Proof:** See `Transset_iff_trans` in [hw3-ord.thy](hw3-ord.thy).∎
 
 **Theorem [Ord iff trans and well-ordered]:** $x$ is an ordinal iff $x$ is transitive and well-ordered by $\in$.
 
@@ -99,7 +99,7 @@ Now consider the set $B = \lbrace y \in S \mid f(y) \neq y\rbrace$.
 Then we get a mapping $f$ from $S$ to some ordinal $\alpha$ by the following construction.
 
 - Let $S\_0 = S$ and instantiate [*] with $S\_0$, we get some $m\_0$ that's the least element in $S\_0$. Let $f(m\_0) = 0$. 
-- Next, let $S\_1 = S\_0 - \lbrace m\_0 \rbrace$ and we instantiate [*] with $S\_1$. Then we get some $m\_1$ that's the least in $S\_0$. Let $f(m\_1) = 1$. 
+- Next, let $S\_1 = S\_0 - \lbrace m\_0 \rbrace$ and we instantiate [*] with $S\_1$. Then we get some $m\_1$ that's the least in $S\_1$. Let $f(m\_1) = 1$. 
 - ...
 
 Since $f$ maps each element of $S$ deterministically, $f$ is a function from $S$ to $\alpha$.
