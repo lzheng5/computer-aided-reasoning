@@ -12,26 +12,26 @@ Then for $i \geq N$: $b\_i >\_{R\_2} b\_{i+1}$, giving an infinite descending ch
 
 **Remark:** Consulted AI for proof ideas. And for an alternative direct proof, see [hw3.thy](hw3.thy). 
 
-**Theorem [Lex Order WF]:** If $R_1$, $R_2$, ... $R_n$ are well-founded, then $R_{lex}$ on $A_1 \times A_2 \times ... \times A_n$ is well-founded.
+**Theorem [Lex Order WF]:** If $R_1$, $R_2$, ... $R_n$ are well-founded, then $R_{lex}$ on $A\_1 \times A\_2 \times ... \times A\_n$ is well-founded.
 
 **Proof:** By induction on `n` and the two case lemma ∎
 
 ## Ex 12.
 
-**Definition [Dictionary Order]:** Given relations $R_1, \ldots, R_n$ on sets $A_1, \ldots, A_n$, define $<_{dict}$ on $\bigcup_{k=1}^{n} (A_1 \times \cdots \times A_k)$ by:
+**Definition [Dictionary Order]:** Given relations $R_1, \ldots, R_n$ on sets $A_1, \ldots, A_n$, define $<_{dict}$ on $\bigcup\_{k=1}^{n} (A\_1 \times \cdots \times A\_k)$ by:
 
 $$[] <_{dict} (b:bs)$$
-$$(a:as) <_{dict} (b:bs) \iff (a <_{R_1} b) \lor (a = b \land as <_{dict'} bs)$$
+$$(a:as) <\_{dict} (b:bs) \iff (a <\_{{R}\_1} b) \lor (a = b \land as <\_{dict'} bs)$$
 
-where $<_{dict'}$ is the dictionary order on the tail using $R_2, \ldots, R_n$.
+where $<\_{dict'}$ is the dictionary order on the tail using $R_2, \ldots, R_n$.
 
 **Theorem [Two Relations Case]:** If $R_1$, $R_2$ are well-founded, then $R_{dict}$ for $R_1$ and $R_2$ is well-founded.
 
 **Proof:** Similar to the two relations case for lex ordering. ∎
 
-**Theorem [Dictionary Order WF]:** If $R_1, R_2, \ldots, R_n$ are well-founded, then $R_{dict}$ on $\bigcup_{k=1}^{n} (A_1 \times \cdots \times A_k)$ is well-founded.
+**Theorem [Dictionary Order WF]:** If $R_1, R_2, \ldots, R_n$ are well-founded, then $R_{dict}$ on $\bigcup\_{k=1}^{n} (A\_1 \times \cdots \times A\_k)$ is well-founded.
 
-**Proof:** Let $(a_1, a_2, ..., a_i)$ and $(a_1', a_2', ..., a_j')$ be in the domain for arbitrary $i$ and $j$, where $i \leq j$.
+**Proof:** Let $(a\_1, a\_2, ..., a\_i)$ and $(a\_1', a\_2', ..., a\_j')$ be in the domain for arbitrary $i$ and $j$, where $i \leq j$.
 
 By induction on $i$ and the two case lemma for the dictionary ordering. ∎
 
@@ -95,8 +95,8 @@ Now consider the set $B = \{y \in S \mid f(y) \neq y\}$.
 
 Then we get a mapping $f$ from $S$ to some ordinal $\alpha$ by the following construction.
 
-- Let $S_0 = S$ and instantiate [*] with $S_0$, we get some $m_0$ that's the least element in $S_0$. Let $f(m_0) = 0$. 
-- Next, let $S_1 = S_0 - \{m_0\}$ and we instantiate [*] with $S_1$. Then we get some $m_1$ that's the least in $S_0$. Let $f(m_1) = 1$. 
+- Let $S\_0 = S$ and instantiate [*] with $S\_0$, we get some $m\_0$ that's the least element in $S\_0$. Let $f(m\_0) = 0$. 
+- Next, let $S\_1 = S\_0 - \{m\_0\}$ and we instantiate [*] with $S\_1$. Then we get some $m\_1$ that's the least in $S\_0$. Let $f(m\_1) = 1$. 
 - ...
 
 Since $f$ maps each element of $S$ deterministically, $f$ is a function from $S$ to $\alpha$.
@@ -104,10 +104,10 @@ And consequently, the ordinal $\alpha$ is also uniquely determined to be the lea
 
 Next, we show $f$ is bijective.
 - $f$ is surjective as it can always map any $\beta \in \alpha$ to $\beta$ itself, which is a woset under $\in$. 
-- $f$ is injective, i.e., $\forall m_i, m_j \in S.\ f(m_i) = f(m_j) \implies m_i = m_j$.  
-  Let $m_i, m_j \in S$ and $f(m_i) = f(m_j)$. We prove by contradiction.  
-  Suppose $m_i \neq m_j$, and WLOG, $m_i\ A\ m_j$, as $A$ is total on $S$.  
-  By the way we have constructed $f$, $f(m_i) < f(m_j)$, contradiction. 
+- $f$ is injective, i.e., $\forall m\_i, m\_j \in S.\ f(m\_i) = f(m\_j) \implies m\_i = m\_j$.  
+  Let $m\_i, m\_j \in S$ and $f(m\_i) = f(m\_j)$. We prove by contradiction.  
+  Suppose $m\_i \neq m\_j$, and WLOG, $m\_i\ A\ m\_j$, as $A$ is total on $S$.  
+  By the way we have constructed $f$, $f(m\_i) < f(m\_j)$, contradiction. 
 
 Then, we show $f$ preserves ordering, i.e., $\forall x, y \in S. x A y \iff f(x) \in f(y)$.
   Let $x, y \in S$. 
