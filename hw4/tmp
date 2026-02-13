@@ -1,0 +1,1261 @@
+Welcome to the Emacs shell
+
+~/Documents/lib/neu/computer aided reasoning/hw4 $ acl2s
+
+ACL2s Version 1.3.1.
+Build date: january 11, 2026  21:10:16.
+Copyright (C) 2022, Northeastern University.
+ACL2s is an extension of ACL2 Version 8.6.
+ACL2s comes with ABSOLUTELY NO WARRANTY.
+This is free software with certain restrictions.
+See the LICENSE files distributed with ACL2s and ACL2.
+
+Project-dir-alist:
+((:system . "/Volumes/T7/m2/acl2/books/")).
+Type :help for help.
+Type (quit) to quit completely out of ACL2.
+
+ACL2S !> "ACL2S"
+ACL2S !><state>
+ACL2S !> 1
+ACL2S !>
+
+ACL2S !>>(table acl2::acl2-defaults-table
+           :termination-method ':measure)
+
+
+ACL2S !>>(table acl2::acl2-defaults-table
+           :termination-method)
+ :measure
+ACL2S !>
+
+ACL2S !>>(acl2s-defaults :set testing-enabled t)
+
+
+ACL2S !>>(value-triple :redundant)
+
+
+ACL2S !>>(table acl2s-defaults-table
+           ':testing-enabled
+           '(acl2s-param-info% t
+                               (member-eq value *testing-enabled-values*)
+                               set-acl2s-random-testing-enabled))
+
+The event ( table acl2s-defaults-table ...) is redundant.  See :DOC
+redundant-events.
+:redundant
+
+
+ACL2S !>>(set-defunc-skip-admissibilityp nil)
+
+The event ( table defunc-defaults-table ...) is redundant.  See :DOC
+redundant-events.
+
+Summary
+Form:  ( table defunc-defaults-table ...)
+Rules: nil
+Time:  0.00 seconds (prove: 0.00, print: 0.00, other: 0.00)
+:redundant
+
+
+ACL2S !>>(set-defunc-skip-function-contractp nil)
+
+The event ( table defunc-defaults-table ...) is redundant.  See :DOC
+redundant-events.
+
+Summary
+Form:  ( table defunc-defaults-table ...)
+Rules: nil
+Time:  0.00 seconds (prove: 0.00, print: 0.00, other: 0.00)
+:redundant
+
+
+ACL2S !>>(set-defunc-skip-body-contractsp nil)
+
+The event ( table defunc-defaults-table ...) is redundant.  See :DOC
+redundant-events.
+
+Summary
+Form:  ( table defunc-defaults-table ...)
+Rules: nil
+Time:  0.00 seconds (prove: 0.00, print: 0.00, other: 0.00)
+:redundant
+
+
+ACL2S !>>(set-defunc-termination-strictp t)
+
+The event ( table defunc-defaults-table ...) is redundant.  See :DOC
+redundant-events.
+
+Summary
+Form:  ( table defunc-defaults-table ...)
+Rules: nil
+Time:  0.00 seconds (prove: 0.00, print: 0.00, other: 0.00)
+:redundant
+
+
+ACL2S !>>(set-defunc-function-contract-strictp t)
+
+The event ( table defunc-defaults-table ...) is redundant.  See :DOC
+redundant-events.
+
+Summary
+Form:  ( table defunc-defaults-table ...)
+Rules: nil
+Time:  0.00 seconds (prove: 0.00, print: 0.00, other: 0.00)
+:redundant
+
+
+ACL2S !>>(set-defunc-body-contracts-strictp t)
+
+The event ( table defunc-defaults-table ...) is redundant.  See :DOC
+redundant-events.
+
+Summary
+Form:  ( table defunc-defaults-table ...)
+Rules: nil
+Time:  0.00 seconds (prove: 0.00, print: 0.00, other: 0.00)
+:redundant
+
+
+ACL2S !>>(set-acl2s-property-table-test-contracts? t)
+
+The event ( table acl2s-property-table ...) is redundant.  See :DOC
+redundant-events.
+
+Summary
+Form:  ( table acl2s-property-table ...)
+Rules: nil
+Time:  0.00 seconds (prove: 0.00, print: 0.00, other: 0.00)
+:redundant
+
+
+ACL2S !>>(set-acl2s-property-table-check-contracts? t)
+
+The event ( table acl2s-property-table ...) is redundant.  See :DOC
+redundant-events.
+
+Summary
+Form:  ( table acl2s-property-table ...)
+Rules: nil
+Time:  0.00 seconds (prove: 0.00, print: 0.00, other: 0.00)
+:redundant
+
+
+ACL2S !>>(set-acl2s-property-table-proofs? t)
+
+The event ( table acl2s-property-table ...) is redundant.  See :DOC
+redundant-events.
+
+Summary
+Form:  ( table acl2s-property-table ...)
+Rules: nil
+Time:  0.00 seconds (prove: 0.00, print: 0.00, other: 0.00)
+:redundant
+
+
+ACL2S !>>(set-acl2s-property-table-testing? t)
+
+The event ( table acl2s-property-table ...) is redundant.  See :DOC
+redundant-events.
+
+Summary
+Form:  ( table acl2s-property-table ...)
+Rules: nil
+Time:  0.00 seconds (prove: 0.00, print: 0.00, other: 0.00)
+:redundant
+
+
+ACL2S !>>(modeling-set-parms 60 15 90 120 60)
+
+
+ACL2S !>>(acl2s-defaults :set cgen-timeout 60)
+
+
+ACL2S !>>(table acl2s-defaults-table
+           ':cgen-timeout
+           '(acl2s-param-info% 60 (and (rationalp value) (<= 0 value))
+                               nil))
+
+The event ( table acl2s-defaults-table ...) is redundant.  See :DOC
+redundant-events.
+
+
+ACL2S !>>(value-triple '60)
+60
+
+
+ACL2S !>>(acl2s-defaults :set cgen-local-timeout 15)
+
+
+ACL2S !>>(table acl2s-defaults-table
+           ':cgen-local-timeout
+           '(acl2s-param-info% 15 (and (rationalp value) (<= 0 value))
+                               nil))
+
+
+ACL2S !>>(value-triple '15)
+15
+
+
+ACL2S !>>(set-defunc-timeout 90)
+
+Summary
+Form:  ( table defunc-defaults-table ...)
+Rules: nil
+Time:  0.00 seconds (prove: 0.00, print: 0.00, other: 0.00)
+defunc-defaults-table
+
+
+ACL2S !>>(set-acl2s-property-table-proof-timeout 120)
+
+Summary
+Form:  ( table acl2s-property-table ...)
+Rules: nil
+Time:  0.00 seconds (prove: 0.00, print: 0.00, other: 0.00)
+acl2s-property-table
+
+
+ACL2S !>>(set-acl2s-property-table-testing-timeout 60)
+
+Summary
+Form:  ( table acl2s-property-table ...)
+Rules: nil
+Time:  0.00 seconds (prove: 0.00, print: 0.00, other: 0.00)
+acl2s-property-table
+
+Summary
+Form:  ( PROGN (acl2s-defaults :set ...) ...)
+Rules: nil
+Time:  0.00 seconds (prove: 0.00, print: 0.00, other: 0.00)
+acl2s-property-table
+
+Summary
+Form:  ( PROGN (acl2s-defaults ... t) ...)
+Rules: nil
+Time:  0.01 seconds (prove: 0.00, print: 0.00, other: 0.01)
+ acl2s-property-table
+ACL2S !> Predicate events...
+Form:  ( defun if-atomp ...)
+Form:  ( IN-THEORY (disable* ...))
+Form:  ( IN-THEORY (enable ...))
+Form:  ( table acl2::ruleset-table ...)
+Form:  ( MAKE-EVENT (let* ...))
+ Tau characterization events...
+Defdata/Note: if-atomp relatively complete for Tau.
+Form:  ( defthm def=>if-atom ...)
+Form:  ( defthm if-atom=>def ...)
+ Enumerator events...
+Form:  ( defun nth-if-atom-builtin ...)
+Form:  ( defun nth-if-atom/acc-builtin ...)
+Form:  ( PROGN (set-bogus-defun-hints-ok t) ...)
+Form:  ( ENCAPSULATE NIL (logic) ...)
+Time:  0.04 seconds (prove: 0.01, print: 0.00, other: 0.03)
+ Registering type...
+Form:  ( defun nth-if-atom ...)
+Form:  ( ENCAPSULATE (((nth-if-atom * ...) ...) ...) ...)
+Form:  ( defun nth-if-atom/acc ...)
+Form:  ( ENCAPSULATE (((nth-if-atom/acc * ...) ...) ...) ...)
+Form:  ( DEFATTACH (nth-if-atom nth-if-atom-builtin) ...)
+Form:  ( DEFATTACH (nth-if-atom/acc nth-if-atom/acc-builtin) ...)
+Form:  ( table type-metadata-table ...)
+Form:  ( PROGN (local ...) ...)
+Form:  ( ENCAPSULATE NIL (logic) ...)
+Time:  0.01 seconds (prove: 0.00, print: 0.00, other: 0.01)
+Form:  ( MAKE-EVENT (defdata::register-type-fn ...))
+Time:  0.01 seconds (prove: 0.00, print: 0.00, other: 0.01)
+Form:  ( ENCAPSULATE NIL (with-output :on ...) ...)
+Time:  0.01 seconds (prove: 0.00, print: 0.00, other: 0.01)
+Form:  ( PROGN (encapsulate nil ...) ...)
+Time:  0.05 seconds (prove: 0.01, print: 0.00, other: 0.04)
+Form:  ( ENCAPSULATE NIL (with-output :off ...) ...)
+Time:  0.06 seconds (prove: 0.01, print: 0.00, other: 0.05)
+ t
+ACL2S !> Predicate events...
+Form:  ( defun if-exprp ...)
+Form:  ( IN-THEORY (disable* ...))
+Form:  ( IN-THEORY (enable ...))
+Form:  ( table acl2::ruleset-table ...)
+Form:  ( MAKE-EVENT (let* ...))
+ Tau characterization events...
+ (if-exprp acl2::v1) <= body -- not complete.
+Reasons:
+("The formula fails to fit any of the forms for acceptable :TAU-SYSTEM rules."
+ "Nesting i.e. (P (f ... (g x1 ...) ...) not allowed in conclusion of signature rule")
+
+ (if-exprp acl2::v1) => body -- not complete.
+Reasons:
+("Unable to characterize (using tau rules) a non-disjoint union type")
+
+Form:  ( defthm def=>if-expr ...)
+ Enumerator events...
+Form:  ( defun nth-if-expr-builtin ...)
+Form:  ( defun nth-if-expr/acc-builtin ...)
+Form:  ( PROGN (set-bogus-defun-hints-ok t) ...)
+Form:  ( ENCAPSULATE NIL (logic) ...)
+Time:  0.13 seconds (prove: 0.11, print: 0.00, other: 0.01)
+ Registering type...
+Form:  ( defun nth-if-expr ...)
+Form:  ( ENCAPSULATE (((nth-if-expr * ...) ...) ...) ...)
+Form:  ( defun nth-if-expr/acc ...)
+Form:  ( ENCAPSULATE (((nth-if-expr/acc * ...) ...) ...) ...)
+Form:  ( DEFATTACH (nth-if-expr nth-if-expr-builtin) ...)
+Form:  ( DEFATTACH (nth-if-expr/acc nth-if-expr/acc-builtin) ...)
+Form:  ( table type-metadata-table ...)
+Form:  ( PROGN (local ...) ...)
+Form:  ( ENCAPSULATE NIL (logic) ...)
+Time:  0.01 seconds (prove: 0.00, print: 0.00, other: 0.01)
+Form:  ( MAKE-EVENT (defdata::register-type-fn ...))
+Time:  0.01 seconds (prove: 0.00, print: 0.00, other: 0.01)
+Form:  ( ENCAPSULATE NIL (with-output :on ...) ...)
+Time:  0.01 seconds (prove: 0.00, print: 0.00, other: 0.01)
+Form:  ( PROGN (encapsulate nil ...) ...)
+Time:  0.14 seconds (prove: 0.11, print: 0.00, other: 0.02)
+Form:  ( ENCAPSULATE NIL (with-output :off ...) ...)
+Time:  0.14 seconds (prove: 0.11, print: 0.00, other: 0.03)
+ t
+ACL2S !> Predicate events...
+Form:  ( defun norm-if-exprp ...)
+Form:  ( IN-THEORY (disable* ...))
+Form:  ( IN-THEORY (enable ...))
+Form:  ( table acl2::ruleset-table ...)
+Form:  ( MAKE-EVENT (let* ...))
+ Tau characterization events...
+ (norm-if-exprp acl2::v1) <= body -- not complete.
+Reasons:
+("The formula fails to fit any of the forms for acceptable :TAU-SYSTEM rules."
+ "Nesting i.e. (P (f ... (g x1 ...) ...) not allowed in conclusion of signature rule")
+
+ (norm-if-exprp acl2::v1) => body -- not complete.
+Reasons:
+("Unable to characterize (using tau rules) a non-disjoint union type")
+
+Form:  ( defthm def=>norm-if-expr ...)
+ Enumerator events...
+Form:  ( defun nth-norm-if-expr-builtin ...)
+Form:  ( defun nth-norm-if-expr/acc-builtin ...)
+Form:  ( PROGN (set-bogus-defun-hints-ok t) ...)
+Form:  ( ENCAPSULATE NIL (logic) ...)
+Time:  0.12 seconds (prove: 0.11, print: 0.00, other: 0.01)
+ Registering type...
+Form:  ( defun nth-norm-if-expr ...)
+Form:  ( ENCAPSULATE (((nth-norm-if-expr * ...) ...) ...) ...)
+Form:  ( defun nth-norm-if-expr/acc ...)
+Form:  ( ENCAPSULATE (((nth-norm-if-expr/acc * ...) ...) ...) ...)
+Form:  ( DEFATTACH (nth-norm-if-expr nth-norm-if-expr-builtin) ...)
+Form:  ( DEFATTACH (nth-norm-if-expr/acc nth-norm-if-expr/acc-builtin)
+...)
+Form:  ( table type-metadata-table ...)
+Form:  ( PROGN (local ...) ...)
+Form:  ( ENCAPSULATE NIL (logic) ...)
+Time:  0.01 seconds (prove: 0.00, print: 0.00, other: 0.01)
+Form:  ( MAKE-EVENT (defdata::register-type-fn ...))
+Time:  0.01 seconds (prove: 0.00, print: 0.00, other: 0.01)
+Form:  ( ENCAPSULATE NIL (with-output :on ...) ...)
+Time:  0.01 seconds (prove: 0.00, print: 0.00, other: 0.01)
+Form:  ( PROGN (encapsulate nil ...) ...)
+Time:  0.13 seconds (prove: 0.11, print: 0.00, other: 0.02)
+Form:  ( ENCAPSULATE NIL (with-output :off ...) ...)
+Time:  0.13 seconds (prove: 0.11, print: 0.00, other: 0.02)
+ t
+ACL2S !>Submitting
+(defthm norm-if-expr-is-subtype-of-if-expr
+  (implies (norm-if-exprp x) (if-exprp x))
+  :rule-classes ((:tau-system) (:forward-chaining)))
+
+**Summary of Cgen/testing**
+We tested 1000 examples across 1 subgoals, of which 851 (851 unique)
+satisfied the hypotheses, and found 0 counterexamples and 851 witnesses.
+
+Cases in which the conjecture is true include:
+ [found in : "Goal"]
+ -- ((x t))
+ -- ((x '(if x t (if t t t))))
+ -- ((x 'xxxyy))
+ norm-if-expr-is-subtype-of-if-expr
+ACL2S !>
+Form:  ( TEST-DEFINITION if-depth ... )
+Form:  ( TEST-BODY-CONTRACTS if-depth... )
+Form:  ( TEST-FUNCTION-CONTRACT if-depth ...)
+Testing: Done
+Elapsed Run Time: 0.23 seconds
+Form:  ( ADMIT-DEFINITION if-depth ... )
+Time:  0.11 seconds (prove: 0.11, print: 0.00, other: 0.00)
+Form:  ( PROVE-FUNCTION-CONTRACT if-depth ... )
+Time:  0.03 seconds (prove: 0.01, print: 0.00, other: 0.01)
+Form:  ( PROVE-BODY-CONTRACTS if-depth ... )
+Time:  0.02 seconds (prove: 0.01, print: 0.00, other: 0.02)
+Elapsed Run Time: 0.18 seconds
+Function Name : IF-DEPTH
+Termination proven -------- [*]
+Function Contract proven -- [*]
+Body Contracts proven ----- [*]
+ t
+ACL2S !>
+Form:  ( TEST-DEFINITION weight ... )
+Form:  ( TEST-BODY-CONTRACTS weight... )
+Form:  ( TEST-FUNCTION-CONTRACT weight ...)
+Testing: Done
+Elapsed Run Time: 0.41 seconds
+Form:  ( ADMIT-DEFINITION weight ... )
+Time:  0.13 seconds (prove: 0.12, print: 0.00, other: 0.00)
+Form:  ( PROVE-FUNCTION-CONTRACT weight ... )
+Time:  0.04 seconds (prove: 0.02, print: 0.00, other: 0.01)
+Form:  ( PROVE-BODY-CONTRACTS weight ... )
+Time:  0.05 seconds (prove: 0.02, print: 0.00, other: 0.03)
+Elapsed Run Time: 0.23 seconds
+Function Name : WEIGHT
+Termination proven -------- [*]
+Function Contract proven -- [*]
+Body Contracts proven ----- [*]
+ t
+ACL2S !>
+
+ERROR in translate1-cw:  The variables d, e and f are not used in the
+body of the LET expression that binds d, e and f.  But d, e and f are
+not declared IGNOREd or IGNORABLE.  See :DOC set-ignore-ok.  Note:
+this error occurred in the context
+(let ((d (car (cdr a)))
+      (e (car (cdr (cdr a))))
+      (f (car (cdr (cdr (cdr a))))))
+  1).
+
+
+ACL2S !> Predicate events...
+Form:  ( defun rstp ...)
+Form:  ( IN-THEORY (disable* ...))
+Form:  ( IN-THEORY (enable ...))
+Form:  ( table acl2::ruleset-table ...)
+Form:  ( MAKE-EVENT (let* ...))
+ Tau characterization events...
+ (rstp acl2::v1) <= body -- not complete.
+Reasons:
+("Nesting i.e. (P (f ... (g x1 ...) ...) not allowed in conclusion of signature rule")
+
+ (rstp acl2::v1) => body -- not complete.
+Reasons:
+("The formula fails to fit any of the forms for acceptable :TAU-SYSTEM rules."
+ "Nesting i.e. (P (f ... (g x1 ...) ...) not allowed in conclusion of signature rule")
+
+Form:  ( defthm rst=>def ...)
+ Enumerator events...
+Form:  ( defun nth-rst-builtin ...)
+Form:  ( defun nth-rst/acc-builtin ...)
+Form:  ( PROGN (set-bogus-defun-hints-ok t) ...)
+Form:  ( ENCAPSULATE NIL (logic) ...)
+Time:  0.01 seconds (prove: 0.00, print: 0.00, other: 0.01)
+ Registering type...
+Form:  ( defun nth-rst ...)
+Form:  ( ENCAPSULATE (((nth-rst * ...) ...) ...) ...)
+Form:  ( defun nth-rst/acc ...)
+Form:  ( ENCAPSULATE (((nth-rst/acc * ...) ...) ...) ...)
+Form:  ( DEFATTACH (nth-rst nth-rst-builtin) ...)
+Form:  ( DEFATTACH (nth-rst/acc nth-rst/acc-builtin) ...)
+Form:  ( table type-metadata-table ...)
+Form:  ( PROGN (local ...) ...)
+Form:  ( ENCAPSULATE NIL (logic) ...)
+Time:  0.01 seconds (prove: 0.00, print: 0.00, other: 0.01)
+Form:  ( MAKE-EVENT (defdata::register-type-fn ...))
+Time:  0.01 seconds (prove: 0.00, print: 0.00, other: 0.01)
+Form:  ( ENCAPSULATE NIL (with-output :on ...) ...)
+Time:  0.01 seconds (prove: 0.00, print: 0.00, other: 0.01)
+Form:  ( PROGN (encapsulate nil ...) ...)
+Time:  0.02 seconds (prove: 0.00, print: 0.00, other: 0.02)
+Form:  ( ENCAPSULATE NIL (with-output :off ...) ...)
+Time:  0.03 seconds (prove: 0.00, print: 0.00, other: 0.03)
+ t
+ACL2S !>Submitting
+(defthm rst-is-subtype-of-lex
+  (implies (rstp x) (lexp x))
+  :rule-classes ((:tau-system) (:forward-chaining)))
+
+**Summary of Cgen/testing**
+We tested 500 examples across 1 subgoals, of which 466 (466 unique)
+satisfied the hypotheses, and found 0 counterexamples and 466 witnesses.
+
+Cases in which the conjecture is true include:
+ [found in : "Goal"]
+ -- ((x '(7 1)))
+ -- ((x '(1 0)))
+ -- ((x '(552 43)))
+ rst-is-subtype-of-lex
+ACL2S !>
+Form:  ( TEST-DEFINITION m-if-flat2 ... )
+Form:  ( TEST-BODY-CONTRACTS m-if-flat2... )
+Form:  ( TEST-FUNCTION-CONTRACT m-if-flat2 ...)
+Testing: Done
+Elapsed Run Time: 49.19 seconds
+Form:  ( ADMIT-DEFINITION m-if-flat2 ... )
+Time:  0.32 seconds (prove: 0.30, print: 0.00, other: 0.02)
+Form:  ( PROVE-FUNCTION-CONTRACT m-if-flat2 ... )
+Time:  0.18 seconds (prove: 0.16, print: 0.00, other: 0.02)
+Form:  ( PROVE-BODY-CONTRACTS m-if-flat2 ... )
+
+
+ACL2 Error in ( verify-guards m-if-flat2 ...):  The proof of the guard
+conjecture for m-if-flat2 has failed.  You may wish to avoid specifying
+a guard, or to supply option :VERIFY-GUARDS nil with the :GUARD.
+
+
+
+ACL2 Error [Failure] in ( verify-guards m-if-flat2 ...):  The proof
+of the guard conjecture for m-if-flat2 has failed; see the discussion
+above about :verify-guards.  See :DOC failure.
+Time:  5.19 seconds (prove: 2.01, print: 0.00, other: 3.18)
+Elapsed Run Time: 5.70 seconds
+
+
+FAILED EVENTS:
+(progn
+ (encapsulate nil
+   (encapsulate
+              ((acl2s-rst-undefined (x y)
+                                    t
+                                    :guard (and (symbolp x) (true-listp y))))
+     (local (defun acl2s-rst-undefined (x y)
+              (declare (ignorable x y))
+              '(0 0)))
+     (defthm acl2s-rst-undefined-rstp
+       (rstp (acl2s-rst-undefined x y))
+       :rule-classes ((:type-prescription) (:rewrite))))
+   (defun acl2s-rst-undefined-attached (x y)
+     (declare (xargs :guard (and (symbolp x) (true-listp y))))
+     (prog2$ (cw? (show-contract-violations?)
+                  "~|**Input contract  violation in ~x0**: ~x1 ~%"
+                  'acl2s-rst-undefined-attached
+                  (cons x y))
+             '(0 0)))
+   (defattach acl2s-rst-undefined
+              acl2s-rst-undefined-attached))
+ (encapsulate nil
+  (with-output
+   :off :all :on (comment error)
+   (defun m-if-flat2 (x)
+    (declare (xargs :guard (if-exprp x)
+                    :verify-guards nil
+                    :normalize nil))
+    (mbe
+     :logic
+     (if
+      (if-exprp x)
+      (match
+           x (:if-atom (list 0 1))
+           (('if a b c)
+            (let ((mb (m-if-flat2 b))
+                  (mc (m-if-flat2 c)))
+              (match (list mb mc)
+                     (((& bs) (& cs))
+                      (match a (:if-atom (list 0 (+ bs cs)))
+                             (('if d e f)
+                              (let ((md (m-if-flat2 d))
+                                    (me (m-if-flat2 e))
+                                    (mf (m-if-flat2 f)))
+                                (match (list md me mf)
+                                       (((dd ds) (& es) (& fs))
+                                        (let ((nd (+ 1 dd)))
+                                          (list nd
+                                                (+ (* (expt 2 nd) (+ bs cs))
+                                                   ds es fs)))))))))))))
+      (acl2s-rst-undefined 'm-if-flat2
+                           (list x)))
+     :exec
+     (match x (:if-atom (list 0 1))
+            (('if a b c)
+             (let ((mb (m-if-flat2 b))
+                   (mc (m-if-flat2 c)))
+               (match (list mb mc)
+                      (((& bs) (& cs))
+                       (match a (:if-atom (list 0 (+ bs cs)))
+                              (('if d e f)
+                               (let ((md (m-if-flat2 d))
+                                     (me (m-if-flat2 e))
+                                     (mf (m-if-flat2 f)))
+                                 (match (list md me mf)
+                                        (((dd ds) (& es) (& fs))
+                                         (let ((nd (+ 1 dd)))
+                                           (list nd
+                                                 (+ (* (expt 2 nd) (+ bs cs))
+                                                    ds es fs)))))))))))))))))
+ (defthm m-if-flat2-contract
+   (implies (if-exprp x)
+            (rstp (m-if-flat2 x))))
+ (encapsulate nil
+   (with-output
+        :off :all :on (comment error)
+        (verify-guards m-if-flat2
+                       :guard-debug t
+                       :hints (("Goal" :do-not-induct t
+                                       :do-not '(generalize fertilize)))))))
+
+Body Contracts FAILED! You can provide :body-contracts-hints to help.
+
+HARD ACL2 ERROR in defunc:
+Submit the events shown above to replicate the failure.
+
+
+
+ACL2 Error [Evaluation] in value-triple:  Evaluation aborted.  To debug
+see :DOC print-gv, see :DOC trace, and see :DOC wet.
+
+ACL2S !>
+
+ACL2S !>>(table acl2::acl2-defaults-table
+           :termination-method ':ccg)
+
+
+ACL2S !>>(table acl2::acl2-defaults-table
+           :termination-method)
+ :ccg
+ACL2S !>
+Form:  ( TEST-DEFINITION m-if-flat2 ... )
+Form:  ( TEST-BODY-CONTRACTS m-if-flat2... )
+Form:  ( TEST-FUNCTION-CONTRACT m-if-flat2 ...)
+Testing: Done
+Elapsed Run Time: 51.09 seconds
+Form:  ( ADMIT-DEFINITION m-if-flat2 ... )
+Time:  0.35 seconds (prove: 0.32, print: 0.00, other: 0.03)
+Form:  ( PROVE-FUNCTION-CONTRACT m-if-flat2 ... )
+Time:  0.18 seconds (prove: 0.16, print: 0.00, other: 0.02)
+Form:  ( PROVE-BODY-CONTRACTS m-if-flat2 ... )
+
+
+ACL2 Error in ( verify-guards m-if-flat2 ...):  The proof of the guard
+conjecture for m-if-flat2 has failed.  You may wish to avoid specifying
+a guard, or to supply option :VERIFY-GUARDS nil with the :GUARD.
+
+
+
+ACL2 Error [Failure] in ( verify-guards m-if-flat2 ...):  The proof
+of the guard conjecture for m-if-flat2 has failed; see the discussion
+above about :verify-guards.  See :DOC failure.
+Time:  4.54 seconds (prove: 1.78, print: 0.00, other: 2.76)
+Elapsed Run Time: 5.08 seconds
+
+
+FAILED EVENTS:
+(progn
+ (encapsulate nil
+   (encapsulate
+              ((acl2s-rst-undefined (x y)
+                                    t
+                                    :guard (and (symbolp x) (true-listp y))))
+     (local (defun acl2s-rst-undefined (x y)
+              (declare (ignorable x y))
+              '(0 0)))
+     (defthm acl2s-rst-undefined-rstp
+       (rstp (acl2s-rst-undefined x y))
+       :rule-classes ((:type-prescription) (:rewrite))))
+   (defun acl2s-rst-undefined-attached (x y)
+     (declare (xargs :guard (and (symbolp x) (true-listp y))))
+     (prog2$ (cw? (show-contract-violations?)
+                  "~|**Input contract  violation in ~x0**: ~x1 ~%"
+                  'acl2s-rst-undefined-attached
+                  (cons x y))
+             '(0 0)))
+   (defattach acl2s-rst-undefined
+              acl2s-rst-undefined-attached))
+ (encapsulate nil
+  (with-output
+   :off :all :on (comment error)
+   (defun m-if-flat2 (x)
+    (declare (xargs :guard (if-exprp x)
+                    :verify-guards nil
+                    :normalize nil
+                    :time-limit 135/2))
+    (mbe
+     :logic
+     (if
+      (if-exprp x)
+      (match
+           x (:if-atom (list 0 1))
+           (('if a b c)
+            (let ((mb (m-if-flat2 b))
+                  (mc (m-if-flat2 c)))
+              (match (list mb mc)
+                     (((& bs) (& cs))
+                      (match a (:if-atom (list 0 (+ bs cs)))
+                             (('if d e f)
+                              (let ((md (m-if-flat2 d))
+                                    (me (m-if-flat2 e))
+                                    (mf (m-if-flat2 f)))
+                                (match (list md me mf)
+                                       (((dd ds) (& es) (& fs))
+                                        (let ((nd (+ 1 dd)))
+                                          (list nd
+                                                (+ (* (expt 2 nd) (+ bs cs))
+                                                   ds es fs)))))))))))))
+      (acl2s-rst-undefined 'm-if-flat2
+                           (list x)))
+     :exec
+     (match x (:if-atom (list 0 1))
+            (('if a b c)
+             (let ((mb (m-if-flat2 b))
+                   (mc (m-if-flat2 c)))
+               (match (list mb mc)
+                      (((& bs) (& cs))
+                       (match a (:if-atom (list 0 (+ bs cs)))
+                              (('if d e f)
+                               (let ((md (m-if-flat2 d))
+                                     (me (m-if-flat2 e))
+                                     (mf (m-if-flat2 f)))
+                                 (match (list md me mf)
+                                        (((dd ds) (& es) (& fs))
+                                         (let ((nd (+ 1 dd)))
+                                           (list nd
+                                                 (+ (* (expt 2 nd) (+ bs cs))
+                                                    ds es fs)))))))))))))))))
+ (defthm m-if-flat2-contract
+   (implies (if-exprp x)
+            (rstp (m-if-flat2 x))))
+ (encapsulate nil
+   (with-output
+        :off :all :on (comment error)
+        (verify-guards m-if-flat2
+                       :guard-debug t
+                       :hints (("Goal" :do-not-induct t
+                                       :do-not '(generalize fertilize)))))))
+
+Body Contracts FAILED! You can provide :body-contracts-hints to help.
+
+HARD ACL2 ERROR in defunc:
+Submit the events shown above to replicate the failure.
+
+
+
+ACL2 Error [Evaluation] in value-triple:  Evaluation aborted.  To debug
+see :DOC print-gv, see :DOC trace, and see :DOC wet.
+
+ACL2S !>
+Test? proved the conjecture under consideration. Therefore, no counterexamples
+exist.
+
+Form:  ( TEST-DEFINITION m-if-flat2 ... )
+Form:  ( TEST-BODY-CONTRACTS m-if-flat2... )
+Form:  ( TEST-FUNCTION-CONTRACT m-if-flat2 ...)
+Testing: Done
+Elapsed Run Time: 52.14 seconds
+Form:  ( ADMIT-DEFINITION m-if-flat2 ... )
+Time:  0.02 seconds (prove: 0.00, print: 0.00, other: 0.02)
+Form:  ( PROVE-FUNCTION-CONTRACT m-if-flat2 ... )
+Time:  0.18 seconds (prove: 0.16, print: 0.00, other: 0.02)
+Form:  ( PROVE-BODY-CONTRACTS m-if-flat2 ... )
+
+
+ACL2 Error in ( verify-guards m-if-flat2 ...):  The proof of the guard
+conjecture for m-if-flat2 has failed.  You may wish to avoid specifying
+a guard, or to supply option :VERIFY-GUARDS nil with the :GUARD.
+
+
+
+ACL2 Error [Failure] in ( verify-guards m-if-flat2 ...):  The proof
+of the guard conjecture for m-if-flat2 has failed; see the discussion
+above about :verify-guards.  See :DOC failure.
+Time:  4.66 seconds (prove: 1.83, print: 0.00, other: 2.83)
+Elapsed Run Time: 4.87 seconds
+
+
+FAILED EVENTS:
+(progn
+ (encapsulate nil
+   (encapsulate
+              ((acl2s-rst-undefined (x y)
+                                    t
+                                    :guard (and (symbolp x) (true-listp y))))
+     (local (defun acl2s-rst-undefined (x y)
+              (declare (ignorable x y))
+              '(0 0)))
+     (test-then-skip-proofs
+          (defthm acl2s-rst-undefined-rstp
+            (rstp (acl2s-rst-undefined x y))
+            :rule-classes ((:type-prescription) (:rewrite)))))
+   (defun acl2s-rst-undefined-attached (x y)
+     (declare (xargs :guard (and (symbolp x) (true-listp y))))
+     (prog2$ (cw? (show-contract-violations?)
+                  "~|**Input contract  violation in ~x0**: ~x1 ~%"
+                  'acl2s-rst-undefined-attached
+                  (cons x y))
+             '(0 0)))
+   (test-then-skip-proofs (defattach acl2s-rst-undefined
+                                     acl2s-rst-undefined-attached)))
+ (encapsulate nil
+  (with-output
+   :off :all :on (comment error)
+   (skip-proofs
+    (defun m-if-flat2 (x)
+     (declare (xargs :guard (if-exprp x)
+                     :verify-guards nil
+                     :normalize nil
+                     :time-limit 135/2))
+     (mbe
+      :logic
+      (if
+       (if-exprp x)
+       (match
+            x (:if-atom (list 0 1))
+            (('if a b c)
+             (let ((mb (m-if-flat2 b))
+                   (mc (m-if-flat2 c)))
+               (match (list mb mc)
+                      (((& bs) (& cs))
+                       (match a (:if-atom (list 0 (+ bs cs)))
+                              (('if d e f)
+                               (let ((md (m-if-flat2 d))
+                                     (me (m-if-flat2 e))
+                                     (mf (m-if-flat2 f)))
+                                 (match (list md me mf)
+                                        (((dd ds) (& es) (& fs))
+                                         (let ((nd (+ 1 dd)))
+                                           (list nd
+                                                 (+ (* (expt 2 nd) (+ bs cs))
+                                                    ds es fs)))))))))))))
+       (acl2s-rst-undefined 'm-if-flat2
+                            (list x)))
+      :exec
+      (match
+           x (:if-atom (list 0 1))
+           (('if a b c)
+            (let ((mb (m-if-flat2 b))
+                  (mc (m-if-flat2 c)))
+              (match (list mb mc)
+                     (((& bs) (& cs))
+                      (match a (:if-atom (list 0 (+ bs cs)))
+                             (('if d e f)
+                              (let ((md (m-if-flat2 d))
+                                    (me (m-if-flat2 e))
+                                    (mf (m-if-flat2 f)))
+                                (match (list md me mf)
+                                       (((dd ds) (& es) (& fs))
+                                        (let ((nd (+ 1 dd)))
+                                          (list nd
+                                                (+ (* (expt 2 nd) (+ bs cs))
+                                                   ds es fs))))))))))))))))))
+ (defthm m-if-flat2-contract
+   (implies (if-exprp x)
+            (rstp (m-if-flat2 x))))
+ (encapsulate nil
+   (with-output
+        :off :all :on (comment error)
+        (verify-guards m-if-flat2
+                       :guard-debug t
+                       :hints (("Goal" :do-not-induct t
+                                       :do-not '(generalize fertilize)))))))
+
+Body Contracts FAILED! You can provide :body-contracts-hints to help.
+
+HARD ACL2 ERROR in defunc:
+Submit the events shown above to replicate the failure.
+
+
+
+ACL2 Error [Evaluation] in value-triple:  Evaluation aborted.  To debug
+see :DOC print-gv, see :DOC trace, and see :DOC wet.
+
+ACL2S !>
+
+ACL2S !>>(acl2s-defaults :set testing-enabled t)
+
+
+ACL2S !>>(value-triple :redundant)
+
+
+ACL2S !>>(table acl2s-defaults-table
+           ':testing-enabled
+           '(acl2s-param-info% t
+                               (member-eq value *testing-enabled-values*)
+                               set-acl2s-random-testing-enabled))
+
+The event ( table acl2s-defaults-table ...) is redundant.  See :DOC
+redundant-events.
+:redundant
+
+
+ACL2S !>>(set-defunc-skip-admissibilityp t)
+
+Summary
+Form:  ( table defunc-defaults-table ...)
+Rules: nil
+Time:  0.00 seconds (prove: 0.00, print: 0.00, other: 0.00)
+defunc-defaults-table
+
+
+ACL2S !>>(set-defunc-skip-function-contractp t)
+
+Summary
+Form:  ( table defunc-defaults-table ...)
+Rules: nil
+Time:  0.00 seconds (prove: 0.00, print: 0.00, other: 0.00)
+defunc-defaults-table
+
+
+ACL2S !>>(set-defunc-skip-body-contractsp t)
+
+Summary
+Form:  ( table defunc-defaults-table ...)
+Rules: nil
+Time:  0.00 seconds (prove: 0.00, print: 0.00, other: 0.00)
+defunc-defaults-table
+
+
+ACL2S !>>(set-acl2s-property-table-test-contracts? t)
+
+The event ( table acl2s-property-table ...) is redundant.  See :DOC
+redundant-events.
+
+Summary
+Form:  ( table acl2s-property-table ...)
+Rules: nil
+Time:  0.00 seconds (prove: 0.00, print: 0.00, other: 0.00)
+:redundant
+
+
+ACL2S !>>(set-acl2s-property-table-check-contracts? nil)
+
+Summary
+Form:  ( table acl2s-property-table ...)
+Rules: nil
+Time:  0.00 seconds (prove: 0.00, print: 0.00, other: 0.00)
+acl2s-property-table
+
+
+ACL2S !>>(set-acl2s-property-table-proofs? nil)
+
+Summary
+Form:  ( table acl2s-property-table ...)
+Rules: nil
+Time:  0.00 seconds (prove: 0.00, print: 0.00, other: 0.00)
+acl2s-property-table
+
+
+ACL2S !>>(set-acl2s-property-table-testing? t)
+
+The event ( table acl2s-property-table ...) is redundant.  See :DOC
+redundant-events.
+
+Summary
+Form:  ( table acl2s-property-table ...)
+Rules: nil
+Time:  0.00 seconds (prove: 0.00, print: 0.00, other: 0.00)
+:redundant
+
+
+ACL2S !>>(modeling-set-parms 2 1 5 5 5)
+
+
+ACL2S !>>(acl2s-defaults :set cgen-timeout 2)
+
+
+ACL2S !>>(table acl2s-defaults-table
+           ':cgen-timeout
+           '(acl2s-param-info% 2 (and (rationalp value) (<= 0 value))
+                               nil))
+
+
+ACL2S !>>(value-triple '2)
+2
+
+
+ACL2S !>>(acl2s-defaults :set cgen-local-timeout 1)
+
+
+ACL2S !>>(table acl2s-defaults-table
+           ':cgen-local-timeout
+           '(acl2s-param-info% 1 (and (rationalp value) (<= 0 value))
+                               nil))
+
+
+ACL2S !>>(value-triple '1)
+1
+
+
+ACL2S !>>(set-defunc-timeout 5)
+
+Summary
+Form:  ( table defunc-defaults-table ...)
+Rules: nil
+Time:  0.00 seconds (prove: 0.00, print: 0.00, other: 0.00)
+defunc-defaults-table
+
+
+ACL2S !>>(set-acl2s-property-table-proof-timeout 5)
+
+Summary
+Form:  ( table acl2s-property-table ...)
+Rules: nil
+Time:  0.00 seconds (prove: 0.00, print: 0.00, other: 0.00)
+acl2s-property-table
+
+
+ACL2S !>>(set-acl2s-property-table-testing-timeout 5)
+
+Summary
+Form:  ( table acl2s-property-table ...)
+Rules: nil
+Time:  0.00 seconds (prove: 0.00, print: 0.00, other: 0.00)
+acl2s-property-table
+
+Summary
+Form:  ( PROGN (acl2s-defaults :set ...) ...)
+Rules: nil
+Time:  0.00 seconds (prove: 0.00, print: 0.00, other: 0.00)
+acl2s-property-table
+
+Summary
+Form:  ( PROGN (acl2s-defaults ... t) ...)
+Rules: nil
+Time:  0.01 seconds (prove: 0.00, print: 0.00, other: 0.01)
+ acl2s-property-table
+ACL2S !>
+Test? proved the conjecture under consideration. Therefore, no counterexamples
+exist.
+
+Form:  ( TEST-DEFINITION m-if-flat2 ... )
+Form:  ( TEST-BODY-CONTRACTS m-if-flat2... )
+
+
+ACL2 Error [Time-limit] in ( THM ...):  Out of time in preprocess (expand-
+abbreviations).
+
+
+
+ACL2 Error [Time-limit] in ( THM ...):  Out of time in preprocess (expand-
+abbreviations).
+
+Form:  ( TEST-FUNCTION-CONTRACT m-if-flat2 ...)
+Testing: Done
+Elapsed Run Time: 3.86 seconds
+Form:  ( ADMIT-DEFINITION m-if-flat2 ... )
+Time:  0.02 seconds (prove: 0.00, print: 0.00, other: 0.02)
+Form:  ( PROVE-FUNCTION-CONTRACT m-if-flat2 ... )
+Time:  0.06 seconds (prove: 0.01, print: 0.00, other: 0.06)
+Form:  ( PROVE-BODY-CONTRACTS m-if-flat2 ... )
+Time:  0.00 seconds (prove: 0.00, print: 0.00, other: 0.00)
+Elapsed Run Time: 0.11 seconds
+Function Name : M-IF-FLAT2
+Termination proven -------- [*]
+Function Contract proven -- [*]
+Body Contracts proven ----- [*]
+ t
+ACL2S !>
+
+Form:  ( TESTING PROPERTY CONTRACTS ...)
+**We falsified the conjecture. Here are counterexamples:**
+ [found in : "top"]
+ -- ((x '(if (if (if t t t) t t) t (if t t t))))
+ -- ((x '(if (if t t t) t (if t t t))))
+ -- ((x '(if (if t t t) (if t t t) (if t t t))))
+
+Test? found a counterexample.
+
+**Contract Testing Error. The hypotheses of your property must imply:
+
+(implies (and (if-exprp x)
+              (consp x)
+              (eq (car x) 'if)
+              (consp (cdr x))
+              (consp (cddr x))
+              (consp (cdddr x))
+              (eq (cddddr x) nil)
+              (let ((a (cadr x)))
+                (and (consp a)
+                     (eq (car a) 'if)
+                     (consp (cdr a))
+                     (consp (cddr a))
+                     (consp (cdddr a))
+                     (eq (cddddr a) nil))))
+         (let ((a (cadr x))
+               (b (caddr x))
+               (c (cadddr x)))
+           (and (or (consp a) (equal a nil))
+                (or (consp (cdr a)) (equal (cdr a) nil))
+                (or (consp (cddr a))
+                    (equal (cddr a) nil))
+                (or (consp (cdddr a))
+                    (equal (cdddr a) nil))
+                (let ((d (cadr a))
+                      (e (caddr a))
+                      (f (cadddr a)))
+                  (and (if-exprp (list 'if
+                                       d (list 'if e b c)
+                                       (list 'if f b c)))
+                       (if-exprp x)
+                       (rationalp (m-if-flat2 (list 'if
+                                                    d (list 'if e b c)
+                                                    (list 'if f b c))))
+                       (rationalp (m-if-flat2 x))))))).
+
+The counterexample above shows that this is not the case.
+******** PROPERTY FAILED ********
+  To debug, add ":debug? t" at the end of your property.
+Time:  0.05 seconds (prove: 0.00, print: 0.00, other: 0.05)
+ACL2S !>
+Form:  ( TEST-DEFINITION m-if-flat3 ... )
+Form:  ( TEST-BODY-CONTRACTS m-if-flat3... )
+
+
+ACL2 Error [Time-limit] in ( THM ...):  Out of time in preprocess (expand-
+abbreviations).
+
+
+
+ACL2 Error [Time-limit] in ( THM ...):  Out of time in preprocess (expand-
+abbreviations).
+
+Form:  ( TEST-FUNCTION-CONTRACT m-if-flat3 ...)
+
+
+ACL2 Error [Time-limit] in ( THM ...):  Out of time in the rewriter
+(rewrite).
+
+Testing: Done
+Elapsed Run Time: 5.04 seconds
+Form:  ( ADMIT-DEFINITION m-if-flat3 ... )
+Time:  0.01 seconds (prove: 0.00, print: 0.00, other: 0.01)
+Form:  ( PROVE-FUNCTION-CONTRACT m-if-flat3 ... )
+Time:  0.06 seconds (prove: 0.01, print: 0.00, other: 0.05)
+Form:  ( PROVE-BODY-CONTRACTS m-if-flat3 ... )
+Time:  0.00 seconds (prove: 0.00, print: 0.00, other: 0.00)
+Elapsed Run Time: 0.10 seconds
+Function Name : M-IF-FLAT3
+Termination proven -------- [*]
+Function Contract proven -- [*]
+Body Contracts proven ----- [*]
+ t
+ACL2S !>
+
+Form:  ( TESTING PROPERTY CONTRACTS ...)
+**We falsified the conjecture. Here are counterexamples:**
+ [found in : "top"]
+ -- ((x '(if (if t t t) t t)))
+ -- ((x '(if (if t t t) (if t t t) t)))
+ -- ((x '(if (if (if t t t) t t) (if t t t) (if t t t))))
+
+Test? found a counterexample.
+
+**Contract Testing Error. The hypotheses of your property must imply:
+
+(implies (and (if-exprp x)
+              (consp x)
+              (eq (car x) 'if)
+              (consp (cdr x))
+              (consp (cddr x))
+              (consp (cdddr x))
+              (eq (cddddr x) nil)
+              (let ((a (cadr x)))
+                (and (consp a)
+                     (eq (car a) 'if)
+                     (consp (cdr a))
+                     (consp (cddr a))
+                     (consp (cdddr a))
+                     (eq (cddddr a) nil))))
+         (let ((a (cadr x))
+               (b (caddr x))
+               (c (cadddr x)))
+           (and (or (consp a) (equal a nil))
+                (or (consp (cdr a)) (equal (cdr a) nil))
+                (or (consp (cddr a))
+                    (equal (cddr a) nil))
+                (or (consp (cdddr a))
+                    (equal (cdddr a) nil))
+                (let ((d (cadr a))
+                      (e (caddr a))
+                      (f (cadddr a)))
+                  (and (if-exprp (list 'if
+                                       d (list 'if e b c)
+                                       (list 'if f b c)))
+                       (if-exprp x)
+                       (rationalp (m-if-flat2 (list 'if
+                                                    d (list 'if e b c)
+                                                    (list 'if f b c))))
+                       (rationalp (m-if-flat2 x))))))).
+
+The counterexample above shows that this is not the case.
+******** PROPERTY FAILED ********
+  To debug, add ":debug? t" at the end of your property.
+Time:  0.06 seconds (prove: 0.00, print: 0.00, other: 0.06)
+ACL2S !>
+
+Form:  ( TESTING PROPERTY CONTRACTS ...)
+**We falsified the conjecture. Here are counterexamples:**
+ [found in : "top"]
+ -- ((x '(if t (if t t t) t)))
+ -- ((x '(if x t t)))
+ -- ((x '(if ny x t)))
+
+Test? found a counterexample.
+
+**Contract Testing Error. The hypotheses of your property must imply:
+
+(implies (and (if-exprp x)
+              (consp x)
+              (eq (car x) 'if)
+              (consp (cdr x))
+              (consp (cddr x))
+              (consp (cdddr x))
+              (eq (cddddr x) nil)
+              (let ((a (cadr x))) (if-atomp a)))
+         (let ((b (caddr x)))
+           (and (if-exprp b)
+                (if-exprp x)
+                (rationalp (m-if-flat2 b))
+                (rationalp (m-if-flat2 x))))).
+
+The counterexample above shows that this is not the case.
+******** PROPERTY FAILED ********
+  To debug, add ":debug? t" at the end of your property.
+Time:  0.04 seconds (prove: 0.00, print: 0.00, other: 0.04)
+ACL2S !>
+
+Form:  ( TESTING PROPERTY CONTRACTS ...)Form:  ( TESTING PROPERTY )
+
+**Summary of Cgen/testing**
+We tested 242 examples across 1 subgoals, of which 26 (26 unique) satisfied
+the hypotheses, and found 3 counterexamples and 23 witnesses.
+
+**We falsified the conjecture. Here are counterexamples:**
+ [found in : "top"]
+ -- ((x '(if xxyxx (if (if t t t) t t) t)))
+ -- ((x '(if nil (if (if t t t) t t) (if t t t))))
+ -- ((x '(if xn (if (if t t t) t t) t)))
+
+Cases in which the conjecture is true include:
+ [found in : "top"]
+ -- ((x '(if t t t)))
+ -- ((x '(if x (if t t t) (if t t t))))
+ -- ((x '(if t (if t t t) t)))
+
+Test? found a counterexample.
+Time:  0.03 seconds (prove: 0.00, print: 0.00, other: 0.03)
+Time:  1.01 seconds (prove: 0.77, print: 0.00, other: 0.24)
+ACL2S !>
+
+Form:  ( TESTING PROPERTY CONTRACTS ...)
+
+ACL2 Error [Time-limit] in ( THM ...):  Out of time in the rewriter
+(rewrite).
+
+Form:  ( TESTING PROPERTY )
+
+**Summary of Cgen/testing**
+We tested 155 examples across 1 subgoals, of which 26 (26 unique) satisfied
+the hypotheses, and found 3 counterexamples and 23 witnesses.
+
+**We falsified the conjecture. Here are counterexamples:**
+ [found in : "top"]
+ -- ((x '(if t (if (if t t t) t t) (if t t t))))
+ -- ((x '(if xxyxx (if (if t t t) t t) t)))
+ -- ((x '(if xxyxx (if (if t t t) t t) (if t t t))))
+
+Cases in which the conjecture is true include:
+ [found in : "top"]
+ -- ((x '(if nil t t)))
+ -- ((x '(if t (if t t t) (if t t t))))
+ -- ((x '(if t (if t t t) t)))
+
+Test? found a counterexample.
+Time:  0.03 seconds (prove: 0.00, print: 0.00, other: 0.03)
+Time:  2.04 seconds (prove: 1.68, print: 0.00, other: 0.35)
+ACL2S !>(m-if-flat3 '(if t (if (if t t t) t t) (if t t t)))
+(0 9)
+ACL2S !>(m-if-flat3 '(if (if t t t) t t))
+(1 8)
+ACL2S !>
