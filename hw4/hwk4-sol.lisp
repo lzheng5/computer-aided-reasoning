@@ -4,16 +4,19 @@
 ; (modeling-start)
 
 (set-induction-depth-limit 1)
+(set-termination-method :measure)
 
 (modeling-admit-all)
 
 ;; Q1
-(definec m-bad-app (x y :tl acc :all) :nat
-   (match (list x y)
-     ((nil nil) 0)
-     ((& nil) (+ 1 (len x)))
-     ((nil (& . &)) (len y))
-     (& (+ 2 (len x) (len acc)))))
+;; Checked with Pete. It is alright to use [append] instead of [app].
+(definec m-bad-app (x y :tl acc :all)
+  :nat
+  (match (list x y)
+    ((nil nil) 0)
+    ((& nil) (+ 1 (len x)))
+    ((nil (& . &)) (len y))
+    (& (+ 2 (len x) (len acc)))))
 
 (property bad-app-1 (x y acc :tl)
   (implies
@@ -43,8 +46,8 @@
    (< (m-bad-app acc nil y)
       (m-bad-app x y acc))))
 
-(set-termination-method :measure)
-(definec bad-app (x y acc :tl) :tl
+(definec bad-app (x y acc :tl)
+  :tl
   (declare (xargs :measure (m-bad-app x y acc)))
   (match (list x y)
     ((nil nil) acc)
@@ -78,3 +81,41 @@
       (if (endp x)
           (rev y)
           (append (rev x) y))))
+
+;; Q2
+
+;; Page 128
+
+(definec m-ack (n :nat m :all)
+  :lex
+  (if (natp m) (list n m) n))
+
+(property m-ack-1 (n m :nat)
+    (implies
+     (and (not (zp n))
+          (zp m))
+     (l< (m-ack (1- n) m)
+         (m-ack n m))))
+
+(property m-ack-2 (n m :nat)
+    (implies
+     (and (not (zp n))
+          (not (zp m)))
+     (l< (m-ack n (1- m))
+         (m-ack n m))))
+
+(property m-ack-3 (n m :nat)
+    (implies
+     (and (not (zp n))
+          (not (zp m)))
+     (l< (m-ack (1- n) (m-ack n (1- m)))
+         (m-ack n m))))
+
+(definec ack (n m :nat)
+  :pos
+  :skip-tests t ; ack is slow, so skip testing
+  (declare (xargs :measure (m-ack n m)))
+  (match (list n m)
+    ((0 &) (1+ m))
+    ((& 0) (ack (1- n) 1))
+    (& (ack (1- n) (ack n (1- m))))))
