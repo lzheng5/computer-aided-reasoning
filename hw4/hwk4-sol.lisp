@@ -10,8 +10,7 @@
 
 ;; Q1
 ;; Q1a
-;; Page !!!
-
+;; Page 126
 
 ;; Q1b
 (definec m-bad-app (x y :tl acc :all)
@@ -92,7 +91,7 @@
 ;; Q2
 
 ;; Q2a
-;; Page 128
+;; Page 128 - 129
 
 ;; Q2b
 (definec m-ack (n :nat m :all)
@@ -137,7 +136,7 @@
 (defdata-subtype-strict norm-if-expr if-expr)
 
 ;; Q3a
-;; Page !!!
+;; Page 127
 
 ;; Q3b
 ;; Consulted Claude
@@ -232,7 +231,7 @@
     (('if x y z)
      (if (if-eval x a) (if-eval y a) (if-eval z a)))))
 
-;; how come this type of goal showed up and cannot be refuted automatically ???
+;; how come this type of subgoal showed up and cannot be refuted automatically ???
 (property bad-if-eval (x y :all a :if-assign)
   (implies (and (not (consp x))
                 (if-exprp (list* 'if x y))
@@ -267,43 +266,43 @@
 (definec check-validp (e :if-expr) :bool
   (validp (if-flat e) nil))
 
-(property validp-sound-var (x :norm-if-expr a :if-assign)
+(property validp-sound-if-atom (x :norm-if-expr a b :if-assign)
   (implies
    (and (if-atomp x)
         (lookup-atom x a))
-   (== (validp x a) (if-eval x a))))
+   (== (validp x a) (if-eval x (append a b)))))
 
-(definec agrees-with (b a :if-assign) :bool
-   (match a
-     (nil t)
-     (((v . val) . rst)
-      (and (== (lookup-var v b) val)
-           (agrees-with b rst)))))
+(definec all-nil (a :if-assign)
+  :bool
+  (match a
+    (nil t)
+    (((& . val) . rest) (and (not val) (all-nil rest)))))
 
-(property agrees-with-lookup (a b :if-assign x :if-atom)
+;; (property all-nil-acons (a :if-assign x :var)
+;;   (implies
+;;    (all-nil a)
+;;    (all-nil (acons x nil a))))
+
+(property all-nil-lookup-var (a :if-assign x :var)
   (implies
-   (and (agrees-with b a)
-        (assignedp x a))
-   (== (lookup-atom x a)
-       (lookup-atom x b))))
+   (all-nil a)
+   (not (lookup-var x a))))
 
-(property agrees-with-acons (a b :if-assign x :var v :bool)
+(property if-eval-acons-nil (e :if-expr x :var a :if-assign)
   (implies
-   (and (agrees-with b (acons x v a))
-        (== (lookup-atom x b) v))
-   (agrees-with b a)))
+   (all-nil a)
+   (== (if-eval e (acons x nil a)) (if-eval e a))))
 
-(property agrees-with-acons-2 (a b :if-assign x :var v :bool)
-  (implies
-   (and (agrees-with b a)
-        (== (lookup-atom x b) v))
-   (agrees-with b (acons x v a))))
+;; (property if-eval-all-nil (e :if-expr a :if-assign)
+;;   (implies
+;;    (all-nil a)
+;;    (== (if-eval e a) (if-eval e nil))))
 
+;; `a` is the assignment built by `validp` so far
 (property validp-sound (e :norm-if-expr a b :if-assign)
   (implies
-   (and (validp e a)
-        (agrees-with b a))
-   (if-eval e b))
+   (validp e a)
+   (if-eval e (append a b)))
   :hints (("goal" :induct (validp e a))))
 
 (property check-validp-is-sound (e :if-expr a :if-assign)
