@@ -266,37 +266,211 @@
 (definec check-validp (e :if-expr) :bool
   (validp (if-flat e) nil))
 
+;; lemmas about `lookup-var`
+(property lookup-var-append-fst (x :var a b :if-assign)
+  (implies
+   (assoc-equal x a)
+   (== (lookup-var x (append a b)) (lookup-var x a))))
+
+(property lookup-var-append-snd (x :var a b :if-assign)
+  (implies
+   (not (assoc-equal x a))
+   (== (lookup-var x (append a b)) (lookup-var x b))))
+
+;; `lookup_var` returns `t` then `v \in a`
+;; but not the other way around
+(property lookup-var-assoc-equal (x :var a :if-assign)
+  (implies
+   (lookup-var x a)
+   (assoc-equal x a)))
+
+;; lemma about `lookup-atom`
+(property lookup-atom-assigned (e :if-atom a :if-assign)
+  (implies
+   (lookup-atom e a)
+   (assignedp e a)))
+
+(property lookup-atom-append-fst (e :if-atom a b :if-assign)
+  (implies
+   (assignedp e a)
+   (== (lookup-atom e (append a b))
+       (lookup-atom e a))))
+
+(property lookup-atom-append-snd (e :if-atom a b :if-assign)
+  (implies
+   (not (assignedp e a))
+   (== (lookup-atom e (append a b))
+       (lookup-atom e b))))
+
+(property if-eval-append-acons-not-in-1 (e :if-expr x :var a b :if-assign)
+  (implies
+   (and (lookup-var x b)
+        (not (assoc-equal x a)))
+   (== (if-eval e (cons (cons x t) (append a b)))
+       (if-eval e (append a b)))))
+
+(property if-eval-append-acons-not-in-2 (e :if-expr x :var a b :if-assign)
+  (implies
+   (and (not (lookup-var x b))
+        (not (assoc-equal x a)))
+   (== (if-eval e (cons (cons x nil) (append a b)))
+       (if-eval e (append a b)))))
+
 (property validp-sound-if-atom (x :norm-if-expr a b :if-assign)
   (implies
    (and (if-atomp x)
-        (lookup-atom x a))
-   (== (validp x a) (if-eval x (append a b)))))
+        (validp x a))
+   (if-eval x (append a b))))
 
-(definec all-nil (a :if-assign)
-  :bool
-  (match a
-    (nil t)
-    (((& . val) . rest) (and (not val) (all-nil rest)))))
-
-;; (property all-nil-acons (a :if-assign x :var)
-;;   (implies
-;;    (all-nil a)
-;;    (all-nil (acons x nil a))))
-
-(property all-nil-lookup-var (a :if-assign x :var)
+(property validp-sound-1 (x :if-atom y z :norm-if-expr a b :if-assign)
   (implies
-   (all-nil a)
-   (not (lookup-var x a))))
+   (and (implies
+         (and (assignedp x a)
+              (lookup-atom x a)
+              (validp y a))
+         (if-eval y (append a b)))
+        (assignedp x a)
+        (lookup-atom x a)
+        (validp y a))
+   (if-eval `(if ,x ,y ,z) (append a b))))
 
-(property if-eval-acons-nil (e :if-expr x :var a :if-assign)
+(property validp-sound-1-1 (x :if-atom y z :norm-if-expr a b :if-assign)
   (implies
-   (all-nil a)
-   (== (if-eval e (acons x nil a)) (if-eval e a))))
+   (and (assignedp x a)
+        (lookup-atom x a)
+        (validp y a)
+        (if-eval y (append a b)))
+   (if-eval `(if ,x ,y ,z) (append a b))))
 
-;; (property if-eval-all-nil (e :if-expr a :if-assign)
-;;   (implies
-;;    (all-nil a)
-;;    (== (if-eval e a) (if-eval e nil))))
+(property validp-sound-1-1-1 (e :norm-if-expr a b :if-assign)
+  (implies
+   (and (consp e)
+        (equal (car e) 'if)
+        (consp (cdr e))
+        (consp (cddr e))
+        (consp (cdddr e))
+        (not (cddddr e))
+        (let ((x (cadr e))
+              (y (caddr e)))
+          (and (assignedp x a)
+               (lookup-atom x a)
+               (validp y a)
+               (if-eval y (append a b)))))
+   (if-eval e (append a b))))
+
+(property validp-sound-2 (x :if-atom y z :norm-if-expr a b :if-assign)
+  (implies
+   (and (implies
+         (and (assignedp x a)
+              (not (lookup-atom x a))
+              (validp z a))
+         (if-eval z (append a b)))
+        (assignedp x a)
+        (not (lookup-atom x a))
+        (validp z a))
+   (if-eval `(if ,x ,y ,z) (append a b))))
+
+(property validp-sound-2-2 (x :if-atom y z :norm-if-expr a b :if-assign)
+  (implies
+   (and (assignedp x a)
+        (not (lookup-atom x a))
+        (validp z a)
+        (if-eval z (append a b)))
+   (if-eval `(if ,x ,y ,z) (append a b))))
+
+(property validp-sound-2-2-2 (e :norm-if-expr a b :if-assign)
+  (implies
+   (and (consp e)
+        (equal (car e) 'if)
+        (consp (cdr e))
+        (consp (cddr e))
+        (consp (cdddr e))
+        (not (cddddr e))
+        (let ((x (cadr e))
+              (z (cadddr e)))
+          (and (assignedp x a)
+               (not (lookup-atom x a))
+               (validp z a)
+               (if-eval z (append a b)))))
+   (if-eval e (append a b))))
+
+(property validp-sound-3 (x :var y z :norm-if-expr a b :if-assign)
+  (implies
+   (and (implies
+         (and (not (assignedp x a))
+              (validp y (acons x t a)))
+         (if-eval y (append (acons x t a) b)))
+
+        (not (assignedp x a))
+        ;; (validp `(if ,x ,y ,z) a)
+        (and (validp y (acons x t a))
+             (validp z (acons x nil a)))
+
+        (lookup-atom x (append a b)))
+   (if-eval `(if ,x ,y ,z) (append a b))))
+
+(property validp-sound-3-3 (x :var y z :norm-if-expr a b :if-assign)
+  (implies
+   (and (not (assignedp x a))
+        (validp y (acons x t a))
+        (lookup-atom x (append a b))
+        (if-eval y (append (acons x t a) b)))
+   (if-eval `(if ,x ,y ,z) (append a b))))
+
+(property validp-sound-3-3-3 (e :norm-if-expr a b :if-assign)
+  (implies
+   (and (consp e)
+        (equal (car e) 'if)
+        (consp (cdr e))
+        (consp (cddr e))
+        (consp (cdddr e))
+        (not (cddddr e))
+        (let ((x (cadr e))
+              (y (caddr e)))
+          (and (not (assignedp x a))
+               (validp y (acons x t a))
+               (lookup-atom x (append a b))
+               (if-eval y (append (acons x t a) b)))))
+   (if-eval e (append a b))))
+
+(property validp-sound-4 (x :var y z :norm-if-expr a b :if-assign)
+  (implies
+   (and (implies
+         (and (not (assignedp x a))
+              (validp z (acons x nil a)))
+         (if-eval z (append (acons x nil a) b)))
+
+        (not (assignedp x a))
+        ;; (validp `(if ,x ,y ,z) a)
+        (and (validp y (acons x t a))
+             (validp z (acons x nil a)))
+
+        (not (lookup-atom x (append a b))))
+   (if-eval `(if ,x ,y ,z) (append a b))))
+
+(property validp-sound-4-4 (x :var y z :norm-if-expr a b :if-assign)
+  (implies
+   (and (not (assignedp x a))
+        (validp z (acons x nil a))
+        (not (lookup-atom x (append a b)))
+        (if-eval z (append (acons x nil a) b)))
+   (if-eval `(if ,x ,y ,z) (append a b))))
+
+(property validp-sound-4-4-4 (e :norm-if-expr a b :if-assign)
+  (implies
+   (and (consp e)
+        (equal (car e) 'if)
+        (consp (cdr e))
+        (consp (cddr e))
+        (consp (cdddr e))
+        (not (cddddr e))
+        (let ((x (cadr e))
+              (z (cadddr e)))
+          (and (not (assignedp x a))
+               (validp z (acons x nil a))
+               (not (lookup-atom x (append a b)))
+               (if-eval z (append (acons x nil a) b)))))
+   (if-eval e (append a b))))
 
 ;; `a` is the assignment built by `validp` so far
 (property validp-sound (e :norm-if-expr a b :if-assign)
@@ -304,6 +478,9 @@
    (validp e a)
    (if-eval e (append a b)))
   :hints (("goal" :induct (validp e a))))
+
+;; I gave up !!!
+;; See the alternative proofs in hw4.thy
 
 (property check-validp-is-sound (e :if-expr a :if-assign)
   (implies (check-validp e) (if-eval e a)))
