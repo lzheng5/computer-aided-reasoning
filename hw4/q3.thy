@@ -81,6 +81,27 @@ lemma lookup_atom_append:
   "lookup_atom e (a @ b) = (if assignedp e a then lookup_atom e a else lookup_atom e b)"
   by (cases e) (auto simp: lookup_var_append)
 
+lemma lookup_var_redundant:
+  assumes "v ∉ set (map fst a)"
+  assumes "lookup_var v (a @ b) = val"
+  shows "lookup_var w ((v, val) # a @ b) = lookup_var w (a @ b)"
+  using assms 
+  by (cases "w = v"; simp)
+
+lemma lookup_atom_redundant:
+  assumes "v ∉ set (map fst a)"
+  assumes "lookup_var v (a @ b) = val"
+  shows "lookup_atom e ((v, val) # a @ b) = lookup_atom e (a @ b)"
+  using assms 
+  by (cases e; simp)
+
+lemma if_eval_redundant_cons:
+  assumes "v ∉ set (map fst a)"
+  assumes "lookup_var v (a @ b) = val"
+  shows "if_eval e ((v, val) # a @ b) = if_eval e (a @ b)"
+  using assms
+  by (induction e; simp add: lookup_atom_redundant)
+
 lemma lookup_var_cons_swap:
   assumes "v ∉ set (map fst a)"
   shows "lookup_var w ((v, val) # a @ b) = lookup_var w (a @ (v, val) # b)"
@@ -183,14 +204,14 @@ next
       then have "lookup_atom x (a @ b)" using x_var by simp
       moreover have "if_eval y ((v, True) # a @ b)" using ih_y by simp
       moreover have "if_eval y (a @ b) = if_eval y ((v, True) # a @ b)"
-        using True v_notin by (metis append_Cons lookup_var_append)
+        using True v_notin by (simp add: if_eval_redundant_cons)
       ultimately show ?thesis by simp
     next
       case False
       then have "¬ lookup_atom x (a @ b)" using x_var by simp
       moreover have "if_eval z ((v, False) # a @ b)" using ih_z by simp
       moreover have "if_eval z (a @ b) = if_eval z ((v, False) # a @ b)"
-        using False v_notin by (metis append_Cons lookup_var_append)
+        using False v_notin by (simp add: if_eval_redundant_cons)
       ultimately show ?thesis by simp
     qed
   qed
