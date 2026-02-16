@@ -9,11 +9,11 @@ begin
 
 section "Insertion Sort"
 
-fun ins :: "'a \<Rightarrow> 'a list \<Rightarrow> 'a list" where
+fun ins :: "'a ⇒ 'a list ⇒ 'a list" where
    "ins x [] = [x]"
- | "ins x (y # ys) = (if x \<le> y then x # (y # ys) else y # (ins x ys))"
+ | "ins x (y # ys) = (if x ≤ y then x # (y # ys) else y # (ins x ys))"
 
-fun isort :: "'a list \<Rightarrow> 'a list" where 
+fun isort :: "'a list ⇒ 'a list" where 
    "isort [] = []" 
  | "isort (x # xs) = ins x (isort xs)"
 
@@ -42,14 +42,14 @@ proof -
 qed
 
 lemma ins_sorted : 
-  "sorted xs \<Longrightarrow> sorted (ins a xs)"
+  "sorted xs ⟹ sorted (ins a xs)"
 proof (induction xs arbitrary: a)
   case Nil
   then show ?case by simp
 next
   case (Cons b xs)
   then show ?case 
-  proof (cases "a \<le> b")
+  proof (cases "a ≤ b")
     case True
     then show ?thesis using Cons.prems by fastforce
   next
@@ -68,13 +68,13 @@ theorem isort_sorted :
 
 section "Quick Sort"
 
-fun qsort :: "'a list \<Rightarrow> 'a list" where 
+fun qsort :: "'a list ⇒ 'a list" where 
    "qsort [] = []"
- | "qsort (x # xs) = qsort [y \<leftarrow> xs.\<not> x \<le> y] @ [x] @ qsort [y \<leftarrow> xs . x \<le> y]"
+ | "qsort (x # xs) = qsort [y ← xs.¬ x ≤ y] @ [x] @ qsort [y ← xs . x ≤ y]"
 
 lemma [code] : 
    "qsort [] = []" 
-   "qsort (x # xs) = qsort [y \<leftarrow> xs. y < x] @ [x] @ qsort [y \<leftarrow> xs . x \<le> y]"
+   "qsort (x # xs) = qsort [y ← xs. y < x] @ [x] @ qsort [y ← xs . x ≤ y]"
   by (simp_all add: not_le)
 
 theorem qsort_permute [simp] :
@@ -84,8 +84,8 @@ proof (induction xs rule: qsort.induct)
   then show ?case by simp
 next
   case (2 x xs)
-  have "qsort (x # xs) =  qsort [y \<leftarrow> xs. \<not> x \<le> y] @ [x] @ qsort [y \<leftarrow> xs . x \<le> y]" by simp
-  moreover have "mset (filter (\<lambda>y. \<not> x \<le> y) xs) + mset (filter ((\<le>) x) xs) = mset xs" by auto
+  have "qsort (x # xs) =  qsort [y ← xs. ¬ x ≤ y] @ [x] @ qsort [y ← xs . x ≤ y]" by simp
+  moreover have "mset (filter (λy. ¬ x ≤ y) xs) + mset (filter ((≤) x) xs) = mset xs" by auto
   ultimately show ?case using "2.IH" by simp
 qed
 
@@ -103,12 +103,12 @@ proof (induction xs rule: qsort.induct)
   then show ?case by simp
 next
   case (2 x xs)
-  have "qsort (x # xs) =  qsort [y \<leftarrow> xs. \<not> x \<le> y] @ [x] @ qsort [y \<leftarrow> xs . x \<le> y]" by simp
+  have "qsort (x # xs) =  qsort [y ← xs. ¬ x ≤ y] @ [x] @ qsort [y ← xs . x ≤ y]" by simp
   moreover have "sorted [x]" by simp
   ultimately show ?case using "2.IH" sorted_append by auto
 qed
 
-section "mset equal sorted equal"
+section "Equivalence"
 
 theorem mset_sorted : 
   assumes Heq : "mset xs = mset ys"
@@ -136,25 +136,32 @@ next
     then show ?thesis by simp
   next
     case (Cons b ys')
-    have "a \<in> set (b # ys')" 
-      using Cons.prems(1) \<open>ys = b # ys'\<close> 
+    have "a ∈ set (b # ys')" 
+      using Cons.prems(1) ‹ys = b # ys'› 
       by (metis list.set_intros(1) set_mset_mset)
-    hence "b \<le> a" using Cons.prems(3) \<open>ys = b # ys'\<close> 
+    hence "b ≤ a" using Cons.prems(3) ‹ys = b # ys'› 
       by auto
-    moreover have "b \<in> set (a # xs')" 
-      using Cons.prems(1) \<open>ys = b # ys'\<close>
+    moreover have "b ∈ set (a # xs')" 
+      using Cons.prems(1) ‹ys = b # ys'›
       by (metis list.set_intros(1) set_mset_mset)
-    hence "a \<le> b" using Cons.prems(2) 
+    hence "a ≤ b" using Cons.prems(2) 
       by auto
     ultimately have "a = b" by (simp add: antisym)
     moreover have "mset xs' = mset ys'" 
-      using Cons.prems(1) \<open>ys = b # ys'\<close> \<open>a = b\<close> by simp
+      using Cons.prems(1) ‹ys = b # ys'› ‹a = b› by simp
     moreover have "sorted xs'" using Cons.prems(2) by simp
-    moreover have "sorted ys'" using Cons.prems(3) \<open>ys = b # ys'\<close> by simp
+    moreover have "sorted ys'" using Cons.prems(3) ‹ys = b # ys'› by simp
     ultimately have "xs' = ys'" using Cons.IH by blast
-    then show ?thesis using \<open>a = b\<close> \<open>ys = b # ys'\<close> by simp
+    then show ?thesis using ‹a = b› ‹ys = b # ys'› by simp
   qed
 qed
+
+corollary isort_qsort : 
+  "isort xs = qsort xs" 
+proof -
+  have "mset (isort xs) = mset (qsort xs)" by auto
+  thus ?thesis using mset_sorted isort_sorted qsort_sorted by blast
+qed 
 
 end
 
