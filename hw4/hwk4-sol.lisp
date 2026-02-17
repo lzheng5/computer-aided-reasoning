@@ -496,4 +496,4 @@
 
 ;; Q4
 
-;; See q4.thy
+;; See [isort_qsort] in q4.thy
