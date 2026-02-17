@@ -472,6 +472,11 @@
                (if-eval z (append (acons x nil a) b)))))
    (if-eval e (append a b))))
 
+;; I gave up on induction depth 1
+;; See the alternative proof [validp-sound] in q3.thy.
+;(set-induction-depth-limit nil)
+;(set-gag-mode t)
+
 ;; `a` is the assignment built by `validp` so far
 (property validp-sound (e :norm-if-expr a b :if-assign)
   (implies
@@ -479,8 +484,16 @@
    (if-eval e (append a b)))
   :hints (("goal" :induct (validp e a))))
 
-;; I gave up !!!
-;; See the alternative proofs in hw4.thy
-
 (property check-validp-is-sound (e :if-expr a :if-assign)
   (implies (check-validp e) (if-eval e a)))
+
+;; Q3f
+
+;; See [validp-complete] in q3.thy
+
+(property check-validp-is-complete (e :if-expr a :if-assign)
+  (implies (if-eval e a) (check-validp e)))
+
+;; Q4
+
+;; See q4.thy
