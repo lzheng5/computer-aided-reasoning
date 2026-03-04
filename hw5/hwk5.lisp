@@ -495,6 +495,74 @@
 
 |#
 
+(defun p-simplify-implies (f)
+  (match f
+    ((list 'implies p q)
+     (let ((sp (p-simplify-implies p))
+           (sq (p-simplify-implies q)))
+       `(or (not ,sp) ,sq)))
+    ((list* op args)
+     `(,op ,@(mapcar #'p-simplify-implies args)))
+    (_ f)))
+
+(defun p-simplify-const (f)
+  (match f
+    ((list 'not a) 
+     (let ((a (p-simplify-const a)))
+       (match a
+         ((type boolean) (not a))
+         (t `(not ,a)))))
+  
+    ((list 'if a b c)
+     (let ((a (p-simplify-const a))
+           (b (p-simplify-const b))
+           (c (p-simplify-const c)))
+        (cond ((== a t) b)
+              ((== a nil) c)
+              ((== b c) b)
+              ((and (== b t) (== c nil)) a)
+              ((and (== b nil) (== c t)) `(not ,a))
+              ((== b t) `(or ,a ,c))
+              ((== c nil) `(and ,a ,b))
+              ((== b nil) `(and (not ,a) ,c))
+              ((== c t) `(or (not ,a) ,b))
+              (t `(if ,a ,b ,c)))))
+
+    ((list* op as)
+     (let ((as (mapcar #'p-simplify-const as)))
+     (match op 
+      ((or (== op 'iff) (== op 'xor))
+        (let* ((consts (remove-if-not #'booleanp as))
+               (non-consts (remove-if #'booleanp as))
+               (id (pfun-key->val op :identity))
+               (result (if (== op 'iff)
+                           (evenp (count nil consts))
+                           (oddp (count t consts))))
+               (new-args (if (== result id)
+                             non-consts
+                             (cons result non-consts))))
+          (cond ((null new-args) id)
+                ((== (len new-args) 1) (car new-args))
+                (t `(,op ,@new-args)))))
+
+      ((or (== op 'and) (== op 'or))
+        (let* ((pop (key-alist->val op *p-ops*))
+                (id (key-list->val :identity pop))
+                (sink (key-list->val :sink pop)))
+            (cond ((in sink as) sink)
+                  (t (reduce 
+                        #'(lambda (a as)
+                            (if (booleanp a)
+                                (if (== a id) as `(,a ,@as))
+                                `(,a ,@as)))
+                        as
+                        :from-end t
+                        :initial-value nil)))))
+
+      (t `(,op ,@as)))))
+
+    (_ f)))
+
 (defun p-simplify-flatten (f)
   (match f
     ((list* op as)
@@ -542,24 +610,233 @@
     ((list* op as) `(,op ,@(mapcar #'p-simplify-not as)))
     (_ f)))
 
+(defun negate (f)
+  "Get the negation of f"
+  (match f
+    ((list 'not a) a)
+    (_ `(not ,f))))
+
+(defun has-opposite (f args)
+  "Check if (not f) or negation of f exists in args"
+  (or (in (negate f) args)
+      (match f
+        ((list 'not a) (in a args))
+        (_ nil))))
+
+(defun p-simplify-dup (f)
+  "Simplify duplicated and opposite subformulas"
+  (match f
+    ((list* op as)
+     (let ((as (mapcar #'p-simplify-dup as)))
+       (cond
+         ;; and/or: idempotent, check for p and (not p)
+         ((in op '(and or))
+          (let* ((pop (key-alist->val op *p-ops*))
+                 (sink (key-list->val :sink pop)))
+            ;; Check for opposite: p and (not p) => sink
+            (if (some #'(lambda (a) (has-opposite a as)) as)
+                sink
+              ;; Remove duplicates (idempotent)
+              `(,op ,@(remove-dups as)))))
+         
+         ;; iff: p iff p = t (identity), p iff (not p) = nil
+         ((== op 'iff)
+          (let* ((pairs (make-hash-table :test #'equal))
+                 (neg-count 0)
+                 (result nil))
+            ;; Count occurrences
+            (dolist (a as)
+              (incf (gethash a pairs 0)))
+            ;; Check for opposites and count odd occurrences
+            (maphash #'(lambda (k v)
+                         (let ((neg (negate k)))
+                           (when (and (gethash neg pairs)
+                                      (not (gethash (list :seen k neg) pairs)))
+                             (setf (gethash (list :seen k neg) pairs) t)
+                             (setf (gethash (list :seen neg k) pairs) t)
+                             (let ((n (min (gethash k pairs) (gethash neg pairs))))
+                               (incf neg-count n)
+                               (decf (gethash k pairs) n)
+                               (decf (gethash neg pairs) n)))))
+                     pairs)
+            ;; Build result: keep odd occurrences
+            (maphash #'(lambda (k v)
+                         (unless (and (listp k) (eq (car k) :seen))
+                           (when (oddp v)
+                             (push k result))))
+                     pairs)
+            ;; Add nil for each opposite pair (nil is not identity for iff)
+            (dotimes (i neg-count)
+              (push nil result))
+            (cond ((null result) t)
+                  ((null (cdr result)) (car result))
+                  (t `(iff ,@result)))))
+         
+         ;; xor: p xor p = nil (identity), p xor (not p) = t
+         ((== op 'xor)
+          (let* ((pairs (make-hash-table :test #'equal))
+                 (neg-count 0)
+                 (result nil))
+            ;; Count occurrences
+            (dolist (a as)
+              (incf (gethash a pairs 0)))
+            ;; Check for opposites
+            (maphash #'(lambda (k v)
+                         (let ((neg (negate k)))
+                           (when (and (gethash neg pairs)
+                                      (not (gethash (list :seen k neg) pairs)))
+                             (setf (gethash (list :seen k neg) pairs) t)
+                             (setf (gethash (list :seen neg k) pairs) t)
+                             (let ((n (min (gethash k pairs) (gethash neg pairs))))
+                               (incf neg-count n)
+                               (decf (gethash k pairs) n)
+                               (decf (gethash neg pairs) n)))))
+                     pairs)
+            ;; Build result: keep odd occurrences
+            (maphash #'(lambda (k v)
+                         (unless (and (listp k) (eq (car k) :seen))
+                           (when (oddp v)
+                             (push k result))))
+                     pairs)
+            ;; Add t for each opposite pair
+            (dotimes (i neg-count)
+              (push t result))
+            (cond ((null result) nil)
+                  ((null (cdr result)) (car result))
+                  (t `(xor ,@result)))))
+         
+         ;; if: check specific cases
+         ((== op 'if)
+          (match as
+            ((list a b c)
+             (cond ((equal b c) b)
+                   ((equal a b) `(or ,a ,c))      ; (if a a c) = (or a c)
+                   ((equal a c) `(and ,a ,b))     ; (if a b a) = (and a b)
+                   ((equal a (negate b)) `(and ,b ,c))  ; (if a (not a) c) = (and (not a) c)
+                   ((equal a (negate c)) `(or ,b ,c))   ; (if a b (not a)) = (or b (not a))
+                   (t `(if ,@as))))
+            (_ `(if ,@as))))
+         
+         (t `(,op ,@as)))))
+
+    (_ f)))
+
+(defun extend (keys vals env)
+  (if (endp keys)
+      env
+    (extend (cdr keys) (cdr vals) 
+            (acons (car keys) (car vals) env))))
+
+(defun partition (pred list)
+  "Partition list into (values trues falses) based on pred"
+  (loop for x in list
+        if (funcall pred x) collect x into trues
+        else collect x into falses
+        finally (return (values trues falses))))
+
+(defun p-simplify-shannon (f &optional env) 
+  (match f
+    ((type boolean) f)
+    ((type symbol) (let ((v (key-alist->val f env)))
+                     (if v v f)))
+    ((list* op as)
+       (if (in op '(and or))
+           (let* ((pop (key-alist->val op *p-ops*))
+                  (id (key-list->val :identity pop))
+                  ((&values vars nvars) (partition #'symbolp as))
+                  ((&values nvars as) (partition #'(lambda (a)
+                                                      (match a
+                                                        ((list 'not b) (symbolp b))
+                                                        (_ nil))) nvars))
+                  (nenv (extend vars (mapcar #'(lambda (v) t) vars) 
+                          (extend nvars (mapcar #'(lambda (v) nil) nvars) 
+                           env)))))
+              
+              `(,op ,@vars ,@nvars ,@(mapcar #'(lambda (a) (p-simplify-shannon a nenv)) as)))
+           `(,op ,@as))))
+
+(defun p-simplify-fixpoint (f)
+  (let ((new-f (p-simplify-shannon ;; happen after removing duplicates and opposites 
+                (p-simplify-dup
+                 (p-simplify-not
+                  (p-simplify-const 
+                   (p-simplify-flatten f))))))) 
+    (if (equal new-f f)
+        f                                
+        (p-simplify-fixpoint new-f))))
+
 (defun p-simplify (f)
-  (p-simplify-not
-   (p-simplify-flatten f)))
+  (p-simplify-fixpoint 
+    (p-simplify-implies f)))
 
-(let ((f '(not (not p))))
+(defun test-simplify (f) 
   (assert-acl2s-equal f (p-simplify f)))
 
-(let ((f '(not (xor p))))
-  (assert-acl2s-equal f (p-simplify f)))
+;; Used Claude to generate tests
+;; A. Constant simplification
+(test-simplify '(and p t q))                    ; remove identity
+(test-simplify '(and p nil q))                  ; sink
+(test-simplify '(or p nil q))                   ; remove identity
+(test-simplify '(or p t q))                     ; sink
+(test-simplify '(and p t (foo t nil) q))        ; non-variable atoms with constants
+(test-simplify '(iff t nil p q))                ; iff with constants
+(test-simplify '(xor t t p))                    ; xor with constants
 
-(let ((f '(not (xor p q))))
-  (assert-acl2s-equal f (p-simplify f)))
+;; B. Flatten expressions
+(test-simplify '(and p q (and r s) (or u v)))   ; nested and
+(test-simplify '(or a (or b c) d))              ; nested or
+(test-simplify '(iff p (iff q r)))              ; nested iff
+(test-simplify '(xor a (xor b c)))              ; nested xor
+(test-simplify '(and))                          ; 0 args
+(test-simplify '(or))                           ; 0 args
+(test-simplify '(and p))                        ; 1 arg
+(test-simplify '(or q))                         ; 1 arg
 
-(let ((f '(not (iff p q))))
-  (assert-acl2s-equal f (p-simplify f)))
+;; C. Sink handling
+(test-simplify '(and a b nil c))                ; nil is sink for and
+(test-simplify '(or a b t c))                   ; t is sink for or
 
-(let ((f '(not (iff (and) (or) q))))
-  (assert-acl2s-equal f (p-simplify f)))
+;; D. (not (not ...)), (not (iff ...)), (not (xor ...))
+(test-simplify '(not (not p)))
+(test-simplify '(not (xor p)))
+(test-simplify '(not (xor p q)))
+(test-simplify '(not (iff p q)))
+(test-simplify '(not (iff (and) (or) q)))
+
+;; E. Shannon expansion example from spec
+(test-simplify '(and (or p q) (or r q p) p))    ; should simplify to p
+
+;; F. Duplicate and opposite subformulas
+(test-simplify '(and p p q))                    ; duplicate in and
+(test-simplify '(or p p q))                     ; duplicate in or
+(test-simplify '(and p (not p) q))              ; opposite in and -> nil
+(test-simplify '(or p (not p) q))               ; opposite in or -> t
+(test-simplify '(or x y (foo a b) z (not (foo a b)) w))  ; opposite with non-var atom
+(test-simplify '(iff p p q))                    ; duplicate in iff
+(test-simplify '(xor p p q))                    ; duplicate in xor
+(test-simplify '(iff p (not p)))                ; opposite in iff -> nil
+(test-simplify '(xor p (not p)))                ; opposite in xor -> t
+
+;; implies handling
+(test-simplify '(implies p q))
+(test-simplify '(implies (implies a b) c))
+
+;; if handling
+(test-simplify '(if t a b))                     ; constant condition
+(test-simplify '(if nil a b))
+(test-simplify '(if p t nil))                   ; special cases
+(test-simplify '(if p nil t))
+(test-simplify '(if p a a))                     ; same branches
+
+;; Deeply nested formulas
+(test-simplify '(and (or (and p q) (not (not r))) (iff s (xor t u))))
+(test-simplify '(implies (and a (or b c)) (iff (not d) e)))
+(test-simplify '(if (and p q) (or r s) (iff t (not u))))
+
+;; Non-variable atoms throughout
+(test-simplify '(and (foo x) (bar y) (not (foo x))))
+(test-simplify '(or (f a b) (g c) (not (g c))))
+(test-simplify '(iff (foo 1) (foo 1) (bar 2)))
 
 #|
 
@@ -582,7 +859,133 @@
 
 |#
 
-(defun tseitin (f) ...)
+(defun tseitin-op (v op args)
+  "Generate CNF clauses: v ↔ (op args...)"
+  (case op
+    (not
+     (let ((a (car args)))
+       `((or ,v ,a)
+         (or (not ,v) (not ,a)))))
+    
+    (and
+     ;; v ↔ (a1 ∧ ... ∧ an)
+     ;; (¬v ∨ a1) ∧ ... ∧ (¬v ∨ an) ∧ (v ∨ ¬a1 ∨ ... ∨ ¬an)
+     (append
+      (mapcar #'(lambda (a) `(or (not ,v) ,a)) args)
+      `((or ,v ,@(mapcar #'(lambda (a) `(not ,a)) args)))))
+    
+    (or
+     ;; v ↔ (a1 ∨ ... ∨ an)
+     ;; (¬v ∨ a1 ∨ ... ∨ an) ∧ (v ∨ ¬a1) ∧ ... ∧ (v ∨ ¬an)
+     (append
+      `((or (not ,v) ,@args))
+      (mapcar #'(lambda (a) `(or ,v (not ,a))) args)))
+    
+    (iff
+     ;; v ↔ (a ↔ b): both same polarity
+     ;; (¬v ∨ ¬a ∨ b) ∧ (¬v ∨ a ∨ ¬b) ∧ (v ∨ ¬a ∨ ¬b) ∧ (v ∨ a ∨ b)
+     (let ((a (first args))
+           (b (second args)))
+       `((or (not ,v) (not ,a) ,b)
+         (or (not ,v) ,a (not ,b))
+         (or ,v (not ,a) (not ,b))
+         (or ,v ,a ,b))))
+    
+    (xor
+     ;; v ↔ (a ⊕ b): different polarity
+     ;; (¬v ∨ ¬a ∨ ¬b) ∧ (¬v ∨ a ∨ b) ∧ (v ∨ ¬a ∨ b) ∧ (v ∨ a ∨ ¬b)
+     (let ((a (first args))
+           (b (second args)))
+       `((or (not ,v) (not ,a) (not ,b))
+         (or (not ,v) ,a ,b)
+         (or ,v (not ,a) ,b)
+         (or ,v ,a (not ,b)))))
+    
+    (if
+     ;; v ↔ (if a b c) ≡ v ↔ ((a ∧ b) ∨ (¬a ∧ c))
+     ;; (¬v ∨ ¬a ∨ b) ∧ (¬v ∨ a ∨ c) ∧ (v ∨ ¬a ∨ ¬b) ∧ (v ∨ a ∨ ¬c)
+     (let ((a (first args))
+           (b (second args))
+           (c (third args)))
+       `((or (not ,v) (not ,a) ,b)
+         (or (not ,v) ,a ,c)
+         (or ,v (not ,a) (not ,b))
+         (or ,v ,a (not ,c)))))
+    
+    (otherwise
+     (error "Unknown operator in Tseitin: ~A" op))))
+
+(defun tseitin-transform (f)
+  "Transform formula f to CNF using Tseitin transformation.
+   Returns CNF as (and clause1 clause2 ...)"
+  (let ((clauses nil))
+    
+    (labels ((transform-subf (subf)
+               "Transform subformula, return its representative variable"
+               (match subf
+                 ((type boolean) subf)
+                 ((type symbol) subf)
+                 ((list* op args)
+                  (if (p-funp op)
+                      ;; Handle n-ary iff/xor by chaining into binary
+                      (if (and (in op '(iff xor)) (> (length args) 2))
+                          ;; Chain: (iff a b c d) -> (iff (iff (iff a b) c) d)
+                          (let ((chained (reduce #'(lambda (acc x) 
+                                                     `(,op ,acc ,x))
+                                                 (cddr args)
+                                                 :initial-value `(,op ,(first args) ,(second args)))))
+                            (transform-subf chained))
+                        ;; Normal case: process arguments first (post-order)
+                        (let* ((arg-vars (mapcar #'transform-subf args))
+                               (v (gentemp "T"))
+                               (new-clauses (tseitin-op v op arg-vars)))
+                          (setf clauses (append new-clauses clauses))
+                          v))
+                    ;; Non-propositional atom - treat as variable
+                    subf)))))
+      
+      ;; Transform and add unit clause for top-level variable
+      (let ((top-var (transform-subf f)))
+        (push `(,top-var) clauses)
+        `(and ,@(reverse clauses))))))
+
+(defun tseitin (f)
+  (let* ((simplified (p-simplify f))           
+         (skeleton (p-skeleton simplified))     
+         (cnf (tseitin-transform skeleton))) 
+    cnf))
+
+(defun test-tseitin (f)
+  (let ((cnf (tseitin f)))
+    (assert-acl2s-equal f cnf)))
+
+;; Tests generated with Claude 
+;; Basic tests
+(test-tseitin 'p)
+(test-tseitin 't)
+(test-tseitin 'nil)
+(test-tseitin '(not p))
+(test-tseitin '(and p q))
+(test-tseitin '(or p q))
+(test-tseitin '(iff p q))
+(test-tseitin '(xor p q))
+(test-tseitin '(if p q r))
+
+;; More complex formulas
+(test-tseitin '(and p (or q r)))
+(test-tseitin '(implies p (and q r)))
+(test-tseitin '(iff (and p q) (or r s)))
+(test-tseitin '(not (or (and p q) (and r s))))
+(test-tseitin '(if (and p q) (or r s) (not t)))
+
+;; Nested formulas
+(test-tseitin '(and (or p (not q)) (iff r (xor s t))))
+(test-tseitin '(or (and a b) (and c (or d e))))
+(test-tseitin '(implies (or p q) (and r (not s))))
+
+;; With non-variable atoms
+(test-tseitin '(or (foo a b) (bar c)))
+(test-tseitin '(and (f x) (g y) (not (h z))))
 
 #|
 
