@@ -1,6 +1,6 @@
 #|
 
- Copyright © 2026 by Pete Manolios 
+ Copyright © 2026 by Pete Manolios
  CS 4820 Fall 2026
 
  Homework 5.
@@ -14,12 +14,12 @@
  The group members are:
 
  ... (put the names of the group members here)
- 
+
  To make sure that we are all on the same page, build the latest
  version of ACL2s, as per HWK1. You are going to be using SBCL, which
  you already have, due to the build process in
 
- Next, install quicklisp. See https://www.quicklisp.org/beta/. 
+ Next, install quicklisp. See https://www.quicklisp.org/beta/.
 
  To make sure everything is OK with quicklisp and to initialize it,
  start sbcl and issue the following commands
@@ -29,18 +29,18 @@
  (ql:quickload :cl-ppcre)
  (ql:quickload :let-plus)
  (setf ppcre:*allow-named-registers* t)
- (exit) 
+ (exit)
 
  Next, clone the ACL2s interface repository:
  (https) https://gitlab.com/acl2s/external-tool-support/interface.git
  (ssh)   git@gitlab.com:acl2s/external-tool-support/interface.git
 
  This repository includes scripts for interfacing with ACL2s from lisp.
- Put this directory in the ...books/acl2s/ of your ACL2 repository, or 
+ Put this directory in the ...books/acl2s/ of your ACL2 repository, or
  use a symbolic link.
 
  Now, certify the books, by going to ...books/acl2s/interface and
- typing 
+ typing
 
  "cert.pl -j 4 top"
 
@@ -58,11 +58,11 @@
 
  Other references that you might find useful and are available online
  include
- 
+
  - Common Lisp: A Gentle Introduction to Symbolic Computation by David
    Touretzky
  - ANSI Common Lisp by Paul Graham
- 
+
 |#
 
 (in-package "ACL2S")
@@ -78,10 +78,10 @@
 ;; This gets us to raw lisp.
 :q
 
-#| 
+#|
 
  The interface books provide us with the ability to call the theorem
- prover within lisp, which will be useful in checking your code. 
+ prover within lisp, which will be useful in checking your code.
 
  Here are some examples you can try. acl2s-compute is the form you use
  when you are using ACL2s to compute something, e.g., running a
@@ -119,7 +119,7 @@
 (setf ppcre:*allow-named-registers* t)
 
 #|
- 
+
  We now define our own package.
 
 |#
@@ -132,25 +132,25 @@
 (import 'acl2s-interface-internal::(acl2s-compute acl2s-query))
 
 #|
- 
+
  We have a list of the propositional operators and information about
- them. 
+ them.
 
  :arity can be a positive integer or - (meaning arbitrary arity) If
  :arity is -, there must be an identity and the function must be
  associative and commutative.
 
  If :identity is non-nil, then the operator has the indicated
- identity. 
- 
+ identity.
+
  An operator is idempotent iff :idem is t.
 
  If :sink is not -, then it must be the case that (op ... sink ...) =
  sink, e.g., (and ... nil ...) = nil.
 
- FYI: it is common for global variables to be enclosed in *'s. 
+ FYI: it is common for global variables to be enclosed in *'s.
 
-|# 
+|#
 
 (defparameter *p-ops*
   '((and     :arity - :identity t   :idem t   :sink nil)
@@ -178,7 +178,7 @@
  define functions that are similar to the ACL2s functions we're
  familiar with.
 
-|# 
+|#
 
 (defun in (a x)
   (member a x :test #'equal))
@@ -222,9 +222,9 @@
               (every #'p-formulap args)))))
 
 #|
- 
- Here is the definition of a propositional formula. 
- 
+
+ Here is the definition of a propositional formula.
+
 |#
 
 (defun p-formulap (f)
@@ -238,12 +238,12 @@
     (_ nil)))
 
 #|
- 
+
  Notice that in addition to propositional variables, we allow atoms
- such as (foo x). 
+ such as (foo x).
 
  Here are some assertions (see the common lisp manual).
- 
+
 |#
 
 (assert (p-formulap '(and)))
@@ -367,8 +367,8 @@
 (defun acl2s-check-equal (f g)
   (let* ((iff `(iff ,f ,g))
          (siff (p-skeleton iff))
-	 (pvars (pvars siff))
-	 (aiff (to-acl2s siff))
+     (pvars (pvars siff))
+     (aiff (to-acl2s siff))
          (af (second aiff))
          (ag (third aiff))
          (bhyps (boolean-hyps pvars)))
@@ -388,6 +388,9 @@
 
 (assert-acl2s-equal 'p 'p)
 
+(defun assert-equal (f g)
+  (assert (== f g) (f g) "Formulas were not equal!~%F: ~A~%G: ~A" f g))
+
 #|
 
 ; This will lead to an error. Try it.
@@ -406,12 +409,12 @@
 
 
 #|
- 
+
  Question 1. (25 pts)
 
  Define function, p-simplify that given a propositional formula
  returns an equivalent propositional formula with the following
- properties. 
+ properties.
 
  A. The skeleton of the returned formula is either a constant or does
  not include any constants. For example:
@@ -426,7 +429,7 @@
 
  A formula of the form (op ...) where op is a Boolean operator of
  arbitrary arity (ie, and, or, iff) applied to 0 or 1 arguments is not
- flat. For example, replace (and) with t. 
+ flat. For example, replace (and) with t.
 
  A formula of the form (op ... (op ...)) where op is a Boolean
  operator of arbitrary arity is not flat. For example, replace (and p
@@ -439,7 +442,7 @@
 
  D. Simplify your formulas so that no subexpressions of the following
  form remain
- 
+
  (not (not f))
  (not (iff ...))
  (not (xor ...))
@@ -459,14 +462,14 @@
  where p, q are equal literals or  p = (not q) or q = (not p).
 
  For example
- 
- (or x y (foo a b) z (not (foo a b)) w) should be simplified to 
 
- t 
+ (or x y (foo a b) z (not (foo a b)) w) should be simplified to
+
+ t
 
  Make sure that your algorithm is as efficient as you can make
  it. The idea is to use this simplification as a preprocessing step,
- so it needs to be fast. 
+ so it needs to be fast.
 
  You are not required to perform any other simplifications beyond
  those specified above. If you do, your simplifier must be guaranteed
@@ -489,11 +492,74 @@
  propositional formulas that include non-variable atoms, all of the
  operators, deeply nested formulas, etc.
 
- 
+
 |#
 
-(defun p-simplify (f) ...)
+(defun p-simplify-flatten (f)
+  (match f
+    ((list* op as)
+     (if (p-funp op)
+         (let* ((pop (key-alist->val op *p-ops*))
+                (arity (key-list->val :arity pop)))
+           (cond ((== arity '-)
+                  (let ((sz (len as)))
+                    (cond ((== sz 0) (key-list->val :identity pop))
+                          ((== sz 1) (car as))
+                          (t `(,op
+                               ,@(reduce
+                                  #'(lambda (a as)
+                                      (match a
+                                       ((list* op0 bs)
+                                        (if (== op op0)
+                                            `(,@bs ,@as)
+                                            `(,a ,@as)))
+                                        (_ `(,a ,@as))))
+                                  (mapcar #'p-simplify-flatten as)
+                                  :from-end t
+                                  :initial-value nil))))))
+                 (t `(,op ,@(mapcar #'p-simplify-flatten as)))))
+         `(,op ,@(mapcar #'p-simplify-flatten as))))
+    (_ f)))
 
+(let ((f '(not (foo (and)))))
+  (assert-equal (p-simplify-flatten f) '(not (foo t))))
+
+(let ((f '(not (foo (and p)))))
+  (assert-equal (p-simplify-flatten f) '(not (foo p))))
+
+(let ((f '(and p q (and r s) (or u v))))
+  (assert-equal (p-simplify-flatten f) '(and p q r s (or u v))))
+
+(defun p-simplify-not (f)
+  (match f
+    ((list 'not a)
+     (match a
+       ((list 'not b) (p-simplify-not b))
+       ((list* 'iff bs) `(xor ,@(mapcar #'p-simplify-not bs)))
+       ((list* 'xor bs) `(iff ,@(mapcar #'p-simplify-not bs)))
+       ((list* op bs) `(not (,op ,@(mapcar #'p-simplify-not bs))))
+       (_ `(not ,a))))
+    ((list* op as) `(,op ,@(mapcar #'p-simplify-not as)))
+    (_ f)))
+
+(defun p-simplify (f)
+  (p-simplify-not
+   (p-simplify-flatten f)))
+
+(let ((f '(not (not p))))
+  (assert-acl2s-equal f (p-simplify f)))
+
+(let ((f '(not (xor p))))
+  (assert-acl2s-equal f (p-simplify f)))
+
+(let ((f '(not (xor p q))))
+  (assert-acl2s-equal f (p-simplify f)))
+
+(let ((f '(not (iff p q))))
+  (assert-acl2s-equal f (p-simplify f)))
+
+(let ((f '(not (iff (and) (or) q))))
+  (assert-acl2s-equal f (p-simplify f)))
 
 #|
 
@@ -539,7 +605,7 @@
  Do some profiling
 
  Test DP using with assert-acl2s-equal using at least 10
- propositional formulas. 
+ propositional formulas.
 
  It is easy to extend dp to support arbitrary formulas by using
  tseitin to generate CNF.
