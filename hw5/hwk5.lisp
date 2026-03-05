@@ -13,7 +13,7 @@
 
  The group members are:
 
- ... (put the names of the group members here)
+ Ling Zheng
 
  To make sure that we are all on the same page, build the latest
  version of ACL2s, as per HWK1. You are going to be using SBCL, which
@@ -391,6 +391,9 @@
 (defun assert-equal (f g)
   (assert (== f g) (f g) "Formulas were not equal!~%F: ~A~%G: ~A" f g))
 
+(defun assertf (f in out)
+  (assert-equal (funcall f in) out))
+
 #|
 
 ; This will lead to an error. Try it.
@@ -507,12 +510,12 @@
 
 (defun p-simplify-const (f)
   (match f
-    ((list 'not a) 
+    ((list 'not a)
      (let ((a (p-simplify-const a)))
        (match a
          ((type boolean) (not a))
-         (t `(not ,a)))))
-  
+         (_ `(not ,a)))))
+
     ((list 'if a b c)
      (let ((a (p-simplify-const a))
            (b (p-simplify-const b))
@@ -530,38 +533,46 @@
 
     ((list* op as)
      (let ((as (mapcar #'p-simplify-const as)))
-     (match op 
-      ((or (== op 'iff) (== op 'xor))
-        (let* ((consts (remove-if-not #'booleanp as))
-               (non-consts (remove-if #'booleanp as))
-               (id (pfun-key->val op :identity))
-               (result (if (== op 'iff)
-                           (evenp (count nil consts))
-                           (oddp (count t consts))))
-               (new-args (if (== result id)
-                             non-consts
-                             (cons result non-consts))))
-          (cond ((null new-args) id)
-                ((== (len new-args) 1) (car new-args))
-                (t `(,op ,@new-args)))))
+       (match op
+         ((or 'iff 'xor)
+            (let* ((consts (remove-if-not #'booleanp as))
+                   (non-consts (remove-if #'booleanp as))
+                   (id (pfun-key->val op :identity))
+                   (result (if (== op 'iff)
+                               (evenp (count nil consts))
+                               (oddp (count t consts))))
+                   (new-args (if (== result id)
+                                 non-consts
+                                 (cons result non-consts))))
+              (cond ((null new-args) id)
+                    ((== (len new-args) 1) (car new-args))
+                    (t `(,op ,@new-args)))))
 
-      ((or (== op 'and) (== op 'or))
-        (let* ((pop (key-alist->val op *p-ops*))
-                (id (key-list->val :identity pop))
-                (sink (key-list->val :sink pop)))
-            (cond ((in sink as) sink)
-                  (t (reduce 
-                        #'(lambda (a as)
-                            (if (booleanp a)
-                                (if (== a id) as `(,a ,@as))
-                                `(,a ,@as)))
-                        as
-                        :from-end t
-                        :initial-value nil)))))
+         ((or 'and 'or)
+          (let* ((pop (key-alist->val op *p-ops*))
+                 (id (key-list->val :identity pop))
+                 (sink (key-list->val :sink pop)))
+            (if (in sink as)
+                sink
+                `(,op
+                  ,@(reduce
+                     #'(lambda (a as)
+                         (if (booleanp a)
+                             (if (== a id) as `(,a ,@as))
+                             `(,a ,@as)))
+                     as
+                     :from-end t
+                     :initial-value nil)))))
 
-      (t `(,op ,@as)))))
+         (_ `(,op ,@as)))))
 
     (_ f)))
+
+(assertf #'p-simplify-const '(and x y t) '(and x y))
+(assertf #'p-simplify-const '(or x y t) 't)
+(assertf #'p-simplify-const '(and p t (foo t nil) q) '(and p (foo t nil) q))
+(assertf #'p-simplify-const '(iff t nil p q) '(iff nil p q))
+(assertf #'p-simplify-const '(not (not p)) '(not (not p)))
 
 (defun p-simplify-flatten (f)
   (match f
@@ -598,6 +609,8 @@
 (let ((f '(and p q (and r s) (or u v))))
   (assert-equal (p-simplify-flatten f) '(and p q r s (or u v))))
 
+(assertf #'p-simplify-flatten '(not (not p)) '(not (not p)))
+
 (defun p-simplify-not (f)
   (match f
     ((list 'not a)
@@ -609,6 +622,8 @@
        (_ `(not ,a))))
     ((list* op as) `(,op ,@(mapcar #'p-simplify-not as)))
     (_ f)))
+
+(assertf #'p-simplify-not '(not (not p)) 'p)
 
 (defun negate (f)
   "Get the negation of f"
@@ -638,7 +653,7 @@
                 sink
               ;; Remove duplicates (idempotent)
               `(,op ,@(remove-dups as)))))
-         
+
          ;; iff: p iff p = t (identity), p iff (not p) = nil
          ((== op 'iff)
           (let* ((pairs (make-hash-table :test #'equal))
@@ -670,8 +685,8 @@
               (push nil result))
             (cond ((null result) t)
                   ((null (cdr result)) (car result))
-                  (t `(iff ,@result)))))
-         
+                  (t `(iff ,@(reverse result))))))
+
          ;; xor: p xor p = nil (identity), p xor (not p) = t
          ((== op 'xor)
           (let* ((pairs (make-hash-table :test #'equal))
@@ -703,8 +718,8 @@
               (push t result))
             (cond ((null result) nil)
                   ((null (cdr result)) (car result))
-                  (t `(xor ,@result)))))
-         
+                  (t `(xor ,@(reverse result))))))
+
          ;; if: check specific cases
          ((== op 'if)
           (match as
@@ -716,16 +731,21 @@
                    ((equal a (negate c)) `(or ,b ,c))   ; (if a b (not a)) = (or b (not a))
                    (t `(if ,@as))))
             (_ `(if ,@as))))
-         
+
          (t `(,op ,@as)))))
 
     (_ f)))
 
+(assertf #'p-simplify-dup '(iff nil p q) '(iff nil p q))
+(assertf #'p-simplify-dup '(iff p q p) 'q)
+(assertf #'p-simplify-dup '(xor p q p) 'q)
+(assertf #'p-simplify-dup '(iff p q (not p)) '(iff q nil))
+
 (defun extend (keys vals env)
   (if (endp keys)
       env
-    (extend (cdr keys) (cdr vals) 
-            (acons (car keys) (car vals) env))))
+      (extend (cdr keys) (cdr vals)
+              (acons (car keys) (car vals) env))))
 
 (defun partition (pred list)
   "Partition list into (values trues falses) based on pred"
@@ -734,42 +754,85 @@
         else collect x into falses
         finally (return (values trues falses))))
 
-(defun p-simplify-shannon (f &optional env) 
+;; pre: no duplicates and opposites
+(defun p-simplify-shannon (f &optional env)
   (match f
     ((type boolean) f)
-    ((type symbol) (let ((v (key-alist->val f env)))
-                     (if v v f)))
+    ((type symbol) (let+ (((&values v found) (key-alist->val f env)))
+                     (if found v f)))
+    ((list 'not a)
+     (match a
+       ((type symbol) (let+ (((&values v found) (key-alist->val a env)))
+                        (if found (not v) f)))
+       (_ `(not ,(p-simplify-shannon a env)))))
+
     ((list* op as)
-       (if (in op '(and or))
-           (let* ((pop (key-alist->val op *p-ops*))
-                  (id (key-list->val :identity pop))
-                  ((&values vars nvars) (partition #'symbolp as))
-                  ((&values nvars as) (partition #'(lambda (a)
-                                                      (match a
-                                                        ((list 'not b) (symbolp b))
-                                                        (_ nil))) nvars))
-                  (nenv (extend vars (mapcar #'(lambda (v) t) vars) 
-                          (extend nvars (mapcar #'(lambda (v) nil) nvars) 
-                           env)))))
-              
-              `(,op ,@vars ,@nvars ,@(mapcar #'(lambda (a) (p-simplify-shannon a nenv)) as)))
-           `(,op ,@as))))
+     (if (in op '(and or))
+         (let+ ((pop (key-alist->val op *p-ops*))
+                (id (key-list->val :identity pop))
+                (as (mapcar #'(lambda (a)
+                                (match a
+                                  ((type symbol)
+                                    (let+ (((&values v found) (key-alist->val a env)))
+                                      (if found v a)))
+                                  ((list 'not b)
+                                   (match b
+                                     ((type symbol) (let+ (((&values v found) (key-alist->val b env)))
+                                                        (if found (not v) a)))
+                                     (_ a)))
+                                  (_ a)))
+                            as))
+                ((&values vars nvars) (partition #'symbolp as))
+                ((&values nlits as) (partition
+                                     #'(lambda (a)
+                                         (match a
+                                           ((list 'not b) (symbolp b))
+                                           (_ nil)))
+                                     nvars))
+                (nvars (mapcar #'(lambda (a)
+                                   (match a
+                                     ((list 'not v) v)
+                                     (_ nil)))
+                               nlits))
+                (nenv (extend vars (mapcar #'(lambda (v) id) vars)
+                              (extend nvars (mapcar #'(lambda (v) (not id)) nvars)
+                                      env))))
+           `(,op ,@vars ,@nlits ,@(mapcar #'(lambda (a) (p-simplify-shannon a nenv)) as)))
+         `(,op ,@(mapcar #'(lambda (a) (p-simplify-shannon a env)) as))))))
+
+(assertf #'p-simplify-shannon '(iff nil p q) '(iff nil p q))
+(assertf #'p-simplify-shannon '(and (or p q) (or r q p) p) '(and p (or t q) (or r q t)))
+(assertf #'p-simplify-shannon '(and (or p q) (or r q p) (not p)) '(and (not p) (or nil q) (or r q nil)))
+(assertf #'p-simplify-shannon '(and (not p) q (or r q)) '(and q (not p) (or r t)))
+(assertf #'p-simplify-shannon '(or (and p q) (and r q p) p) '(or p (and nil q) (and r q nil)))
+(assertf #'p-simplify-shannon '(or p q (and r q)) '(or p q (and r nil)))
+(assertf #'p-simplify-shannon '(or (and p q) (and r q p) (not p)) '(or (not p) (and t q) (and r q t)))
+(assertf #'p-simplify-shannon '(or (not p) q (and r q)) '(or q (not p) (and r nil)))
 
 (defun p-simplify-fixpoint (f)
-  (let ((new-f (p-simplify-shannon ;; happen after removing duplicates and opposites 
+  (let ((new-f (p-simplify-shannon
                 (p-simplify-dup
                  (p-simplify-not
-                  (p-simplify-const 
-                   (p-simplify-flatten f))))))) 
+                  (p-simplify-const
+                   (p-simplify-flatten f)))))))
     (if (equal new-f f)
-        f                                
+        f
         (p-simplify-fixpoint new-f))))
 
 (defun p-simplify (f)
-  (p-simplify-fixpoint 
+  (p-simplify-fixpoint
     (p-simplify-implies f)))
 
-(defun test-simplify (f) 
+;; Shannon
+(assertf #'p-simplify '(and (or p q) (or r q p) p) 'p)
+(assertf #'p-simplify '(and (or p q) (or r q p) (not p)) '(and q (not p)))
+(assertf #'p-simplify '(or (and p q) (and r q p) p) 'p)
+(assertf #'p-simplify '(or (and p q) (and r q p) (not p)) '(or q (not p)))
+
+;; Non-propositional atoms
+(assertf #'p-simplify '(iff (foo a) (foo a) (bar b)) '(bar b))
+
+(defun test-simplify (f)
   (assert-acl2s-equal f (p-simplify f)))
 
 ;; Used Claude to generate tests
@@ -836,7 +899,7 @@
 ;; Non-variable atoms throughout
 (test-simplify '(and (foo x) (bar y) (not (foo x))))
 (test-simplify '(or (f a b) (g c) (not (g c))))
-(test-simplify '(iff (foo 1) (foo 1) (bar 2)))
+(test-simplify '(iff (foo a) (foo a) (bar b)))
 
 #|
 
@@ -866,21 +929,21 @@
      (let ((a (car args)))
        `((or ,v ,a)
          (or (not ,v) (not ,a)))))
-    
+
     (and
      ;; v ↔ (a1 ∧ ... ∧ an)
      ;; (¬v ∨ a1) ∧ ... ∧ (¬v ∨ an) ∧ (v ∨ ¬a1 ∨ ... ∨ ¬an)
      (append
       (mapcar #'(lambda (a) `(or (not ,v) ,a)) args)
       `((or ,v ,@(mapcar #'(lambda (a) `(not ,a)) args)))))
-    
+
     (or
      ;; v ↔ (a1 ∨ ... ∨ an)
      ;; (¬v ∨ a1 ∨ ... ∨ an) ∧ (v ∨ ¬a1) ∧ ... ∧ (v ∨ ¬an)
      (append
       `((or (not ,v) ,@args))
       (mapcar #'(lambda (a) `(or ,v (not ,a))) args)))
-    
+
     (iff
      ;; v ↔ (a ↔ b): both same polarity
      ;; (¬v ∨ ¬a ∨ b) ∧ (¬v ∨ a ∨ ¬b) ∧ (v ∨ ¬a ∨ ¬b) ∧ (v ∨ a ∨ b)
@@ -890,7 +953,7 @@
          (or (not ,v) ,a (not ,b))
          (or ,v (not ,a) (not ,b))
          (or ,v ,a ,b))))
-    
+
     (xor
      ;; v ↔ (a ⊕ b): different polarity
      ;; (¬v ∨ ¬a ∨ ¬b) ∧ (¬v ∨ a ∨ b) ∧ (v ∨ ¬a ∨ b) ∧ (v ∨ a ∨ ¬b)
@@ -900,7 +963,7 @@
          (or (not ,v) ,a ,b)
          (or ,v (not ,a) ,b)
          (or ,v ,a (not ,b)))))
-    
+
     (if
      ;; v ↔ (if a b c) ≡ v ↔ ((a ∧ b) ∨ (¬a ∧ c))
      ;; (¬v ∨ ¬a ∨ b) ∧ (¬v ∨ a ∨ c) ∧ (v ∨ ¬a ∨ ¬b) ∧ (v ∨ a ∨ ¬c)
@@ -911,7 +974,7 @@
          (or (not ,v) ,a ,c)
          (or ,v (not ,a) (not ,b))
          (or ,v ,a (not ,c)))))
-    
+
     (otherwise
      (error "Unknown operator in Tseitin: ~A" op))))
 
@@ -919,7 +982,7 @@
   "Transform formula f to CNF using Tseitin transformation.
    Returns CNF as (and clause1 clause2 ...)"
   (let ((clauses nil))
-    
+
     (labels ((transform-subf (subf)
                "Transform subformula, return its representative variable"
                (match subf
@@ -930,7 +993,7 @@
                       ;; Handle n-ary iff/xor by chaining into binary
                       (if (and (in op '(iff xor)) (> (length args) 2))
                           ;; Chain: (iff a b c d) -> (iff (iff (iff a b) c) d)
-                          (let ((chained (reduce #'(lambda (acc x) 
+                          (let ((chained (reduce #'(lambda (acc x)
                                                      `(,op ,acc ,x))
                                                  (cddr args)
                                                  :initial-value `(,op ,(first args) ,(second args)))))
@@ -943,23 +1006,23 @@
                           v))
                     ;; Non-propositional atom - treat as variable
                     subf)))))
-      
+
       ;; Transform and add unit clause for top-level variable
       (let ((top-var (transform-subf f)))
         (push `(,top-var) clauses)
         `(and ,@(reverse clauses))))))
 
 (defun tseitin (f)
-  (let* ((simplified (p-simplify f))           
-         (skeleton (p-skeleton simplified))     
-         (cnf (tseitin-transform skeleton))) 
+  (let* ((simplified (p-simplify f))
+         (skeleton (p-skeleton simplified))
+         (cnf (tseitin-transform skeleton)))
     cnf))
 
 (defun test-tseitin (f)
   (let ((cnf (tseitin f)))
     (assert-acl2s-equal f cnf)))
 
-;; Tests generated with Claude 
+;; Tests generated with Claude
 ;; Basic tests
 (test-tseitin 'p)
 (test-tseitin 't)
