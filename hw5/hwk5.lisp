@@ -498,6 +498,13 @@
 
 |#
 
+(defun partition (pred list)
+  "Partition list into (values trues falses) based on pred"
+  (loop for x in list
+        if (funcall pred x) collect x into trues
+        else collect x into falses
+        finally (return (values trues falses))))
+
 (defun p-simplify-implies (f)
   (match f
     ((list 'implies p q)
@@ -535,18 +542,18 @@
      (let ((as (mapcar #'p-simplify-const as)))
        (match op
          ((or 'iff 'xor)
-            (let* ((consts (remove-if-not #'booleanp as))
-                   (non-consts (remove-if #'booleanp as))
-                   (id (pfun-key->val op :identity))
-                   (result (if (== op 'iff)
-                               (evenp (count nil consts))
-                               (oddp (count t consts))))
-                   (new-args (if (== result id)
-                                 non-consts
-                                 (cons result non-consts))))
-              (cond ((null new-args) id)
-                    ((== (len new-args) 1) (car new-args))
-                    (t `(,op ,@new-args)))))
+          (let+ (((&values consts non-consts) (partition #'booleanp as))
+                 (id (pfun-key->val op :identity))
+                 (result (if (== op 'iff)
+                             (evenp (count nil consts))
+                             (oddp (count t consts)))))
+            (if (== result id)
+                (cond ((null non-consts) id)
+                      ((null (cdr non-consts)) (car non-consts))
+                      (t `(,op ,@non-consts)))
+                (cond ((null non-consts) result)
+                      ((null (cdr non-consts)) `(not ,(car non-consts)))
+                      (t `(,op ,result ,@non-consts))))))
 
          ((or 'and 'or)
           (let* ((pop (key-alist->val op *p-ops*))
@@ -572,6 +579,7 @@
 (assertf #'p-simplify-const '(or x y t) 't)
 (assertf #'p-simplify-const '(and p t (foo t nil) q) '(and p (foo t nil) q))
 (assertf #'p-simplify-const '(iff t nil p q) '(iff nil p q))
+(assertf #'p-simplify-const '(iff nil p) '(not p))
 (assertf #'p-simplify-const '(not (not p)) '(not (not p)))
 
 (defun p-simplify-flatten (f)
@@ -747,13 +755,6 @@
       (extend (cdr keys) (cdr vals)
               (acons (car keys) (car vals) env))))
 
-(defun partition (pred list)
-  "Partition list into (values trues falses) based on pred"
-  (loop for x in list
-        if (funcall pred x) collect x into trues
-        else collect x into falses
-        finally (return (values trues falses))))
-
 ;; pre: no duplicates and opposites
 (defun p-simplify-shannon (f &optional env)
   (match f
@@ -823,14 +824,18 @@
   (p-simplify-fixpoint
     (p-simplify-implies f)))
 
+;; Dup
+(assertf #'p-simplify '(iff p q (not p)) '(not q))
+
 ;; Shannon
 (assertf #'p-simplify '(and (or p q) (or r q p) p) 'p)
 (assertf #'p-simplify '(and (or p q) (or r q p) (not p)) '(and q (not p)))
 (assertf #'p-simplify '(or (and p q) (and r q p) p) 'p)
 (assertf #'p-simplify '(or (and p q) (and r q p) (not p)) '(or q (not p)))
 
-;; Non-propositional atoms
+;; Non-variable atoms
 (assertf #'p-simplify '(iff (foo a) (foo a) (bar b)) '(bar b))
+(assertf #'p-simplify '(iff (foo a) (bar b) (not (foo a))) '(not (bar b)))
 
 (defun test-simplify (f)
   (assert-acl2s-equal f (p-simplify f)))
@@ -922,6 +927,9 @@
 
 |#
 
+;; TODO: 1. unchain 2. to-clauses 3. cnf?
+;; 4. fix list 'not symbol pattern
+
 (defun tseitin-op (v op args)
   "Generate CNF clauses: v ↔ (op args...)"
   (case op
@@ -981,46 +989,54 @@
 (defun tseitin-transform (f)
   "Transform formula f to CNF using Tseitin transformation.
    Returns CNF as (and clause1 clause2 ...)"
-  (let ((clauses nil))
 
-    (labels ((transform-subf (subf)
-               "Transform subformula, return its representative variable"
-               (match subf
-                 ((type boolean) subf)
-                 ((type symbol) subf)
-                 ((list* op args)
-                  (if (p-funp op)
-                      ;; Handle n-ary iff/xor by chaining into binary
-                      (if (and (in op '(iff xor)) (> (length args) 2))
-                          ;; Chain: (iff a b c d) -> (iff (iff (iff a b) c) d)
-                          (let ((chained (reduce #'(lambda (acc x)
-                                                     `(,op ,acc ,x))
-                                                 (cddr args)
-                                                 :initial-value `(,op ,(first args) ,(second args)))))
-                            (transform-subf chained))
-                        ;; Normal case: process arguments first (post-order)
-                        (let* ((arg-vars (mapcar #'transform-subf args))
-                               (v (gentemp "T"))
-                               (new-clauses (tseitin-op v op arg-vars)))
-                          (setf clauses (append new-clauses clauses))
-                          v))
-                    ;; Non-propositional atom - treat as variable
-                    subf)))))
+  (match f
+    ((type boolean) f)
+    ((type symbol) f)
+    ((list 'not (type symbol)) f)
+    (_ (let ((clauses nil))
 
-      ;; Transform and add unit clause for top-level variable
-      (let ((top-var (transform-subf f)))
-        (push `(,top-var) clauses)
-        `(and ,@(reverse clauses))))))
+         (labels ((transform-subf (subf)
+                    "Transform subformula, return its representative variable"
+                    (match subf
+                      ((type boolean) subf)
+                      ((type symbol) subf)
+                      ((list* op args)
+                       (if (p-funp op)
+                           ;; Handle n-ary iff/xor by chaining into binary
+                           (if (and (in op '(iff xor)) (> (length args) 2))
+                               ;; Chain: (iff a b c d) -> (iff (iff (iff a b) c) d)
+                               (let ((chained (reduce #'(lambda (acc x)
+                                                          `(,op ,acc ,x))
+                                                      (cddr args)
+                                                      :initial-value `(,op ,(first args) ,(second args)))))
+                                 (transform-subf chained))
+                               ;; Normal case: process arguments first (post-order)
+                               (let* ((arg-vars (mapcar #'transform-subf args))
+                                      (v (gentemp "T"))
+                                      (new-clauses (tseitin-op v op arg-vars)))
+                                 (setf clauses (append new-clauses clauses))
+                                 v))
+                           ;; Non-propositional atom - treat as variable
+                           subf)))))
+
+           ;; Transform and add unit clause for top-level variable
+           (let ((top-var (transform-subf f)))
+             `(and ,top-var ,@clauses)))))))
 
 (defun tseitin (f)
-  (let* ((simplified (p-simplify f))
-         (skeleton (p-skeleton simplified))
-         (cnf (tseitin-transform skeleton)))
-    cnf))
+  (let+ ((simplified (p-simplify f))
+         ((&values skeleton amap) (p-skeleton simplified))
+         (cnf (tseitin-transform skeleton))
+         (cnf (p-simplify cnf)))
+    (values cnf amap)))
 
 (defun test-tseitin (f)
   (let ((cnf (tseitin f)))
     (assert-acl2s-equal f cnf)))
+
+(assertf #'tseitin '(not p) '(not p))
+(assertf #'tseitin '(or p q) '(AND T49 (OR P Q)))
 
 ;; Tests generated with Claude
 ;; Basic tests
