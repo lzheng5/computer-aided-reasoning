@@ -755,6 +755,11 @@
       (extend (cdr keys) (cdr vals)
               (acons (car keys) (car vals) env))))
 
+(defun lit->var (lit)
+  (match lit
+    ((list 'not v) v)
+    (_ lit)))
+
 ;; pre: no duplicates and opposites
 (defun p-simplify-shannon (f &optional env)
   (match f
@@ -787,14 +792,10 @@
                 ((&values nlits as) (partition
                                      #'(lambda (a)
                                          (match a
-                                           ((list 'not b) (symbolp b))
+                                           ((list 'not (type symbol))
                                            (_ nil)))
                                      nvars))
-                (nvars (mapcar #'(lambda (a)
-                                   (match a
-                                     ((list 'not v) v)
-                                     (_ nil)))
-                               nlits))
+                (nvars (mapcar #'lit->var nlits)) nlits))
                 (nenv (extend vars (mapcar #'(lambda (v) id) vars)
                               (extend nvars (mapcar #'(lambda (v) (not id)) nvars)
                                       env))))
@@ -927,9 +928,6 @@
 
 |#
 
-;; TODO: 1. unchain 2. to-clauses 3. cnf?
-;; 4. fix list 'not symbol pattern
-
 (defun tseitin-op (v op args)
   "Generate CNF clauses: v ↔ (op args...)"
   (case op
@@ -986,57 +984,71 @@
     (otherwise
      (error "Unknown operator in Tseitin: ~A" op))))
 
-(defun tseitin-transform (f)
-  "Transform formula f to CNF using Tseitin transformation.
-   Returns CNF as (and clause1 clause2 ...)"
-
+(defun tseitin-unchain (f)
+  "Recursively convert n-ary iff/xor to binary form.
+   (iff a b c d) -> (iff (iff (iff a b) c) d)"
   (match f
     ((type boolean) f)
     ((type symbol) f)
-    ((list 'not (type symbol)) f)
-    (_ (let ((clauses nil))
+    ((list* op args)
+     (let ((args (mapcar #'tseitin-unchain args)))
+       (if (and (in op '(iff xor)) (> (length args) 2))
+           (reduce #'(lambda (acc x) `(,op ,acc ,x))
+                   (cddr args)
+                   :initial-value `(,op ,(first args) ,(second args)))
+           `(,op ,@args))))
+    (_ f)))
 
-         (labels ((transform-subf (subf)
-                    "Transform subformula, return its representative variable"
-                    (match subf
-                      ((type boolean) subf)
-                      ((type symbol) subf)
-                      ((list* op args)
-                       (if (p-funp op)
-                           ;; Handle n-ary iff/xor by chaining into binary
-                           (if (and (in op '(iff xor)) (> (length args) 2))
-                               ;; Chain: (iff a b c d) -> (iff (iff (iff a b) c) d)
-                               (let ((chained (reduce #'(lambda (acc x)
-                                                          `(,op ,acc ,x))
-                                                      (cddr args)
-                                                      :initial-value `(,op ,(first args) ,(second args)))))
-                                 (transform-subf chained))
-                               ;; Normal case: process arguments first (post-order)
-                               (let* ((arg-vars (mapcar #'transform-subf args))
-                                      (v (gentemp "T"))
-                                      (new-clauses (tseitin-op v op arg-vars)))
-                                 (setf clauses (append new-clauses clauses))
-                                 v))
-                           ;; Non-propositional atom - treat as variable
-                           subf)))))
-
-           ;; Transform and add unit clause for top-level variable
-           (let ((top-var (transform-subf f)))
-             `(and ,top-var ,@clauses)))))))
+(defun tseitin-transform (f)
+  "Transform formula f to CNF using Tseitin transformation.
+   Returns CNF as (and clause1 clause2 ...)"
+  (let ((clauses nil))
+    (labels ((transform-subf (subf)
+               "Transform subformula, return its representative variable"
+               (match subf
+                 ((type boolean) subf)
+                 ((type symbol) subf)
+                 ((list* op args)
+                  (if (p-funp op)
+                      (let* ((arg-vars (mapcar #'transform-subf args))
+                             (v (gentemp "T"))
+                             (new-clauses (tseitin-op v op arg-vars)))
+                        (setf clauses (append new-clauses clauses))
+                        v)
+                      subf)))))
+      (match f
+        ((type boolean) f)
+        ((type symbol) f)
+        ((list 'not (type symbol)) f)
+        ((list* 'and args)
+         (dolist (arg args)
+           (let ((top-var (transform-subf arg)))
+             (push top-var clauses)))
+         `(and ,@(reverse clauses)))
+        (_
+         (let ((top-var (transform-subf f)))
+            (push top-var clauses)
+           `(and ,@(reverse clauses))))))))
 
 (defun tseitin (f)
   (let+ ((simplified (p-simplify f))
          ((&values skeleton amap) (p-skeleton simplified))
-         (cnf (tseitin-transform skeleton))
+         (unchained (tseitin-unchain skeleton))
+         (cnf (tseitin-transform unchained))
          (cnf (p-simplify cnf)))
     (values cnf amap)))
 
-(defun test-tseitin (f)
-  (let ((cnf (tseitin f)))
-    (assert-acl2s-equal f cnf)))
+(defun acl2s-unsat? (f)
+  "Check if f is unsatisfiable using ACL2s (f is UNSAT iff (not f) is valid)"
+  (== (car (acl2s-check-equal `(not ,f) 't)) nil))
 
-(assertf #'tseitin '(not p) '(not p))
-(assertf #'tseitin '(or p q) '(AND T49 (OR P Q)))
+(defun test-tseitin (f)
+  "Test equisatisfiability: f is UNSAT iff (tseitin f) is UNSAT"
+  (let* ((cnf (tseitin f))
+         (f-unsat (acl2s-unsat? f))
+         (cnf-unsat (acl2s-unsat? cnf)))
+    (assert (eq f-unsat cnf-unsat) ()
+            "Equisat failed for ~A: f-unsat=~A, cnf-unsat=~A" f f-unsat cnf-unsat)))
 
 ;; Tests generated with Claude
 ;; Basic tests
@@ -1066,6 +1078,30 @@
 (test-tseitin '(or (foo a b) (bar c)))
 (test-tseitin '(and (f x) (g y) (not (h z))))
 
+(defun literalp (f)
+  (match f
+    ((type boolean) t)
+    ((type symbol) t)
+    ((list 'not a) (or (symbolp a) (booleanp a)))
+    (_ nil)))
+
+(defun clausep (f)
+  (match f
+    ((type boolean) t)
+    ((type symbol) t)
+    ((list 'not a) (literalp f))
+    ((list* 'or args) (every #'literalp args))
+    (_ nil)))
+
+(defun cnfp (f)
+  (match f
+    ((type boolean) t)
+    ((type symbol) t)
+    ((list 'not a) (literalp f))
+    ((list* 'or args) (clausep f))
+    ((list* 'and args) (every #'clausep args))
+    (_ nil)))
+
 #|
 
  Question 3. (30 pts)
@@ -1094,8 +1130,109 @@
 
 |#
 
-(defun dp (f) ...)
+(defun clause->list (c)
+  "Convert a clause to a list of literals"
+  (match c
+    ((type boolean) (list c))
+    ((type symbol) (list c))
+    ((list 'not _) (list c))
+    ((list* 'or args) args)
+    (_ (error "Not a clause: ~A" c))))
 
+(defun cnf->clauses (f)
+  "Convert a CNF formula to a list of clauses (each clause is a list of literals)"
+  (match f
+    ((type boolean) (if f nil (list nil)))  ; t -> empty, nil -> (())
+    ((type symbol) (list (list f)))
+    ((list 'not _) (list (list f)))
+    ((list* 'or args) (list args))
+    ((list* 'and args) (mapcar #'clause->list args))
+    (_ (error "Not in CNF: ~A" f))))
+
+;; Post: no more pure literals
+(defun dp-pure (clauses)
+  "Pure literal elimination. Returns new clauses with pure literals removed.
+   A pure literal appears only in one polarity across all clauses."
+  (let ((pos (make-hash-table :test #'equal))   ; vars appearing positive
+        (neg (make-hash-table :test #'equal)))  ; vars appearing negative
+    ;; Collect all literals
+    (dolist (c clauses)
+      (dolist (lit c)
+        (match lit
+          ((list 'not v) (setf (gethash v neg) t))
+          ((type symbol) (setf (gethash lit pos) t))
+          (_ nil))))
+    ;; Find pure literals
+    (let ((pure-lits nil))
+      (maphash #'(lambda (v _)
+                   (unless (gethash v neg)
+                     (push v pure-lits)))
+               pos)
+      (maphash #'(lambda (v _)
+                   (unless (gethash v pos)
+                     (push `(not ,v) pure-lits)))
+               neg)
+      ;; Remove satisfied clauses
+      (if (null pure-lits)
+          clauses
+          (remove-if #'(lambda (c)
+                         (some #'(lambda (lit) (in lit pure-lits)) c))
+                     clauses)))))
+
+;; Post: no more unit clauses
+(defun dp-unit (clauses)
+  "Unit propagation. Returns new clauses after propagating unit clauses.
+   A unit clause has exactly one literal, which must be true."
+  (let ((unit-lit (some #'(lambda (c) (and (== (length c) 1) (car c))) clauses)))
+    (if (null unit-lit)
+        clauses
+        (let* ((neg-lit (negate unit-lit))
+               (new-clauses
+                (mapcar 
+                  #'(lambda (c) (remove neg-lit c :test #'equal))
+                  (remove-if #'(lambda (c) (in unit-lit c)) clauses))))
+          (dp-unit new-clauses)))))
+
+(defun dp-decide (cls) 
+  (some #'(lambda (c) (some #'symbolp c)) cls))
+
+(defun dp-resolve (clauses var)
+  (let ((pos-lit var)
+        (neg-lit `(not ,var))
+        (pos-clauses nil)
+        (neg-clauses nil)
+        (other-clauses nil))
+    ;; Partition clauses
+    (dolist (c clauses)
+      (cond ((in pos-lit c) (push c pos-clauses))
+            ((in neg-lit c) (push c neg-clauses))
+            (t (push c other-clauses))))
+    ;; Generate resolvents
+    (let ((resolvents nil))
+      (dolist (pc pos-clauses)
+        (dolist (nc neg-clauses)
+          (let ((resolvent (remove-dups
+                            (append (remove pos-lit pc :test #'equal)
+                                    (remove neg-lit nc :test #'equal)))))
+            ;; Skip clauses containing both p and (not p)
+            (unless (some #'(lambda (lit) (has-opposite lit resolvent)) resolvent)
+              (push resolvent resolvents)))))
+      (append other-clauses resolvents))))
+
+(defun dp-sat (cls) 
+  (let* ((cls (dp-unit cls))
+         (cls (dp-pure cls)))
+    (cond ((null cls) 'sat)                          
+          ((member nil cls :test #'equal) 'unsat)    
+          (t
+           (let* ((var (dp-decide cls))
+                  (new-cls (dp-resolve cls var)))
+             (dp-sat new-cls))))))
+
+(defun dp (f) 
+  (let* ((cnf (tseitin f))
+         (clauses (cnf->clauses cnf)))
+    (dp-sat clauses)))
 
 #|
 
