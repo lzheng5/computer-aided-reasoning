@@ -800,12 +800,12 @@
                                            ((list 'not (type symbol)) a)
                                            (_ nil)))
                                      nvars))
-                (nvars (mapcar #'lit->var nlits)) nlits))
+                (nvars (mapcar #'lit->var nlits)) 
                 (nenv (extend vars (mapcar #'(lambda (v) id) vars)
                               (extend nvars (mapcar #'(lambda (v) (not id)) nvars)
                                       env))))
            `(,op ,@vars ,@nlits ,@(mapcar #'(lambda (a) (p-simplify-shannon a nenv)) as)))
-         `(,op ,@(mapcar #'(lambda (a) (p-simplify-shannon a env)) as))))
+         `(,op ,@(mapcar #'(lambda (a) (p-simplify-shannon a env)) as))))))
 
 (assertf #'p-simplify-shannon '(iff nil p q) '(iff nil p q))
 (assertf #'p-simplify-shannon '(and (or p q) (or r q p) p) '(and p (or t q) (or r q t)))
@@ -817,10 +817,10 @@
 (assertf #'p-simplify-shannon '(or (not p) q (and r q)) '(or q (not p) (and r nil)))
 
 (defun p-simplify-fixpoint (f)
-  (let ((new-f (p-simplify-shannon
-                (p-simplify-dup
-                 (p-simplify-not
-                  (p-simplify-const
+  (let ((new-f (p-simplify-const       
+                (p-simplify-shannon
+                 (p-simplify-dup
+                  (p-simplify-not
                    (p-simplify-flatten f)))))))
     (if (equal new-f f)
         f
@@ -1221,6 +1221,36 @@
 (defun dp-decide (cls) 
   (some #'(lambda (c) (some #'lit->var c)) cls))
 
+(defun clause->set (clause)
+  "Convert a clause (list of literals) to a hash set for O(1) lookup."
+  (let ((ht (make-hash-table :test #'equal)))
+    (dolist (lit clause ht)
+      (setf (gethash lit ht) t))))
+
+(defun subsumes-set? (c1 c2-set c2-len)
+  "Return t if c1 subsumes c2 (c1 ⊆ c2).
+   c2-set is a hash table, c2-len is the length of c2."
+  (and (<= (length c1) c2-len)
+       (every #'(lambda (lit) (gethash lit c2-set)) c1)))
+
+(defun remove-subsumed (clauses)
+  "Remove clauses that are subsumed by other clauses in the list.
+   Keep smaller clauses that subsume larger ones.
+   Uses hash tables for O(1) literal lookup."
+  ;; Sort by length - shorter clauses first (they subsume longer ones)
+  (let* ((sorted (sort (copy-list clauses) #'< :key #'length))
+         (result nil))
+    (dolist (c sorted)
+      (let ((c-set (clause->set c))
+            (c-len (length c)))
+        ;; Check if c is subsumed by anything in result (which are all shorter or equal)
+        ;; r subsumes c means r ⊆ c, so check if every lit in r is in c-set
+        (unless (some #'(lambda (r) (subsumes-set? r c-set c-len)) result)
+          ;; c is not subsumed; add it (no need to check if c subsumes result
+          ;; since result only contains shorter/equal clauses processed before c)
+          (push c result))))
+    (nreverse result)))
+
 (defun dp-resolve (clauses var)
   (let ((pos-lit var)
         (neg-lit `(not ,var))
@@ -1242,7 +1272,8 @@
             ;; Skip clauses containing both p and (not p)
             (unless (some #'(lambda (lit) (has-opposite lit resolvent)) resolvent)
               (push resolvent resolvents)))))
-      (append other-clauses resolvents))))
+      ;; Remove subsumed clauses to keep clause set small
+      (remove-subsumed (append other-clauses resolvents)))))
 
 (defun dp-sat (cls &optional acc-assignment) 
   (let+ (((&values cls unit-asgn) (dp-unit cls)))
