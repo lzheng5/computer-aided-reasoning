@@ -640,11 +640,7 @@
     (_ `(not ,f))))
 
 (defun has-opposite (f args)
-  "Check if (not f) or negation of f exists in args"
-  (or (in (negate f) args)
-      (match f
-        ((list 'not a) (in a args))
-        (_ nil))))
+  (in (negate f) args))
 
 (defun p-simplify-dup (f)
   "Simplify duplicated and opposite subformulas"
@@ -1172,8 +1168,8 @@
 (defun dp-pure (clauses)
   "Pure literal elimination. Returns (values new-clauses assignment).
    A pure literal appears only in one polarity across all clauses."
-  (let ((pos (make-hash-table :test #'equal))   ; vars appearing positive
-        (neg (make-hash-table :test #'equal)))  ; vars appearing negative
+  (let ((pos (make-hash-table :test #'equal))   
+        (neg (make-hash-table :test #'equal)))
     ;; Collect all literals using lit->var/lit->val
     (dolist (c clauses)
       (dolist (lit c)
@@ -1218,6 +1214,7 @@
                  neg-lit)))
           (dp-unit new-clauses (acons var val acc-assignment))))))
 
+;; TODO: better ways to pick variables 
 (defun dp-decide (cls) 
   (some #'(lambda (c) (some #'lit->var c)) cls))
 
