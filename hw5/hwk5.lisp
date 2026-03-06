@@ -1135,44 +1135,130 @@
 
 |#
 
-(defun clause->list (c)
-  "Convert a clause to a list of literals"
-  (match c
-    ((type boolean) (list c))
-    ((type symbol) (list c))
-    ((list 'not _) (list c))
-    ((list* 'or args) args)
-    (_ (error "Not a clause: ~A" c))))
+;;; ============================================================
+;;; Clause API - Abstraction over clause representation
+;;; Current implementation: Hash sets with symbol variables
+;;;
+;;; This API provides a clean abstraction so that the clause
+;;; representation can be easily changed (e.g., to use numbered
+;;; variables or bit vectors) without modifying the DP algorithm.
+;;; ============================================================
+
+(defun make-clause (literals)
+  "Create a clause from a list of literals"
+  (let ((ht (make-hash-table :test #'equal)))
+    (dolist (lit literals ht)
+      (setf (gethash lit ht) t))))
+
+(defun clause-has-lit? (clause lit)
+  "Check if literal is in clause"
+  (gethash lit clause))
+
+(defun clause-remove-lit (clause lit)
+  "Return new clause with literal removed"
+  (let ((new-ht (make-hash-table :test #'equal)))
+    (maphash #'(lambda (k v)
+                 (declare (ignore v))
+                 (unless (equal k lit)
+                   (setf (gethash k new-ht) t)))
+             clause)
+    new-ht))
+
+(defun clause-size (clause)
+  "Return number of literals in clause"
+  (hash-table-count clause))
+
+(defun clause-literals (clause)
+  "Return list of all literals in clause"
+  (let ((lits nil))
+    (maphash #'(lambda (k v) (declare (ignore v)) (push k lits)) clause)
+    lits))
+
+(defun clause-empty? (clause)
+  "Check if clause is empty"
+  (zerop (hash-table-count clause)))
+
+(defun clause-unit? (clause)
+  "Check if clause is a unit clause (size 1)"
+  (= 1 (hash-table-count clause)))
+
+(defun clause-unit-lit (clause)
+  "Get the single literal from a unit clause"
+  (assert (clause-unit? clause) () "Not a unit clause")
+  (maphash #'(lambda (k v) (declare (ignore v)) (return-from clause-unit-lit k)) clause))
+
+(defun clause-merge (literals-list)
+  "Create clause from multiple literal lists (for resolution)"
+  (make-clause (remove-dups (apply #'append literals-list))))
+
+;;; Test the clause API
+(let ((c (make-clause '(p q (not r)))))
+  (assert (= 3 (clause-size c)))
+  (assert (clause-has-lit? c 'p))
+  (assert (clause-has-lit? c '(not r)))
+  (assert (not (clause-has-lit? c 's)))
+  (assert (not (clause-unit? c)))
+  (assert (not (clause-empty? c))))
+
+(let ((c (make-clause '(p))))
+  (assert (clause-unit? c))
+  (assert (equal 'p (clause-unit-lit c))))
+
+(let ((c (make-clause nil)))
+  (assert (clause-empty? c))
+  (assert (= 0 (clause-size c))))
+
+(let* ((c1 (make-clause '(p q r)))
+       (c2 (clause-remove-lit c1 'q)))
+  (assert (clause-has-lit? c1 'q))
+  (assert (not (clause-has-lit? c2 'q)))
+  (assert (= 2 (clause-size c2))))
+
+;;; ============================================================
+;;; CNF -> Clauses Conversion
+;;; ============================================================
 
 (defun cnf->clauses (f)
-  "Convert a CNF formula to a list of clauses (each clause is a list of literals)"
-  (match f
-    ((type boolean) (if f nil (list nil)))  ; t -> empty, nil -> (())
-    ((type symbol) (list (list f)))
-    ((list 'not _) (list (list f)))
-    ((list* 'or args) (list args))
-    ((list* 'and args) (mapcar #'clause->list args))
-    (_ (error "Not in CNF: ~A" f))))
+  "Convert a CNF formula to a list of clauses (using clause representation)"
+  (labels ((clause->list (c)
+             "Convert a clause formula to a list of literals"
+             (match c
+               ((type boolean) (list c))
+               ((type symbol) (list c))
+               ((list 'not _) (list c))
+               ((list* 'or args) args)
+               (_ (error "Not a clause: ~A" c)))))
+    (match f
+      ((type boolean) (if f nil (list (make-clause nil))))  ; t -> empty, nil -> empty clause
+      ((type symbol) (list (make-clause (list f))))
+      ((list 'not _) (list (make-clause (list f))))
+      ((list* 'or args) (list (make-clause args)))
+      ((list* 'and args) (mapcar #'(lambda (c) (make-clause (clause->list c))) args))
+      (_ (error "Not in CNF: ~A" f)))))
+
+;;; ============================================================
+;;; DP Algorithm
+;;; ============================================================
 
 (defun remove-satisfied-clauses (clauses satisfied-lits)
-  "Remove all clauses containing any literal in satisfied-lits."
+  "Remove all clauses containing any literal in satisfied-lits"
   (remove-if #'(lambda (c)
-                 (some #'(lambda (lit) (in lit satisfied-lits)) c))
+                 (some #'(lambda (lit) (clause-has-lit? c lit)) satisfied-lits))
              clauses))
 
 (defun remove-lit-from-clauses (clauses lit)
-  "Remove lit from all clauses."
-  (mapcar #'(lambda (c) (remove lit c :test #'equal)) clauses))
+  "Remove lit from all clauses"
+  (mapcar #'(lambda (c) (clause-remove-lit c lit)) clauses))
 
 ;; Post: no more pure literals
 (defun dp-pure (clauses)
   "Pure literal elimination. Returns (values new-clauses assignment).
    A pure literal appears only in one polarity across all clauses."
-  (let ((pos (make-hash-table :test #'equal))   
+  (let ((pos (make-hash-table :test #'equal))   ;; TODO hash set API 
         (neg (make-hash-table :test #'equal)))
     ;; Collect all literals using lit->var/lit->val
     (dolist (c clauses)
-      (dolist (lit c)
+      (dolist (lit (clause-literals c)) ;; TODO clause-map 
         (let ((var (lit->var lit))
               (val (lit->val lit)))
           (if val
@@ -1182,10 +1268,12 @@
     (let ((pure-pos nil)
           (pure-neg nil))
       (maphash #'(lambda (v _)
+                   (declare (ignore _))  
                    (unless (gethash v neg)
                      (push v pure-pos)))
                pos)
       (maphash #'(lambda (v _)
+                   (declare (ignore _))
                    (unless (gethash v pos)
                      (push v pure-neg)))
                neg)
@@ -1202,10 +1290,11 @@
 (defun dp-unit (clauses &optional acc-assignment)
   "Unit propagation. Returns (values new-clauses assignment).
    A unit clause has exactly one literal, which must be true."
-  (let ((unit-lit (some #'(lambda (c) (and (== (length c) 1) (car c))) clauses)))
-    (if (null unit-lit)
+  (let ((unit-clause (find-if #'clause-unit? clauses)))
+    (if (null unit-clause)
         (values clauses acc-assignment)
-        (let* ((neg-lit (negate unit-lit))
+        (let* ((unit-lit (clause-unit-lit unit-clause))
+               (neg-lit (negate unit-lit))
                (var (lit->var unit-lit))
                (val (lit->val unit-lit))
                (new-clauses
@@ -1214,41 +1303,34 @@
                  neg-lit)))
           (dp-unit new-clauses (acons var val acc-assignment))))))
 
-;; TODO: better ways to pick variables 
 (defun dp-decide (cls) 
-  (some #'(lambda (c) (some #'lit->var c)) cls))
+  "Pick a variable from the clauses for resolution"
+  (some #'(lambda (c) 
+            (let ((lits (clause-literals c)))
+              (some #'lit->var lits)))
+        cls))
 
-(defun clause->set (clause)
-  "Convert a clause (list of literals) to a hash set for O(1) lookup."
-  (let ((ht (make-hash-table :test #'equal)))
-    (dolist (lit clause ht)
-      (setf (gethash lit ht) t))))
-
-(defun subsumes-set? (c1 c2-set c2-len)
-  "Return t if c1 subsumes c2 (c1 ⊆ c2).
-   c2-set is a hash table, c2-len is the length of c2."
-  (and (<= (length c1) c2-len)
-       (every #'(lambda (lit) (gethash lit c2-set)) c1)))
+(defun clause-subsumes? (c1 c2)
+  "Return t if c1 subsumes c2 (c1 ⊆ c2)"
+  (let ((c1-lits (clause-literals c1)))
+    (and (<= (length c1-lits) (clause-size c2))
+         (every #'(lambda (lit) (clause-has-lit? c2 lit)) c1-lits))))
 
 (defun remove-subsumed (clauses)
   "Remove clauses that are subsumed by other clauses in the list.
-   Keep smaller clauses that subsume larger ones.
-   Uses hash tables for O(1) literal lookup."
-  ;; Sort by length - shorter clauses first (they subsume longer ones)
-  (let* ((sorted (sort (copy-list clauses) #'< :key #'length))
+   Keep smaller clauses that subsume larger ones."
+  ;; Sort by size - smaller clauses first (they subsume larger ones)
+  (let* ((sorted (sort (copy-list clauses) #'< :key #'clause-size))
          (result nil))
     (dolist (c sorted)
-      (let ((c-set (clause->set c))
-            (c-len (length c)))
-        ;; Check if c is subsumed by anything in result (which are all shorter or equal)
-        ;; r subsumes c means r ⊆ c, so check if every lit in r is in c-set
-        (unless (some #'(lambda (r) (subsumes-set? r c-set c-len)) result)
-          ;; c is not subsumed; add it (no need to check if c subsumes result
-          ;; since result only contains shorter/equal clauses processed before c)
-          (push c result))))
+      ;; Check if c is subsumed by anything in result (which are all smaller or equal)
+      (unless (some #'(lambda (r) (clause-subsumes? r c)) result)
+        ;; c is not subsumed; add it
+        (push c result)))
     (nreverse result)))
 
 (defun dp-resolve (clauses var)
+  "Resolve on variable var, returning new clause set"
   (let ((pos-lit var)
         (neg-lit `(not ,var))
         (pos-clauses nil)
@@ -1256,19 +1338,19 @@
         (other-clauses nil))
     ;; Partition clauses
     (dolist (c clauses)
-      (cond ((in pos-lit c) (push c pos-clauses))
-            ((in neg-lit c) (push c neg-clauses))
+      (cond ((clause-has-lit? c pos-lit) (push c pos-clauses))
+            ((clause-has-lit? c neg-lit) (push c neg-clauses))
             (t (push c other-clauses))))
     ;; Generate resolvents
     (let ((resolvents nil))
       (dolist (pc pos-clauses)
         (dolist (nc neg-clauses)
-          (let ((resolvent (remove-dups
-                            (append (remove pos-lit pc :test #'equal)
-                                    (remove neg-lit nc :test #'equal)))))
+          (let* ((pc-lits (remove pos-lit (clause-literals pc) :test #'equal)) ;; TODO 
+                 (nc-lits (remove neg-lit (clause-literals nc) :test #'equal))
+                 (resolvent-lits (remove-dups (append pc-lits nc-lits))))
             ;; Skip clauses containing both p and (not p)
-            (unless (some #'(lambda (lit) (has-opposite lit resolvent)) resolvent)
-              (push resolvent resolvents)))))
+            (unless (some #'(lambda (lit) (has-opposite lit resolvent-lits)) resolvent-lits)
+              (push (make-clause resolvent-lits) resolvents)))))
       ;; Remove subsumed clauses to keep clause set small
       (remove-subsumed (append other-clauses resolvents)))))
 
@@ -1276,13 +1358,13 @@
   (let+ (((&values cls unit-asgn) (dp-unit cls)))
     ;; Early termination after unit propagation
     (cond ((null cls) (values 'sat (append unit-asgn acc-assignment)))
-          ((member nil cls :test #'equal) (values 'unsat nil))
+          ((some #'clause-empty? cls) (values 'unsat nil))
           (t
            (let+ (((&values cls pure-asgn) (dp-pure cls))
                   (asgn (append unit-asgn pure-asgn acc-assignment)))
              ;; Early termination after pure literal elimination
              (cond ((null cls) (values 'sat asgn))
-                   ((member nil cls :test #'equal) (values 'unsat nil))
+                   ((some #'clause-empty? cls) (values 'unsat nil))
                    (t
                     (let* ((var (dp-decide cls))
                            (new-cls (dp-resolve cls var)))
