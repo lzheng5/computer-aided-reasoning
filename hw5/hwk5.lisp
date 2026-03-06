@@ -1136,6 +1136,45 @@
 |#
 
 ;;; ============================================================
+;;; Hash Set API - Simple set abstraction over hash tables
+;;; ============================================================
+
+(defun make-hash-set ()
+  "Create an empty hash set"
+  (make-hash-table :test #'equal))
+
+(defun hash-set-add (set elem)
+  "Add element to hash set (mutates set)"
+  (setf (gethash elem set) t))
+
+(defun hash-set-contains? (set elem)
+  "Check if element is in hash set"
+  (gethash elem set))
+
+(defun hash-set-size (set)
+  "Return number of elements in hash set"
+  (hash-table-count set))
+
+(defun hash-set-map (fn set)
+  "Apply function fn to each element in set"
+  (maphash #'(lambda (k v) (declare (ignore v)) (funcall fn k)) set))
+
+(defun hash-set->list (set)
+  "Convert hash set to list"
+  (let ((result nil))
+    (hash-set-map #'(lambda (elem) (push elem result)) set)
+    result))
+
+(defun hash-set-copy-except (set elem)
+  "Create a new hash set with all elements except elem"
+  (let ((new-set (make-hash-set)))
+    (hash-set-map #'(lambda (e) 
+                      (unless (equal e elem)
+                        (hash-set-add new-set e)))
+                  set)
+    new-set))
+
+;;; ============================================================
 ;;; Clause API - Abstraction over clause representation
 ;;; Current implementation: Hash sets with symbol variables
 ;;;
@@ -1144,52 +1183,59 @@
 ;;; variables or bit vectors) without modifying the DP algorithm.
 ;;; ============================================================
 
+;; TODO: numbered variables 
+;; TODO: bit vectors 
+
 (defun make-clause (literals)
   "Create a clause from a list of literals"
-  (let ((ht (make-hash-table :test #'equal)))
-    (dolist (lit literals ht)
-      (setf (gethash lit ht) t))))
+  (let ((clause (make-hash-set)))
+    (dolist (lit literals clause)
+      (hash-set-add clause lit))))
 
 (defun clause-has-lit? (clause lit)
   "Check if literal is in clause"
-  (gethash lit clause))
-
-(defun clause-remove-lit (clause lit)
-  "Return new clause with literal removed"
-  (let ((new-ht (make-hash-table :test #'equal)))
-    (maphash #'(lambda (k v)
-                 (declare (ignore v))
-                 (unless (equal k lit)
-                   (setf (gethash k new-ht) t)))
-             clause)
-    new-ht))
+  (hash-set-contains? clause lit))
 
 (defun clause-size (clause)
   "Return number of literals in clause"
-  (hash-table-count clause))
-
-(defun clause-literals (clause)
-  "Return list of all literals in clause"
-  (let ((lits nil))
-    (maphash #'(lambda (k v) (declare (ignore v)) (push k lits)) clause)
-    lits))
+  (hash-set-size clause))
 
 (defun clause-empty? (clause)
   "Check if clause is empty"
-  (zerop (hash-table-count clause)))
+  (zerop (hash-set-size clause)))
 
 (defun clause-unit? (clause)
   "Check if clause is a unit clause (size 1)"
-  (= 1 (hash-table-count clause)))
+  (= 1 (hash-set-size clause)))
 
 (defun clause-unit-lit (clause)
   "Get the single literal from a unit clause"
   (assert (clause-unit? clause) () "Not a unit clause")
-  (maphash #'(lambda (k v) (declare (ignore v)) (return-from clause-unit-lit k)) clause))
+  (hash-set-map #'(lambda (lit) (return-from clause-unit-lit lit)) clause))
 
-(defun clause-merge (literals-list)
-  "Create clause from multiple literal lists (for resolution)"
-  (make-clause (remove-dups (apply #'append literals-list))))
+(defun clause-foreach (fn clause)
+  "Apply function fn to each literal in clause (for side effects only)"
+  (hash-set-map fn clause))
+
+(defun clause-subsumes? (c1 c2)
+  "Return t if c1 subsumes c2 (c1 ⊆ c2)"
+  (and (<= (clause-size c1) (clause-size c2))
+       (block check
+         (clause-foreach #'(lambda (lit)
+                             (unless (clause-has-lit? c2 lit)
+                               (return-from check nil)))
+                         c1)
+         t)))
+
+(defun clause-copy (clause)
+  "Create a deep copy of a clause (copies the hash table)"
+  (let ((new-clause (make-hash-set)))
+    (clause-foreach #'(lambda (lit) (hash-set-add new-clause lit)) clause)
+    new-clause))
+
+(defun clause-remove-lit! (clause lit)
+  "Destructively remove literal from clause (mutates clause)"
+  (remhash lit clause))
 
 ;;; Test the clause API
 (let ((c (make-clause '(p q (not r)))))
@@ -1209,7 +1255,8 @@
   (assert (= 0 (clause-size c))))
 
 (let* ((c1 (make-clause '(p q r)))
-       (c2 (clause-remove-lit c1 'q)))
+       (c2 (clause-copy c1)))
+  (clause-remove-lit! c2 'q)
   (assert (clause-has-lit? c1 'q))
   (assert (not (clause-has-lit? c2 'q)))
   (assert (= 2 (clause-size c2))))
@@ -1220,7 +1267,7 @@
 
 (defun cnf->clauses (f)
   "Convert a CNF formula to a list of clauses (using clause representation)"
-  (labels ((clause->list (c)
+  (labels ((unpack (c)
              "Convert a clause formula to a list of literals"
              (match c
                ((type boolean) (list c))
@@ -1233,7 +1280,7 @@
       ((type symbol) (list (make-clause (list f))))
       ((list 'not _) (list (make-clause (list f))))
       ((list* 'or args) (list (make-clause args)))
-      ((list* 'and args) (mapcar #'(lambda (c) (make-clause (clause->list c))) args))
+      ((list* 'and args) (mapcar #'(lambda (c) (make-clause (unpack c))) args))
       (_ (error "Not in CNF: ~A" f)))))
 
 ;;; ============================================================
@@ -1246,37 +1293,32 @@
                  (some #'(lambda (lit) (clause-has-lit? c lit)) satisfied-lits))
              clauses))
 
-(defun remove-lit-from-clauses (clauses lit)
-  "Remove lit from all clauses"
-  (mapcar #'(lambda (c) (clause-remove-lit c lit)) clauses))
-
 ;; Post: no more pure literals
 (defun dp-pure (clauses)
   "Pure literal elimination. Returns (values new-clauses assignment).
    A pure literal appears only in one polarity across all clauses."
-  (let ((pos (make-hash-table :test #'equal))   ;; TODO hash set API 
-        (neg (make-hash-table :test #'equal)))
+  (let ((pos (make-hash-set))
+        (neg (make-hash-set)))
     ;; Collect all literals using lit->var/lit->val
     (dolist (c clauses)
-      (dolist (lit (clause-literals c)) ;; TODO clause-map 
-        (let ((var (lit->var lit))
-              (val (lit->val lit)))
-          (if val
-              (setf (gethash var pos) t)
-              (setf (gethash var neg) t)))))
+      (clause-foreach #'(lambda (lit)
+                          (let ((var (lit->var lit))
+                                (val (lit->val lit)))
+                            (if val
+                                (hash-set-add pos var)
+                                (hash-set-add neg var))))
+                      c))
     ;; Find pure literals and build assignment
     (let ((pure-pos nil)
           (pure-neg nil))
-      (maphash #'(lambda (v _)
-                   (declare (ignore _))  
-                   (unless (gethash v neg)
-                     (push v pure-pos)))
-               pos)
-      (maphash #'(lambda (v _)
-                   (declare (ignore _))
-                   (unless (gethash v pos)
-                     (push v pure-neg)))
-               neg)
+      (hash-set-map #'(lambda (v)
+                        (unless (hash-set-contains? neg v)
+                          (push v pure-pos)))
+                    pos)
+      (hash-set-map #'(lambda (v)
+                        (unless (hash-set-contains? pos v)
+                          (push v pure-neg)))
+                    neg)
       (let ((assignment (append (mapcar #'(lambda (v) (cons v t)) pure-pos)
                                 (mapcar #'(lambda (v) (cons v nil)) pure-neg)))
             (pure-lits (append pure-pos
@@ -1290,31 +1332,33 @@
 (defun dp-unit (clauses &optional acc-assignment)
   "Unit propagation. Returns (values new-clauses assignment).
    A unit clause has exactly one literal, which must be true."
-  (let ((unit-clause (find-if #'clause-unit? clauses)))
-    (if (null unit-clause)
-        (values clauses acc-assignment)
-        (let* ((unit-lit (clause-unit-lit unit-clause))
-               (neg-lit (negate unit-lit))
-               (var (lit->var unit-lit))
-               (val (lit->val unit-lit))
-               (new-clauses
-                (remove-lit-from-clauses
-                 (remove-satisfied-clauses clauses (list unit-lit))
-                 neg-lit)))
-          (dp-unit new-clauses (acons var val acc-assignment))))))
+  ;; Copy all clauses once, then destructively modify
+  (labels ((loop (clauses acc-assignment)
+             (let ((unit-clause (find-if #'clause-unit? clauses)))
+               (if (null unit-clause)
+                   (values clauses acc-assignment)
+                   (let* ((unit-lit (clause-unit-lit unit-clause))
+                          (neg-lit (negate unit-lit))
+                          (var (lit->var unit-lit))
+                          (val (lit->val unit-lit)))
+                     ;; Remove satisfied clauses
+                     (setf clauses (remove-satisfied-clauses clauses (list unit-lit)))
+                     ;; Destructively remove negated literal from remaining clauses
+                     (dolist (c clauses) (clause-remove-lit! c neg-lit))
+                     (loop clauses (acons var val acc-assignment)))))))
+    (loop (mapcar #'clause-copy clauses) acc-assignment)))
 
+;; TODO: improve 
 (defun dp-decide (cls) 
   "Pick a variable from the clauses for resolution"
   (some #'(lambda (c) 
-            (let ((lits (clause-literals c)))
-              (some #'lit->var lits)))
+            (block find-var
+              (clause-foreach #'(lambda (lit)
+                                  (let ((var (lit->var lit)))
+                                    (return-from find-var var)))
+                              c)
+              nil))
         cls))
-
-(defun clause-subsumes? (c1 c2)
-  "Return t if c1 subsumes c2 (c1 ⊆ c2)"
-  (let ((c1-lits (clause-literals c1)))
-    (and (<= (length c1-lits) (clause-size c2))
-         (every #'(lambda (lit) (clause-has-lit? c2 lit)) c1-lits))))
 
 (defun remove-subsumed (clauses)
   "Remove clauses that are subsumed by other clauses in the list.
@@ -1345,14 +1389,24 @@
     (let ((resolvents nil))
       (dolist (pc pos-clauses)
         (dolist (nc neg-clauses)
-          (let* ((pc-lits (remove pos-lit (clause-literals pc) :test #'equal)) ;; TODO 
-                 (nc-lits (remove neg-lit (clause-literals nc) :test #'equal))
-                 (resolvent-lits (remove-dups (append pc-lits nc-lits))))
-            ;; Skip clauses containing both p and (not p)
-            (unless (some #'(lambda (lit) (has-opposite lit resolvent-lits)) resolvent-lits)
-              (push (make-clause resolvent-lits) resolvents)))))
+          ;; Build resolvent and detect tautologies on the fly
+          (block next-resolvent
+            (let ((resolvent (make-hash-set)))
+              (clause-foreach #'(lambda (lit)
+                                  (unless (equal lit pos-lit)
+                                    (hash-set-add resolvent lit)))
+                              pc)
+              (clause-foreach #'(lambda (lit)
+                                  (unless (equal lit neg-lit)
+                                    ;; Check for tautology as we add from nc
+                                    (when (clause-has-lit? resolvent (negate lit))
+                                      (return-from next-resolvent))
+                                    (hash-set-add resolvent lit)))
+                              nc)
+              (push resolvent resolvents)))))
       ;; Remove subsumed clauses to keep clause set small
-      (remove-subsumed (append other-clauses resolvents)))))
+      (remove-subsumed 
+         (append other-clauses resolvents))))))
 
 (defun dp-sat (cls &optional acc-assignment) 
   (let+ (((&values cls unit-asgn) (dp-unit cls)))
