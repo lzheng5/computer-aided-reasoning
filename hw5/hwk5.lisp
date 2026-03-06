@@ -760,6 +760,11 @@
     ((list 'not v) v)
     (_ lit)))
 
+(defun lit->val (lit)
+  (match lit
+    ((list 'not _) nil)
+    (_ t)))
+
 ;; pre: no duplicates and opposites
 (defun p-simplify-shannon (f &optional env)
   (match f
@@ -784,7 +789,7 @@
                                   ((list 'not b)
                                    (match b
                                      ((type symbol) (let+ (((&values v found) (key-alist->val b env)))
-                                                        (if found (not v) a)))
+                                                      (if found (not v) a)))
                                      (_ a)))
                                   (_ a)))
                             as))
@@ -792,7 +797,7 @@
                 ((&values nlits as) (partition
                                      #'(lambda (a)
                                          (match a
-                                           ((list 'not (type symbol))
+                                           ((list 'not (type symbol)) a)
                                            (_ nil)))
                                      nvars))
                 (nvars (mapcar #'lit->var nlits)) nlits))
@@ -800,7 +805,7 @@
                               (extend nvars (mapcar #'(lambda (v) (not id)) nvars)
                                       env))))
            `(,op ,@vars ,@nlits ,@(mapcar #'(lambda (a) (p-simplify-shannon a nenv)) as)))
-         `(,op ,@(mapcar #'(lambda (a) (p-simplify-shannon a env)) as))))))
+         `(,op ,@(mapcar #'(lambda (a) (p-simplify-shannon a env)) as))))
 
 (assertf #'p-simplify-shannon '(iff nil p q) '(iff nil p q))
 (assertf #'p-simplify-shannon '(and (or p q) (or r q p) p) '(and p (or t q) (or r q t)))
@@ -1038,9 +1043,13 @@
          (cnf (p-simplify cnf)))
     (values cnf amap)))
 
+(defun acl2s-valid? (f)
+  "Check if f is valid (tautology) using ACL2s"
+  (== (car (acl2s-check-equal f 't)) nil))
+
 (defun acl2s-unsat? (f)
-  "Check if f is unsatisfiable using ACL2s (f is UNSAT iff (not f) is valid)"
-  (== (car (acl2s-check-equal `(not ,f) 't)) nil))
+  "Check if f is unsatisfiable using ACL2s (f is UNSAT iff (negate f) is valid)"
+  (acl2s-valid? (negate f)))
 
 (defun test-tseitin (f)
   "Test equisatisfiability: f is UNSAT iff (tseitin f) is UNSAT"
@@ -1149,52 +1158,68 @@
     ((list* 'and args) (mapcar #'clause->list args))
     (_ (error "Not in CNF: ~A" f))))
 
+(defun remove-satisfied-clauses (clauses satisfied-lits)
+  "Remove all clauses containing any literal in satisfied-lits."
+  (remove-if #'(lambda (c)
+                 (some #'(lambda (lit) (in lit satisfied-lits)) c))
+             clauses))
+
+(defun remove-lit-from-clauses (clauses lit)
+  "Remove lit from all clauses."
+  (mapcar #'(lambda (c) (remove lit c :test #'equal)) clauses))
+
 ;; Post: no more pure literals
 (defun dp-pure (clauses)
-  "Pure literal elimination. Returns new clauses with pure literals removed.
+  "Pure literal elimination. Returns (values new-clauses assignment).
    A pure literal appears only in one polarity across all clauses."
   (let ((pos (make-hash-table :test #'equal))   ; vars appearing positive
         (neg (make-hash-table :test #'equal)))  ; vars appearing negative
-    ;; Collect all literals
+    ;; Collect all literals using lit->var/lit->val
     (dolist (c clauses)
       (dolist (lit c)
-        (match lit
-          ((list 'not v) (setf (gethash v neg) t))
-          ((type symbol) (setf (gethash lit pos) t))
-          (_ nil))))
-    ;; Find pure literals
-    (let ((pure-lits nil))
+        (let ((var (lit->var lit))
+              (val (lit->val lit)))
+          (if val
+              (setf (gethash var pos) t)
+              (setf (gethash var neg) t)))))
+    ;; Find pure literals and build assignment
+    (let ((pure-pos nil)
+          (pure-neg nil))
       (maphash #'(lambda (v _)
                    (unless (gethash v neg)
-                     (push v pure-lits)))
+                     (push v pure-pos)))
                pos)
       (maphash #'(lambda (v _)
                    (unless (gethash v pos)
-                     (push `(not ,v) pure-lits)))
+                     (push v pure-neg)))
                neg)
-      ;; Remove satisfied clauses
-      (if (null pure-lits)
-          clauses
-          (remove-if #'(lambda (c)
-                         (some #'(lambda (lit) (in lit pure-lits)) c))
-                     clauses)))))
+      (let ((assignment (append (mapcar #'(lambda (v) (cons v t)) pure-pos)
+                                (mapcar #'(lambda (v) (cons v nil)) pure-neg)))
+            (pure-lits (append pure-pos
+                               (mapcar #'(lambda (v) `(not ,v)) pure-neg))))
+        (if (null pure-lits)
+            (values clauses nil)
+            (values (remove-satisfied-clauses clauses pure-lits)
+                    assignment))))))
 
 ;; Post: no more unit clauses
-(defun dp-unit (clauses)
-  "Unit propagation. Returns new clauses after propagating unit clauses.
+(defun dp-unit (clauses &optional acc-assignment)
+  "Unit propagation. Returns (values new-clauses assignment).
    A unit clause has exactly one literal, which must be true."
   (let ((unit-lit (some #'(lambda (c) (and (== (length c) 1) (car c))) clauses)))
     (if (null unit-lit)
-        clauses
+        (values clauses acc-assignment)
         (let* ((neg-lit (negate unit-lit))
+               (var (lit->var unit-lit))
+               (val (lit->val unit-lit))
                (new-clauses
-                (mapcar 
-                  #'(lambda (c) (remove neg-lit c :test #'equal))
-                  (remove-if #'(lambda (c) (in unit-lit c)) clauses))))
-          (dp-unit new-clauses)))))
+                (remove-lit-from-clauses
+                 (remove-satisfied-clauses clauses (list unit-lit))
+                 neg-lit)))
+          (dp-unit new-clauses (acons var val acc-assignment))))))
 
 (defun dp-decide (cls) 
-  (some #'(lambda (c) (some #'symbolp c)) cls))
+  (some #'(lambda (c) (some #'lit->var c)) cls))
 
 (defun dp-resolve (clauses var)
   (let ((pos-lit var)
@@ -1219,20 +1244,86 @@
               (push resolvent resolvents)))))
       (append other-clauses resolvents))))
 
-(defun dp-sat (cls) 
-  (let* ((cls (dp-unit cls))
-         (cls (dp-pure cls)))
-    (cond ((null cls) 'sat)                          
-          ((member nil cls :test #'equal) 'unsat)    
+(defun dp-sat (cls &optional acc-assignment) 
+  (let+ (((&values cls unit-asgn) (dp-unit cls)))
+    ;; Early termination after unit propagation
+    (cond ((null cls) (values 'sat (append unit-asgn acc-assignment)))
+          ((member nil cls :test #'equal) (values 'unsat nil))
           (t
-           (let* ((var (dp-decide cls))
-                  (new-cls (dp-resolve cls var)))
-             (dp-sat new-cls))))))
+           (let+ (((&values cls pure-asgn) (dp-pure cls))
+                  (asgn (append unit-asgn pure-asgn acc-assignment)))
+             ;; Early termination after pure literal elimination
+             (cond ((null cls) (values 'sat asgn))
+                   ((member nil cls :test #'equal) (values 'unsat nil))
+                   (t
+                    (let* ((var (dp-decide cls))
+                           (new-cls (dp-resolve cls var)))
+                      (dp-sat new-cls asgn)))))))))
 
 (defun dp (f) 
   (let* ((cnf (tseitin f))
          (clauses (cnf->clauses cnf)))
     (dp-sat clauses)))
+
+(defun subst-formula (f assignment)
+  "Substitute variables in formula f according to assignment alist"
+  (match f
+    ((type boolean) f)
+    ((type symbol)
+     (let ((val (assoc f assignment :test #'equal)))
+       (if val (cdr val) f)))
+    ((list* op args) `(,op ,@(mapcar #'(lambda (a) (subst-formula a assignment)) args)))
+    (_ f)))
+
+(defun verify-sat (f result assignment)
+  "Verify if result and assignment are correct for formula f.
+   If result is 'sat, verify that substituting assignment makes f valid.
+   If result is 'unsat, verify using ACL2s."
+  (case result
+    (sat
+     (let* ((subst-f (subst-formula f assignment)))
+       ;; After partial substitution, remaining formula should be valid (tautology)
+       (assert (acl2s-valid? subst-f) () 
+               "Partial assignment does not make formula valid: ~A~%Assignment: ~A~%Result: ~A" 
+               f assignment subst-f)))
+    (unsat
+     (assert (acl2s-unsat? f) () "Formula is not UNSAT: ~A" f))
+    (otherwise
+     (error "Invalid result: ~A (expected 'sat or 'unsat)" result))))
+
+(defun test-dp (f)
+  "Test dp on formula f by verifying its result"
+  (let+ (((&values result assignment) (dp f)))
+    (verify-sat f result assignment)))
+
+;; Tests generated with Claude
+;; Basic SAT tests
+(test-dp 'p)                                    ; single var - SAT
+(test-dp '(or p q))                             ; simple disjunction - SAT
+(test-dp '(and p q))                            ; simple conjunction - SAT
+(test-dp '(implies p q))                        ; implication - SAT
+(test-dp '(iff p q))                            ; biconditional - SAT
+
+;; Basic UNSAT tests
+(test-dp '(and p (not p)))                      ; contradiction - UNSAT
+(test-dp '(and (or p q) (not p) (not q)))       ; UNSAT
+(test-dp '(and p q (or (not p) (not q)) (or p (not q)) (or (not p) q)))  ; UNSAT
+
+;; More complex SAT formulas
+(test-dp '(and (or p q) (or (not p) r)))        ; SAT
+(test-dp '(and (or p q r) (or (not p) (not q)) (or (not r) p)))  ; SAT
+(test-dp '(or (and p q) (and (not p) r)))       ; SAT
+(test-dp '(iff (and p q) (or r s)))             ; SAT
+
+;; With non-variable atoms
+(test-dp '(or (foo a) (bar b)))                 ; SAT
+(test-dp '(and (foo x) (not (foo x))))          ; UNSAT
+(test-dp '(implies (f a b) (g c)))              ; SAT
+
+;; Nested formulas
+(test-dp '(and (or p (not q)) (or q (not r)) (or r (not p))))  ; SAT
+(test-dp '(xor p q))                            ; SAT
+(test-dp '(if p q r))                           ; SAT
 
 #|
 
