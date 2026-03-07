@@ -948,6 +948,7 @@
     (iff
      ;; v ↔ (a ↔ b): both same polarity
      ;; (¬v ∨ ¬a ∨ b) ∧ (¬v ∨ a ∨ ¬b) ∧ (v ∨ ¬a ∨ ¬b) ∧ (v ∨ a ∨ b)
+     (assert (= (length args) 2) () "iff must be binary after unchaining")
      (let ((a (first args))
            (b (second args)))
        `((or (not ,v) (not ,a) ,b)
@@ -958,6 +959,7 @@
     (xor
      ;; v ↔ (a ⊕ b): different polarity
      ;; (¬v ∨ ¬a ∨ ¬b) ∧ (¬v ∨ a ∨ b) ∧ (v ∨ ¬a ∨ b) ∧ (v ∨ a ∨ ¬b)
+     (assert (= (length args) 2) () "xor must be binary after unchaining")
      (let ((a (first args))
            (b (second args)))
        `((or (not ,v) (not ,a) (not ,b))
@@ -968,6 +970,7 @@
     (if
      ;; v ↔ (if a b c) ≡ v ↔ ((a ∧ b) ∨ (¬a ∧ c))
      ;; (¬v ∨ ¬a ∨ b) ∧ (¬v ∨ a ∨ c) ∧ (v ∨ ¬a ∨ ¬b) ∧ (v ∨ a ∨ ¬c)
+     (assert (= (length args) 3) () "if must be ternary")
      (let ((a (first args))
            (b (second args))
            (c (third args)))
@@ -1030,7 +1033,7 @@
          ((&values skeleton amap) (p-skeleton simplified))
          (unchained (tseitin-unchain skeleton))
          (cnf (tseitin-transform unchained))
-         (cnf (p-simplify cnf)))
+         (cnf (p-simplify cnf))) ;; p-simplify preserves CNF
     (values cnf amap)))
 
 (defun acl2s-valid? (f)
@@ -1046,6 +1049,7 @@
   (let* ((cnf (tseitin f))
          (f-unsat (acl2s-unsat? f))
          (cnf-unsat (acl2s-unsat? cnf)))
+    (assert (cnfp cnf) () "Result not in CNF: ~A" cnf)
     (assert (eq f-unsat cnf-unsat) ()
             "Equisat failed for ~A: f-unsat=~A, cnf-unsat=~A" f f-unsat cnf-unsat)))
 
@@ -1472,12 +1476,12 @@
     ;; TODO: Early exit if blowup <= 0
     ;; TODO: Tie-breaking with MOMS heuristic (prefer variables in smaller clauses)
     (let ((best-var nil)
-          (best-score most-positive-fixnum))
+          (best-score 0))
       (maphash #'(lambda (var counts)
                    (let* ((m (car counts))
                           (n (cdr counts))
                           (score (- (* m n) m n)))
-                     (when (< score best-score)
+                     (when (or (null best-var) (< score best-score))
                        (setf best-var var
                              best-score score))))
                var-counts)
