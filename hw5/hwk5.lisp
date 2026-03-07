@@ -1452,17 +1452,36 @@
                      (loop cls))))))
     (loop (mapcar #'clause-copy cls)))) 
 
-;; TODO: improve 
 (defun dp-decide (cls) 
-  "Pick a variable from the clauses for resolution"
-  (some #'(lambda (cl) 
-            (block find-var
-              (clause-map #'(lambda (lit)
-                                  (let ((var (lit-var lit)))
-                                    (return-from find-var var)))
-                              cl)
-              nil))
-        cls))
+  "Pick variable with minimum resolution blowup: m*n - m - n"
+  (let ((var-counts (make-hash-table :test #'eql))) ; var -> (pos-count . neg-count)
+    ;; Collect variable occurrences
+    (dolist (cl cls)
+      (clause-map #'(lambda (lit)
+                      (let* ((var (lit-var lit))
+                             (pos? (lit-sign lit))
+                             (counts (gethash var var-counts)))
+                        (if counts
+                            (if pos?
+                                (incf (car counts))
+                                (incf (cdr counts)))
+                            (setf (gethash var var-counts)
+                                  (if pos? (cons 1 0) (cons 0 1))))))
+                  cl))
+    ;; Find variable with minimum blowup: m*n - m - n
+    ;; TODO: Early exit if blowup <= 0
+    ;; TODO: Tie-breaking with MOMS heuristic (prefer variables in smaller clauses)
+    (let ((best-var nil)
+          (best-score most-positive-fixnum))
+      (maphash #'(lambda (var counts)
+                   (let* ((m (car counts))
+                          (n (cdr counts))
+                          (score (- (* m n) m n)))
+                     (when (< score best-score)
+                       (setf best-var var
+                             best-score score))))
+               var-counts)
+      best-var)))
 
 (defun remove-subsumed (cls)
   "Remove clauses that are subsumed by other clauses in the list.
