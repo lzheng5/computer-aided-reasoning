@@ -1044,6 +1044,30 @@
   "Check if f is unsatisfiable using ACL2s (f is UNSAT iff (negate f) is valid)"
   (acl2s-valid? (negate f)))
 
+(defun literalp (f)
+  (match f
+    ((type boolean) t)
+    ((type symbol) t)
+    ((list 'not a) (or (symbolp a) (booleanp a)))
+    (_ nil)))
+
+(defun clausep (f)
+  (match f
+    ((type boolean) t)
+    ((type symbol) t)
+    ((list 'not a) (literalp f))
+    ((list* 'or args) (every #'literalp args))
+    (_ nil)))
+
+(defun cnfp (f)
+  (match f
+    ((type boolean) t)
+    ((type symbol) t)
+    ((list 'not a) (literalp f))
+    ((list* 'or args) (clausep f))
+    ((list* 'and args) (every #'clausep args))
+    (_ nil)))
+
 (defun test-tseitin (f)
   "Test equisatisfiability: f is UNSAT iff (tseitin f) is UNSAT"
   (let* ((cnf (tseitin f))
@@ -1081,29 +1105,6 @@
 (test-tseitin '(or (foo a b) (bar c)))
 (test-tseitin '(and (f x) (g y) (not (h z))))
 
-(defun literalp (f)
-  (match f
-    ((type boolean) t)
-    ((type symbol) t)
-    ((list 'not a) (or (symbolp a) (booleanp a)))
-    (_ nil)))
-
-(defun clausep (f)
-  (match f
-    ((type boolean) t)
-    ((type symbol) t)
-    ((list 'not a) (literalp f))
-    ((list* 'or args) (every #'literalp args))
-    (_ nil)))
-
-(defun cnfp (f)
-  (match f
-    ((type boolean) t)
-    ((type symbol) t)
-    ((list 'not a) (literalp f))
-    ((list* 'or args) (clausep f))
-    ((list* 'and args) (every #'clausep args))
-    (_ nil)))
 
 #|
 
@@ -1487,21 +1488,21 @@
                var-counts)
       best-var)))
 
+;; TODO: use signatures to speed up subsumption  
 (defun remove-subsumed (cls)
   "Remove clauses that are subsumed by other clauses in the list.
-   Keep smaller clauses that subsume larger ones."
+   The value bound to cls shouldn't be used after the function call as it will be modified in place."
   ;; Sort by size - smaller clauses first (they subsume larger ones)
   (let* ((sorted (sort cls #'< :key #'clause-size))
          (result nil))
     (dolist (cl sorted)
-      ;; Check if cl is subsumed by anything in result (which are all smaller or equal)
+      ;; If cl is not subsumed by anything in result (which are all smaller or equal), then add it
       (unless (some #'(lambda (r) (clause-subsumes? r cl)) result)
-        ;; cl is not subsumed; add it
         (push cl result)))
-    ;; Prefer smaller clauses at the front 
+    ;; Prefer smaller clauses in the front 
     (nreverse result)))
 
-(defun dp-resolve (cls var)
+(defun resolve-var (cls var)
   "Resolve on variable var, returning new clause set"
   (let ((pos-lit (make-lit var t))
         (neg-lit (make-lit var nil))
@@ -1532,9 +1533,13 @@
                                     (hash-set-add resolvent lit)))
                               ncl)
               (push resolvent resolvents)))))
-      ;; Remove subsumed clauses to keep clause set small
-      (remove-subsumed 
-         (append other-cls resolvents)))))
+      (append other-cls resolvents))))
+
+(defun dp-resolve (cls var) 
+  "Resolve on variable var and apply subsumption to keep clause set small.
+   Return new clause set. "
+  (remove-subsumed 
+    (resolve-var cls var)))
 
 (defun dp-sat (cls asgn) 
   "Main DP loop: apply unit propagation, pure literal elimination, and resolution recursively.
