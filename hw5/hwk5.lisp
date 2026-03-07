@@ -1285,7 +1285,7 @@
   (assert (clause-unit? clause) () "Not a unit clause")
   (hash-set-map #'(lambda (lit) (return-from clause-unit-lit lit)) clause))
 
-(defun clause-foreach (fn clause)
+(defun clause-map (fn clause)
   "Apply function fn to each literal in clause (for side effects only)"
   (hash-set-map fn clause))
 
@@ -1293,7 +1293,7 @@
   "Return t if c1 subsumes c2 (c1 ⊆ c2)"
   (and (<= (clause-size c1) (clause-size c2))
        (block check
-         (clause-foreach #'(lambda (lit)
+         (clause-map #'(lambda (lit)
                              (unless (clause-has-lit? c2 lit)
                                (return-from check nil)))
                          c1)
@@ -1302,7 +1302,7 @@
 (defun clause-copy (clause)
   "Create a deep copy of a clause (copies the hash table)"
   (let ((new-clause (make-hash-set)))
-    (clause-foreach #'(lambda (lit) (hash-set-add new-clause lit)) clause)
+    (clause-map #'(lambda (lit) (hash-set-add new-clause lit)) clause)
     new-clause))
 
 (defun clause-remove-lit! (clause lit)
@@ -1332,6 +1332,27 @@
   (assert (clause-has-lit? c1 'q))
   (assert (not (clause-has-lit? c2 'q)))
   (assert (= 2 (clause-size c2))))
+
+;;; ============================================================
+;;; Assignment Hash Table API
+;;; ============================================================
+
+(defun make-assignment ()
+  "Create an empty assignment hash table"
+  (make-hash-table :test #'eql))
+
+(defun assignment-set (asgn var val)
+  "Set variable to value in assignment (mutates asgn)"
+  (setf (gethash var asgn) val))
+
+(defun assignment->alist (asgn vm)
+  "Convert numeric assignment hash table to symbolic alist using var-manager"
+  (let ((amap nil))
+    (maphash #'(lambda (num-var val)
+                 (let ((sym-var (var-manager-get-sym vm num-var)))
+                   (push (cons sym-var val) amap)))
+             asgn)
+    amap))
 
 ;;; ============================================================
 ;;; CNF -> Clauses Conversion
@@ -1370,24 +1391,22 @@
                  (some #'(lambda (lit) (clause-has-lit? c lit)) satisfied-lits))
              clauses))
 
-;; TODO: assignment hash table 
-
 ;; Post: no more pure literals
-(defun dp-pure (clauses)
-  "Pure literal elimination. Returns (values new-clauses assignment).
+(defun dp-pure (clauses asgn)
+  "Pure literal elimination. Returns simplified clauses, mutates asgn.
    A pure literal appears only in one polarity across all clauses."
   (let ((pos (make-hash-set))
         (neg (make-hash-set)))
     ;; Collect all literals using numeric literal operations
     (dolist (c clauses)
-      (clause-foreach #'(lambda (lit)
+      (clause-map #'(lambda (lit)
                           (let ((var (lit-var lit))
                                 (pos? (lit-sign lit))) 
                             (if pos?
                                 (hash-set-add pos var)
                                 (hash-set-add neg var))))
                       c))
-    ;; Find pure literals and build assignment
+    ;; Find pure literals and update assignment
     (let ((pure-pos nil)
           (pure-neg nil))
       (hash-set-map #'(lambda (v)
@@ -1398,24 +1417,25 @@
                         (unless (hash-set-contains? pos v)
                           (push v pure-neg)))
                     neg)
-      (let ((assignment (append (mapcar #'(lambda (v) (cons v t)) pure-pos)
-                                (mapcar #'(lambda (v) (cons v nil)) pure-neg)))
-            (pure-lits (append (mapcar #'(lambda (v) (make-lit v t)) pure-pos)
+      (let ((pure-lits (append (mapcar #'(lambda (v) (make-lit v t)) pure-pos)
                                (mapcar #'(lambda (v) (make-lit v nil)) pure-neg))))
+        (dolist (v pure-pos)
+          (assignment-set asgn v t))
+        (dolist (v pure-neg)
+          (assignment-set asgn v nil))
         (if (null pure-lits)
-            (values clauses nil)
-            (values (remove-satisfied-clauses clauses pure-lits)
-                    assignment))))))
+            clauses
+            (remove-satisfied-clauses clauses pure-lits))))))
 
 ;; Post: no more unit clauses
-(defun dp-unit (clauses &optional acc-assignment)
-  "Unit propagation. Returns (values new-clauses assignment).
+(defun dp-unit (clauses asgn)
+  "Unit propagation. Returns simplified clauses, mutates asgn.
    A unit clause has exactly one literal, which must be true."
   ;; Copy all clauses once, then destructively modify
-  (labels ((loop (clauses acc-assignment)
+  (labels ((loop (clauses)
              (let ((unit-clause (find-if #'clause-unit? clauses)))
                (if (null unit-clause)
-                   (values clauses acc-assignment)
+                   clauses
                    (let* ((unit-lit (clause-unit-lit unit-clause))
                           (neg-lit (lit-negate unit-lit))
                           (var (lit-var unit-lit))
@@ -1424,15 +1444,16 @@
                      (setf clauses (remove-satisfied-clauses clauses (list unit-lit)))
                      ;; Destructively remove negated literal from remaining clauses
                      (dolist (c clauses) (clause-remove-lit! c neg-lit))
-                     (loop clauses (acons var val acc-assignment)))))))
-    (loop (mapcar #'clause-copy clauses) acc-assignment)))
+                     (assignment-set asgn var val)
+                     (loop clauses))))))
+    (loop (mapcar #'clause-copy clauses)))) 
 
 ;; TODO: improve 
 (defun dp-decide (cls) 
   "Pick a variable from the clauses for resolution"
   (some #'(lambda (c) 
             (block find-var
-              (clause-foreach #'(lambda (lit)
+              (clause-map #'(lambda (lit)
                                   (let ((var (lit-var lit)))
                                     (return-from find-var var)))
                               c)
@@ -1443,7 +1464,7 @@
   "Remove clauses that are subsumed by other clauses in the list.
    Keep smaller clauses that subsume larger ones."
   ;; Sort by size - smaller clauses first (they subsume larger ones)
-  (let* ((sorted (sort (copy-list clauses) #'< :key #'clause-size))
+  (let* ((sorted (sort clauses #'< :key #'clause-size))
          (result nil))
     (dolist (c sorted)
       ;; Check if c is subsumed by anything in result (which are all smaller or equal)
@@ -1471,11 +1492,11 @@
           ;; Build resolvent and detect tautologies on the fly
           (block next-resolvent
             (let ((resolvent (make-hash-set)))
-              (clause-foreach #'(lambda (lit)
+              (clause-map #'(lambda (lit)
                                   (unless (= lit pos-lit)
                                     (hash-set-add resolvent lit)))
                               pc)
-              (clause-foreach #'(lambda (lit)
+              (clause-map #'(lambda (lit)
                                   (unless (= lit neg-lit)
                                     ;; Check for tautology as we add from nc
                                     (when (clause-has-lit? resolvent (lit-negate lit))
@@ -1485,56 +1506,55 @@
               (push resolvent resolvents)))))
       ;; Remove subsumed clauses to keep clause set small
       (remove-subsumed 
-         (append other-clauses resolvents))))))
+         (append other-clauses resolvents)))))
 
-(defun dp-sat (cls &optional acc-assignment) 
-  (let+ (((&values cls unit-asgn) (dp-unit cls)))
-    (cond ((null cls) (values 'sat (append unit-asgn acc-assignment)))
-          ((some #'clause-empty? cls) (values 'unsat nil))
+(defun dp-sat (cls asgn) 
+  "Main DP loop: apply unit propagation, pure literal elimination, and resolution recursively.
+   Returns 'sat or 'unsat with assignment in asgn."
+  (let ((cls (dp-unit cls asgn)))
+    (cond ((null cls) 'sat)
+          ((some #'clause-empty? cls) 'unsat)
           (t
-           (let+ (((&values cls pure-asgn) (dp-pure cls))
-                  (asgn (append unit-asgn pure-asgn acc-assignment)))
-             (cond ((null cls) (values 'sat asgn))
-                   ((some #'clause-empty? cls) (values 'unsat nil))
+           (let ((cls (dp-pure cls asgn)))
+             (cond ((null cls) 'sat)
+                   ((some #'clause-empty? cls) 'unsat)
                    (t
-                    (let* ((var (dp-decide cls))
-                           (new-cls (dp-resolve cls var)))
+                    (let ((new-cls (dp-resolve cls (dp-decide cls))))
                       (dp-sat new-cls asgn)))))))))
 
 (defun dp (f) 
+  "Main DP function: takes a formula f, converts to CNF, and applies DP algorithm.
+   Returns 'sat or 'unsat with assignment alist."
   (let* ((vm (make-var-manager))
          (cnf (tseitin f))
-         (clauses (cnf->clauses cnf vm)))
-    (let+ (((&values result assignment) (dp-sat clauses)))
-      ;; Convert numeric assignment back to symbolic
-      (let ((sym-assignment 
-              (mapcar #'(lambda (pair)
-                          (cons (var-manager-get-sym vm (car pair))
-                                (cdr pair)))
-                      assignment)))
-        (values result sym-assignment)))))
+         (clauses (cnf->clauses cnf vm)) ;; mutates vm 
+         (asgn (make-assignment))
+         (result (dp-sat clauses asgn))) ;; mutates asgn 
+    (values result 
+            (when (eq result 'sat)
+              (assignment->alist asgn vm)))))
 
-(defun subst-formula (f assignment)
-  "Substitute variables in formula f according to assignment alist"
+(defun subst-formula (f amap)
+  "Substitute variables in formula f according to amap (alist)"
   (match f
     ((type boolean) f)
     ((type symbol)
-     (let ((val (assoc f assignment :test #'equal)))
+     (let ((val (assoc f amap :test #'equal)))
        (if val (cdr val) f)))
-    ((list* op args) `(,op ,@(mapcar #'(lambda (a) (subst-formula a assignment)) args)))
+    ((list* op args) `(,op ,@(mapcar #'(lambda (a) (subst-formula a amap)) args)))
     (_ f)))
 
-(defun verify-sat (f result assignment)
-  "Verify if result and assignment are correct for formula f.
-   If result is 'sat, verify that substituting assignment makes f valid.
+(defun verify-sat (f result amap)
+  "Verify if result and amap are correct for formula f.
+   If result is 'sat, verify that substituting amap makes f valid.
    If result is 'unsat, verify using ACL2s."
   (case result
     (sat
-     (let* ((subst-f (subst-formula f assignment)))
+     (let* ((subst-f (subst-formula f amap)))
        ;; After partial substitution, remaining formula should be valid (tautology)
        (assert (acl2s-valid? subst-f) () 
                "Partial assignment does not make formula valid: ~A~%Assignment: ~A~%Result: ~A" 
-               f assignment subst-f)))
+               f amap subst-f)))
     (unsat
      (assert (acl2s-unsat? f) () "Formula is not UNSAT: ~A" f))
     (otherwise
@@ -1542,8 +1562,8 @@
 
 (defun test-dp (f)
   "Test dp on formula f by verifying its result"
-  (let+ (((&values result assignment) (dp f)))
-    (verify-sat f result assignment)))
+  (let+ (((&values result amap) (dp f)))
+    (verify-sat f result amap)))
 
 ;; Tests generated with Claude
 ;; Basic SAT tests
