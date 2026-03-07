@@ -751,16 +751,6 @@
       (extend (cdr keys) (cdr vals)
               (acons (car keys) (car vals) env))))
 
-(defun lit->var (lit)
-  (match lit
-    ((list 'not v) v)
-    (_ lit)))
-
-(defun lit->val (lit)
-  (match lit
-    ((list 'not _) nil)
-    (_ t)))
-
 ;; pre: no duplicates and opposites
 (defun p-simplify-shannon (f &optional env)
   (match f
@@ -796,7 +786,11 @@
                                            ((list 'not (type symbol)) a)
                                            (_ nil)))
                                      nvars))
-                (nvars (mapcar #'lit->var nlits)) 
+                (nvars (mapcar #'(lambda (lit)
+                                   (match lit
+                                     ((list 'not v) v)
+                                     (_ lit)))
+                               nlits)) 
                 (nenv (extend vars (mapcar #'(lambda (v) id) vars)
                               (extend nvars (mapcar #'(lambda (v) (not id)) nvars)
                                       env))))
@@ -1141,7 +1135,7 @@
 
 (defun make-hash-set ()
   "Create an empty hash set"
-  (make-hash-table :test #'equal))
+  (make-hash-table :test #'eql))
 
 (defun hash-set-add (set elem)
   "Add element to hash set (mutates set)"
@@ -1175,16 +1169,94 @@
     new-set))
 
 ;;; ============================================================
-;;; Clause API - Abstraction over clause representation
-;;; Current implementation: Hash sets with symbol variables
-;;;
-;;; This API provides a clean abstraction so that the clause
-;;; representation can be easily changed (e.g., to use numbered
-;;; variables or bit vectors) without modifying the DP algorithm.
+;;; Variable Manager - Maps between symbolic and numeric variables
+;;; Encoding: variable n -> literal 2n (positive), literal 2n+1 (negative)
 ;;; ============================================================
 
-;; TODO: numbered variables 
-;; TODO: bit vectors 
+(defstruct var-manager
+  "Manages mapping between symbolic variables and numeric variables"
+  (sym->num (make-hash-table :test #'equal))  ; symbol -> number
+  (num->sym (make-hash-table :test #'eql))    ; number -> symbol
+  (counter 0))                                 ; next available variable number
+
+(defun var-manager-get-num (vm sym)
+  "Get or create numeric variable for symbolic variable"
+  (or (gethash sym (var-manager-sym->num vm))
+      (let ((num (var-manager-counter vm)))
+        (setf (gethash sym (var-manager-sym->num vm)) num)
+        (setf (gethash num (var-manager-num->sym vm)) sym)
+        (setf (var-manager-counter vm) (1+ num))
+        num)))
+
+(defun var-manager-get-sym (vm num)
+  "Get symbolic variable for numeric variable"
+  (gethash num (var-manager-num->sym vm)))
+
+(defun var-manager-sym-lit->num-lit (vm sym-lit)
+  "Convert symbolic literal to numeric literal"
+  (match sym-lit
+    ((list 'not v) 
+     (let ((var-num (var-manager-get-num vm v)))
+       (1+ (* 2 var-num))))  ; negative literal: 2n+1
+    (_
+     (let ((var-num (var-manager-get-num vm sym-lit)))
+       (* 2 var-num)))))     ; positive literal: 2n
+
+(defun var-manager-num-lit->sym-lit (vm num-lit)
+  "Convert numeric literal to symbolic literal"
+  (let* ((var-num (ash num-lit -1))         ; extract variable number
+         (pos? (evenp num-lit))         ; check polarity
+         (sym (var-manager-get-sym vm var-num)))
+    (if pos?
+        sym
+        `(not ,sym))))
+
+;;; ============================================================
+;;; Numeric Literal Operations
+;;; Encoding: variable n -> literal 2n (positive), literal 2n+1 (negative)
+;;; ============================================================
+
+(declaim (inline lit-var lit-sign lit-negate make-lit))
+(declaim (ftype (function (fixnum) fixnum) lit-var))
+(declaim (ftype (function (fixnum) boolean) lit-sign))
+(declaim (ftype (function (fixnum) fixnum) lit-negate))
+(declaim (ftype (function (fixnum t) fixnum) make-lit))
+
+(defun lit-var (lit)
+  "Extract variable number from numeric literal"
+  (declare (type fixnum lit))
+  (the fixnum (ash lit -1)))
+
+(defun lit-sign (lit)
+  "Check if numeric literal is positive"
+  (declare (type fixnum lit))
+  (evenp lit))
+
+(defun lit-negate (lit)
+  "Negate numeric literal"
+  (declare (type fixnum lit))
+  (the fixnum (logxor lit 1)))
+
+(defun make-lit (var-num pos?)
+  "Create numeric literal from variable number and polarity"
+  (declare (type fixnum var-num))
+  (the fixnum
+       (if pos?
+           (* 2 var-num)
+           (1+ (* 2 var-num)))))
+
+;;; ============================================================
+;;; Clause API - Abstraction over clause representation
+;;; Current implementation: Hash sets with numeric literals
+;;;
+;;; This API provides a clean abstraction so that the clause
+;;; representation can be easily changed (e.g., to use numeric
+;;; variables or bit vectors) without modifying the DP algorithm.
+;;;
+;;; Current encoding: variable n -> literal 2n (positive), 2n+1 (negative)
+;;; ============================================================
+
+;; TODO: bit vectors for variable sets (pos/neg tracking)
 
 (defun make-clause (literals)
   "Create a clause from a list of literals"
@@ -1265,22 +1337,27 @@
 ;;; CNF -> Clauses Conversion
 ;;; ============================================================
 
-(defun cnf->clauses (f)
-  "Convert a CNF formula to a list of clauses (using clause representation)"
+(defun cnf->clauses (f vm)
+  "Convert a CNF formula to a list of clauses with numeric literals.
+   vm: variable manager for symbol to number mapping"
   (labels ((unpack (c)
-             "Convert a clause formula to a list of literals"
+             "Convert a clause formula to a list of symbolic literals"
              (match c
                ((type boolean) (list c))
                ((type symbol) (list c))
                ((list 'not _) (list c))
                ((list* 'or args) args)
-               (_ (error "Not a clause: ~A" c)))))
+               (_ (error "Not a clause: ~A" c))))
+           (convert-lits (sym-lits)
+             "Convert symbolic literals to numeric literals"
+             (mapcar #'(lambda (lit) (var-manager-sym-lit->num-lit vm lit))
+                     sym-lits)))
     (match f
       ((type boolean) (if f nil (list (make-clause nil))))  ; t -> empty, nil -> empty clause
-      ((type symbol) (list (make-clause (list f))))
-      ((list 'not _) (list (make-clause (list f))))
-      ((list* 'or args) (list (make-clause args)))
-      ((list* 'and args) (mapcar #'(lambda (c) (make-clause (unpack c))) args))
+      ((type symbol) (list (make-clause (convert-lits (list f)))))
+      ((list 'not _) (list (make-clause (convert-lits (list f)))))
+      ((list* 'or args) (list (make-clause (convert-lits args))))
+      ((list* 'and args) (mapcar #'(lambda (c) (make-clause (convert-lits (unpack c)))) args))
       (_ (error "Not in CNF: ~A" f)))))
 
 ;;; ============================================================
@@ -1293,18 +1370,20 @@
                  (some #'(lambda (lit) (clause-has-lit? c lit)) satisfied-lits))
              clauses))
 
+;; TODO: assignment hash table 
+
 ;; Post: no more pure literals
 (defun dp-pure (clauses)
   "Pure literal elimination. Returns (values new-clauses assignment).
    A pure literal appears only in one polarity across all clauses."
   (let ((pos (make-hash-set))
         (neg (make-hash-set)))
-    ;; Collect all literals using lit->var/lit->val
+    ;; Collect all literals using numeric literal operations
     (dolist (c clauses)
       (clause-foreach #'(lambda (lit)
-                          (let ((var (lit->var lit))
-                                (val (lit->val lit)))
-                            (if val
+                          (let ((var (lit-var lit))
+                                (pos? (lit-sign lit))) 
+                            (if pos?
                                 (hash-set-add pos var)
                                 (hash-set-add neg var))))
                       c))
@@ -1321,8 +1400,8 @@
                     neg)
       (let ((assignment (append (mapcar #'(lambda (v) (cons v t)) pure-pos)
                                 (mapcar #'(lambda (v) (cons v nil)) pure-neg)))
-            (pure-lits (append pure-pos
-                               (mapcar #'(lambda (v) `(not ,v)) pure-neg))))
+            (pure-lits (append (mapcar #'(lambda (v) (make-lit v t)) pure-pos)
+                               (mapcar #'(lambda (v) (make-lit v nil)) pure-neg))))
         (if (null pure-lits)
             (values clauses nil)
             (values (remove-satisfied-clauses clauses pure-lits)
@@ -1338,9 +1417,9 @@
                (if (null unit-clause)
                    (values clauses acc-assignment)
                    (let* ((unit-lit (clause-unit-lit unit-clause))
-                          (neg-lit (negate unit-lit))
-                          (var (lit->var unit-lit))
-                          (val (lit->val unit-lit)))
+                          (neg-lit (lit-negate unit-lit))
+                          (var (lit-var unit-lit))
+                          (val (lit-sign unit-lit)))
                      ;; Remove satisfied clauses
                      (setf clauses (remove-satisfied-clauses clauses (list unit-lit)))
                      ;; Destructively remove negated literal from remaining clauses
@@ -1354,7 +1433,7 @@
   (some #'(lambda (c) 
             (block find-var
               (clause-foreach #'(lambda (lit)
-                                  (let ((var (lit->var lit)))
+                                  (let ((var (lit-var lit)))
                                     (return-from find-var var)))
                               c)
               nil))
@@ -1375,8 +1454,8 @@
 
 (defun dp-resolve (clauses var)
   "Resolve on variable var, returning new clause set"
-  (let ((pos-lit var)
-        (neg-lit `(not ,var))
+  (let ((pos-lit (make-lit var t))
+        (neg-lit (make-lit var nil))
         (pos-clauses nil)
         (neg-clauses nil)
         (other-clauses nil))
@@ -1393,13 +1472,13 @@
           (block next-resolvent
             (let ((resolvent (make-hash-set)))
               (clause-foreach #'(lambda (lit)
-                                  (unless (equal lit pos-lit)
+                                  (unless (= lit pos-lit)
                                     (hash-set-add resolvent lit)))
                               pc)
               (clause-foreach #'(lambda (lit)
-                                  (unless (equal lit neg-lit)
+                                  (unless (= lit neg-lit)
                                     ;; Check for tautology as we add from nc
-                                    (when (clause-has-lit? resolvent (negate lit))
+                                    (when (clause-has-lit? resolvent (lit-negate lit))
                                       (return-from next-resolvent))
                                     (hash-set-add resolvent lit)))
                               nc)
@@ -1410,13 +1489,11 @@
 
 (defun dp-sat (cls &optional acc-assignment) 
   (let+ (((&values cls unit-asgn) (dp-unit cls)))
-    ;; Early termination after unit propagation
     (cond ((null cls) (values 'sat (append unit-asgn acc-assignment)))
           ((some #'clause-empty? cls) (values 'unsat nil))
           (t
            (let+ (((&values cls pure-asgn) (dp-pure cls))
                   (asgn (append unit-asgn pure-asgn acc-assignment)))
-             ;; Early termination after pure literal elimination
              (cond ((null cls) (values 'sat asgn))
                    ((some #'clause-empty? cls) (values 'unsat nil))
                    (t
@@ -1425,9 +1502,17 @@
                       (dp-sat new-cls asgn)))))))))
 
 (defun dp (f) 
-  (let* ((cnf (tseitin f))
-         (clauses (cnf->clauses cnf)))
-    (dp-sat clauses)))
+  (let* ((vm (make-var-manager))
+         (cnf (tseitin f))
+         (clauses (cnf->clauses cnf vm)))
+    (let+ (((&values result assignment) (dp-sat clauses)))
+      ;; Convert numeric assignment back to symbolic
+      (let ((sym-assignment 
+              (mapcar #'(lambda (pair)
+                          (cons (var-manager-get-sym vm (car pair))
+                                (cdr pair)))
+                      assignment)))
+        (values result sym-assignment)))))
 
 (defun subst-formula (f assignment)
   "Substitute variables in formula f according to assignment alist"
