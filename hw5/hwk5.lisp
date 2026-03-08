@@ -623,6 +623,7 @@
 (assertf #'p-simplify-flatten '(not (not p)) '(not (not p)))
 (assertf #'p-simplify-flatten '(not (iff (iff) (and) (or) q)) '(not (iff t t nil q)))
 
+;; TODO: iff/xor associative so (not (iff a b c ...)) -> (xor a (iff b c ...))
 ;; TODO: last + butlast in one shot?
 (defun p-simplify-not (f)
   (match f
@@ -1070,8 +1071,8 @@
          ((&values skeleton amap) (p-skeleton simplified))
          (unchained (tseitin-unchain skeleton))
          (cnf (tseitin-transform unchained))
-         (cnf (p-simplify cnf))) ;; p-simplify preserves CNF
-    (values cnf amap)))
+         (simplified-cnf (p-simplify cnf))) ;; p-simplify preserves CNF
+    (values simplified-cnf amap)))
 
 (defun acl2s-valid? (f)
   "Check if f is valid (tautology) using ACL2s"
@@ -1394,20 +1395,22 @@
                              orig-atom)  ;; Include atoms even if not in vars
                      (push (cons key val) result))))
              asgn)
-    
+
     ;; Add missing variables from vars (assign t arbitrarily)
     (when vars
       (dolist (var vars)
         (unless (assoc var result :test #'equal)
+          (pprint (format nil "assignment->alist assigned var ~A to t" var))
           (push (cons var t) result))))
-    
+
     ;; Add missing atoms from amap (assign t arbitrarily)
     (when amap
       (dolist (pair amap)
         (let ((atom (car pair)))
           (unless (assoc atom result :test #'equal)
+            (pprint (format nil "assignment->alist assigned atom ~A to t" atom))
             (push (cons atom t) result)))))
-    
+
     result))
 
 ;;; ============================================================
@@ -1427,7 +1430,10 @@
                (_ (error "Not a clause: ~A" cl))))
            (convert-lits (sym-lits)
              "Convert symbolic literals to numeric literals"
-             (mapcar #'(lambda (lit) (var-manager-sym-lit->num-lit vm lit))
+             (mapcar #'(lambda (lit)
+                         (let ((n (var-manager-sym-lit->num-lit vm lit)))
+                           (pprint (format nil "variable mapping ~A to ~A" lit n))
+                           n))
                      sym-lits)))
     (match f
       ((type boolean) (if f nil (list (make-clause nil))))  ; t -> empty, nil -> empty clause
@@ -1501,6 +1507,7 @@
                      ;; Destructively remove negated literal from remaining clauses
                      (dolist (cl cls) (clause-remove-lit! cl neg-lit))
                      (assignment-set asgn var val)
+                     (pprint (format nil "dp-unit assigned ~A to be ~A" var val))
                      (unit-loop cls))))))
     (unit-loop (mapcar #'clause-copy cls))))
 
@@ -1533,7 +1540,7 @@
                        (setf best-var var
                              best-score score))))
                var-counts)
-      best-var)))
+     best-var)))
 
 ;; TODO: use signatures to speed up subsumption
 (defun remove-subsumed (cls)
@@ -1606,35 +1613,44 @@
 (defun dp-reconstruct (cls asgn resolved-vars)
   "Reconstruct assignment for resolved variables by assigning them arbitrarily and propagating.
    Mutates asgn to add assignments for resolved variables."
-  ;; Apply current assignment to simplify clauses
-  (let ((working-cls 
-         (mapcar #'(lambda (cl)
-                     ;; Copy clause and remove false literals
-                     (let ((new-cl (make-hash-set)))
-                       (clause-map #'(lambda (lit)
-                                       (let ((var (lit-var lit))
-                                             (sign (lit-sign lit)))
-                                         (unless (and (gethash var asgn)
-                                                      (not (eq (gethash var asgn) sign)))
-                                           (hash-set-add new-cl lit))))
-                                   cl)
-                       new-cl))
-                 ;; Remove satisfied clauses (where any literal is true)
-                 (remove-if #'(lambda (cl)
-                                (clause-any? #'(lambda (lit)
-                                                 (let ((var (lit-var lit))
-                                                       (sign (lit-sign lit)))
-                                                   (and (gethash var asgn)
-                                                        (eq (gethash var asgn) sign))))
-                                             cl))
-                            cls))))
-    ;; Assign resolved variable arbitrarily and perform dp-unit if not already assigned
-    (dolist (var (reverse resolved-vars))
-      (unless (gethash var asgn)
-        (assignment-set asgn var t)
-        (setf working-cls (dp-unit working-cls asgn))
-        (when (null working-cls)
-          (return))))))
+  (labels ((simplify-clauses (cls)
+             (mapcar #'(lambda (cl)
+                         ;; Copy clause and remove false literals
+                         (let ((new-cl (make-hash-set)))
+                           (clause-map #'(lambda (lit)
+                                           (let ((var (lit-var lit))
+                                                 (sign (lit-sign lit)))
+                                             (unless (and (gethash var asgn)
+                                                          (not (eq (gethash var asgn) sign)))
+                                               (hash-set-add new-cl lit))))
+                                       cl)
+                           new-cl))
+                     ;; Remove satisfied clauses (where any literal is true)
+                     (remove-if #'(lambda (cl)
+                                    (clause-any? #'(lambda (lit)
+                                                     (let ((var (lit-var lit))
+                                                           (sign (lit-sign lit)))
+                                                       (and (gethash var asgn)
+                                                            (eq (gethash var asgn) sign))))
+                                                 cl))
+                                cls))))
+    (let ((working-cls cls))
+      ;; Assign resolved variable arbitrarily and perform dp-unit if not already assigned
+      (dolist (var resolved-vars)
+        (unless (gethash var asgn)
+          (assignment-set asgn var t)
+          (pprint (format nil "dp-reconstruct try assgin ~A to be T" var))
+          (let ((new-working-cls (dp-unit (simplify-clauses working-cls) asgn)))
+            (cond ((null new-working-cls) (return))
+                  ((some #'clause-empty? new-working-cls)
+                   ;; Backtrack
+                   ;; TODO: undo assignments
+                   (pprint (format nil "dp-reconstruct assgined ~A to be NIL" var))
+                   (assignment-set asgn var nil)
+                   (setf working-cls (dp-unit (simplify-clauses working-cls) asgn)))
+                  (t
+                   (pprint (format nil "dp-reconstruct assgined ~A to be T" var))
+                   (setf working-cls new-working-cls)))))))))
 
 (defun dp (f)
   "Main DP function: takes a formula f, converts to CNF, and applies DP algorithm.
@@ -1643,11 +1659,11 @@
     (let+ (((&values cnf amap) (tseitin f))
            (cls (cnf->clauses cnf vm)) ;; mutates vm
            (asgn (make-assignment))
-           ((&values result resolved-vars) (dp-sat cls asgn nil))) ;; mutates asgn
-      (values result
-              (when (eq result 'sat)
-                (dp-reconstruct cls asgn resolved-vars) ;; mutates asgn
-                (assignment->alist asgn vm (pvars f) amap))))))
+           ((&values result resolved-vars) (dp-sat cls asgn nil)) ;; mutates asgn
+           (result-asgn (when (eq result 'sat)
+                          (dp-reconstruct cls asgn resolved-vars) ;; mutates asgn
+                          (assignment->alist asgn vm (pvars f) amap))))
+      (values result result-asgn))))
 
 (defun subst-formula (f asgn)
   "Substitute variables in formula f according to asgn (alist)"
@@ -1694,6 +1710,22 @@
   (let+ (((&values result asgn) (dp f)))
     (verify-sat f result asgn expected)))
 
+(dp '(xor p q))
+
+(tseitin (ripplecarry0
+          #'(lambda (i) (genvar 'x i))
+          #'(lambda (i) (genvar 'y i))
+          #'(lambda (i) (genvar 'c i))
+          #'(lambda (i) (genvar 'z i))
+          1))
+
+(test-dp (ripplecarry0
+          #'(lambda (i) (genvar 'x i))
+          #'(lambda (i) (genvar 'y i))
+          #'(lambda (i) (genvar 'c i))
+          #'(lambda (i) (genvar 'z i))
+          1))
+
 ;; Tests generated with Claude
 ;; Basic SAT tests
 (test-dp 'p)                                    ; single var - SAT
@@ -1718,6 +1750,9 @@
 (test-dp '(and (foo x) (not (foo x))) 'unsat)   ; UNSAT
 (test-dp '(implies (f a b) (g c)))              ; SAT
 
+;; TODO: fix shannon?
+(dp '(or a (foo a) (bar b)))
+
 ;; Nested formulas
 (test-dp '(and (or p (not q)) (or q (not r)) (or r (not p))))  ; SAT
 (test-dp '(xor p q))                            ; SAT
@@ -1728,7 +1763,7 @@
 (defun halfcarry (x y) `(and ,x ,y))
 (defun carry (x y z) `(or (and ,x ,y) (and (or ,x ,y) ,z)))
 (defun sum (x y z) (halfsum (halfsum x y) z))
-(defun fa (x y z s c) `(and (iff ,s ,(sum ,x ,y ,z)) (iff ,c ,(carry ,x ,y ,z))))
+(defun fa (x y z s c) `(and (iff ,s ,(sum x y z)) (iff ,c ,(carry x y z))))
 
 ;; TODO: use genvar for tseitin
 (defun genvar (prefix n)
