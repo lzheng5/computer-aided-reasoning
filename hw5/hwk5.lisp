@@ -1335,6 +1335,15 @@
   "Apply function fn to each literal in clause (for side effects only)"
   (hash-set-map fn cl))
 
+(defun clause-any? (pred cl)
+  "Return t if any literal in clause satisfies predicate pred"
+  (block found
+    (clause-map #'(lambda (lit)
+                    (when (funcall pred lit)
+                      (return-from found t)))
+                cl)
+    nil))
+
 (defun clause-subsumes? (cl1 cl2)
   "Return t if cl1 subsumes cl2 (cl1 ⊆ cl2)"
   (and (<= (clause-size cl1) (clause-size cl2))
