@@ -1367,12 +1367,15 @@
   "Set variable to value in assignment (mutates asgn)"
   (setf (gethash var asgn) val))
 
-(defun assignment->alist (asgn vm)
-  "Convert numeric assignment hash table to symbolic alist using var-manager"
+(defun assignment->alist (asgn vm &optional vars)
+  "Convert numeric assignment hash table to symbolic alist using var-manager.
+   If vars is provided, only include assignments for those variables."
   (let ((amap nil))
     (maphash #'(lambda (num-var val)
                  (let ((sym-var (var-manager-get-sym vm num-var)))
-                   (push (cons sym-var val) amap)))
+                   (when (or (null vars)
+                             (in sym-var vars))
+                     (push (cons sym-var val) amap))))
              asgn)
     amap))
 
@@ -1554,33 +1557,66 @@
   (remove-subsumed
     (resolve-var cls var)))
 
-(defun dp-sat (cls asgn)
+(defun dp-sat (cls asgn resolved-vars)
   "Main DP loop: apply unit propagation, pure literal elimination, and resolution recursively.
-   Returns 'sat or 'unsat with assignment in asgn."
+   Returns (values result resolved-vars) where resolved-vars is a stack of variables eliminated by resolution."
   (let ((cls (dp-unit cls asgn)))
-    (cond ((null cls) 'sat)
-          ((some #'clause-empty? cls) 'unsat)
+    (cond ((null cls) (values 'sat resolved-vars))
+          ((some #'clause-empty? cls) (values 'unsat resolved-vars))
           (t
            (let ((cls (dp-pure cls asgn)))
-             (cond ((null cls) 'sat)
-                   ((some #'clause-empty? cls) 'unsat)
+             (cond ((null cls) (values 'sat resolved-vars))
+                   ((some #'clause-empty? cls) (values 'unsat resolved-vars))
                    (t
-                    (let ((new-cls (dp-resolve cls (dp-decide cls))))
-                      (dp-sat new-cls asgn)))))))))
+                    (let* ((var (dp-decide cls))
+                           (new-cls (dp-resolve cls var)))
+                      (dp-sat new-cls asgn (cons var resolved-vars))))))))))
 
-;; TODO: fix assignment and verify-sat as it can contain Tseitin variables
+(defun dp-reconstruct (cls asgn resolved-vars)
+  "Reconstruct assignment for resolved variables by assigning them arbitrarily and propagating.
+   Mutates asgn to add assignments for resolved variables."
+  ;; Apply current assignment to simplify clauses
+  (let ((working-cls 
+         (mapcar #'(lambda (cl)
+                     ;; Copy clause and remove false literals
+                     (let ((new-cl (make-hash-set)))
+                       (clause-map #'(lambda (lit)
+                                       (let ((var (lit-var lit))
+                                             (sign (lit-sign lit)))
+                                         (unless (and (gethash var asgn)
+                                                      (not (eq (gethash var asgn) sign)))
+                                           (hash-set-add new-cl lit))))
+                                   cl)
+                       new-cl))
+                 ;; Remove satisfied clauses (where any literal is true)
+                 (remove-if #'(lambda (cl)
+                                (clause-any? #'(lambda (lit)
+                                                 (let ((var (lit-var lit))
+                                                       (sign (lit-sign lit)))
+                                                   (and (gethash var asgn)
+                                                        (eq (gethash var asgn) sign))))
+                                             cl))
+                            cls))))
+    ;; Assign resolved variable arbitrarily and perform dp-unit if not already assigned
+    (dolist (var (reverse resolved-vars))
+      (unless (gethash var asgn)
+        (assignment-set asgn var t)
+        (setf working-cls (dp-unit working-cls asgn))
+        (when (null working-cls)
+          (return))))))
+
 (defun dp (f)
   "Main DP function: takes a formula f, converts to CNF, and applies DP algorithm.
    Returns 'sat or 'unsat with assignment alist."
   (let* ((vm (make-var-manager))
          (cnf (tseitin f))
          (cls (cnf->clauses cnf vm)) ;; mutates vm
-         (asgn (make-assignment))
-         (result (dp-sat cls asgn))) ;; mutates asgn
-    ;; TODO: reconstruct sat assignment
-    (values result
-            (when (eq result 'sat)
-              (assignment->alist asgn vm)))))
+         (asgn (make-assignment)))
+    (let+ (((&values result resolved-vars) (dp-sat cls asgn nil))) ;; mutates asgn
+      (values result
+              (when (eq result 'sat)
+                (dp-reconstruct cls asgn resolved-vars) ;; mutates asgn
+                (assignment->alist asgn vm (pvars f)))))))
 
 (defun subst-formula (f amap)
   "Substitute variables in formula f according to amap (alist)"
