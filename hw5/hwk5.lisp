@@ -1702,20 +1702,28 @@
                                                        (and (gethash var asgn)
                                                             (eq (gethash var asgn) sign))))
                                                  cl))
-                                cls))))
+                                cls)))))
     (dolist (entry resolve-map)
       (let ((var (car entry))
             (var-cls (cdr entry)))
         (let ((cls (simplify-clauses var-cls)))
           (cond ((null cls) (assignment-set asgn var t))  ;; If all clauses are satisfied, assign arbitrarily
-                ((null (cdr cls)) 
-                 ;; There has to be exactly one clause left after simplification, which must be a unit clause containing var or its negation
-                 (if (clause-unit? (first cls)) 
-                     (let ((unit (clause-unit-lit (first cls)))
-                           (sign (lit-sign unit)))
-                       (assignment-set asgn var sign))
-                     (t (error "Unexpected non-unit clause during reconstruction: ~A" cl))))
-                (t (error "Unexpected simplified clauses during reconstruction: ~A" cls))))))
+                ((every #'clause-unit? cls)
+                 ;; All remaining clauses must be unit clauses with the same literal
+                 (let* ((first-unit (clause-unit-lit (first cls)))
+                        (expected-sign (lit-sign first-unit)))
+                   (assert (= (lit-var first-unit) var) () 
+                           "Expected unit clause to contain variable ~A, but got ~A" var (clause->string (first cls)))
+                   (assert (every #'(lambda (cl)
+                                      (let ((lit (clause-unit-lit cl)))
+                                        (and (= (lit-var lit) var)
+                                             (eq (lit-sign lit) expected-sign))))
+                                  cls)
+                           () "Inconsistent unit clauses during reconstruction for var ~A: ~A" 
+                           var (mapcar #'clause->string cls))
+                   (assignment-set asgn var expected-sign)))
+                (t (error "Unexpected non-unit clauses during reconstruction for var ~A: ~A" 
+                          var (mapcar #'clause->string cls))))))))
 
 (defun dp (f)
   "Main DP function: takes a formula f, converts to CNF, and applies DP algorithm.
