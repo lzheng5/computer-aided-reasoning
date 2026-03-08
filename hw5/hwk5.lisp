@@ -1702,11 +1702,51 @@
                                                        (and (gethash var asgn)
                                                             (eq (gethash var asgn) sign))))
                                                  cl))
-                                cls)))))
+                                cls)))
+           (get-unassigned-vars (cls target-var)
+             "Get all unassigned variables in clauses except target-var"
+             (let ((vars nil))
+               (dolist (cl cls)
+                 (clause-map #'(lambda (lit)
+                                 (let ((var (lit-var lit)))
+                                   (unless (or (= var target-var)
+                                               (gethash var asgn)
+                                               (member var vars))
+                                     (push var vars))))
+                             cl))
+               vars))
+           (assign-companion-vars (cls target-var)
+             "Assign companion variables (vars other than target) to reduce clauses to unit.
+              Iteratively pick literals to satisfy clauses until only target-var remains."
+             (loop
+               (let ((simplified (simplify-clauses cls)))
+                 ;; If empty or all unit with target-var, we're done
+                 (when (or (null simplified)
+                           (every #'(lambda (cl)
+                                      (and (clause-unit? cl)
+                                           (= (lit-var (clause-unit-lit cl)) target-var)))
+                                  simplified))
+                   (return simplified))
+                 ;; Find a non-unit clause with unassigned vars other than target
+                 (let ((companion-vars (get-unassigned-vars simplified target-var)))
+                   (if (null companion-vars)
+                       ;; No more companions, return what we have
+                       (return simplified)
+                       ;; Assign first companion to satisfy some clause
+                       ;; Pick the first literal containing this var from any clause
+                       (let ((var-to-assign (first companion-vars)))
+                         (block found-lit
+                           (dolist (cl simplified)
+                             (clause-map #'(lambda (lit)
+                                             (when (= (lit-var lit) var-to-assign)
+                                               (assignment-set asgn var-to-assign (lit-sign lit))
+                                               (return-from found-lit)))
+                                         cl))))))))))
     (dolist (entry resolve-map)
       (let ((var (car entry))
             (var-cls (cdr entry)))
-        (let ((cls (simplify-clauses var-cls)))
+        ;; First assign any companion variables that would otherwise leave non-unit clauses
+        (let ((cls (assign-companion-vars var-cls var)))
           (cond ((null cls) (assignment-set asgn var t))  ;; If all clauses are satisfied, assign arbitrarily
                 ((every #'clause-unit? cls)
                  ;; All remaining clauses must be unit clauses with the same literal
