@@ -667,6 +667,8 @@
 (defun has-opposite (f args)
   (in (negate f) args))
 
+;; TODO: revisit gethash 
+
 (defun p-simplify-dup (f)
   "Simplify duplicated and opposite subformulas"
   (match f
@@ -1226,6 +1228,7 @@
   (num->sym (make-hash-table :test #'eql))    ; number -> symbol
   (counter 0))                                 ; next available variable number
 
+;; TODO: gethash once
 (defun var-manager-get-num (vm sym)
   "Get or create numeric variable for symbolic variable"
   (or (gethash sym (var-manager-sym->num vm))
@@ -1413,6 +1416,10 @@
 (defun assignment-set (asgn var val)
   "Set variable to value in assignment (mutates asgn)"
   (setf (gethash var asgn) val))
+
+(defun assignment-get (asgn var)
+  "Get variable's value from assignment. Returns (values val present-p)."
+  (gethash var asgn))
 
 (defun assignment->alist (asgn vm vars amap)
   "Convert numeric assignment hash table to symbolic alist using var-manager.
@@ -1687,20 +1694,22 @@
                          ;; Copy clause and remove false literals
                          (let ((new-cl (make-hash-set)))
                            (clause-map #'(lambda (lit)
-                                           (let ((var (lit-var lit))
-                                                 (sign (lit-sign lit)))
-                                             (unless (and (gethash var asgn)
-                                                          (not (eq (gethash var asgn) sign)))
+                                           (let+ ((var (lit-var lit))
+                                                  (sign (lit-sign lit))
+                                                  ((&values val assigned?) (assignment-get asgn var)))
+                                             ;; Keep literal unless it's false (assigned opposite sign)
+                                             (unless (and assigned? (not (eq val sign)))
                                                (hash-set-add new-cl lit))))
                                        cl)
                            new-cl))
                      ;; Remove satisfied clauses (where any literal is true)
                      (remove-if #'(lambda (cl)
                                     (clause-any? #'(lambda (lit)
-                                                     (let ((var (lit-var lit))
-                                                           (sign (lit-sign lit)))
-                                                       (and (gethash var asgn)
-                                                            (eq (gethash var asgn) sign))))
+                                                     (let+ ((var (lit-var lit))
+                                                            (sign (lit-sign lit))
+                                                            ((&values val assigned?) (assignment-get asgn var)))
+                                                       ;; Clause satisfied if literal is true (assigned same sign)
+                                                       (and assigned? (eq val sign))))
                                                  cl))
                                 cls)))
            (get-unassigned-vars (cls target-var)
@@ -1708,9 +1717,10 @@
              (let ((vars nil))
                (dolist (cl cls)
                  (clause-map #'(lambda (lit)
-                                 (let ((var (lit-var lit)))
+                                 (let+ ((var (lit-var lit))
+                                        ((&values _ assigned?) (assignment-get asgn var)))
                                    (unless (or (= var target-var)
-                                               (gethash var asgn)
+                                               assigned?
                                                (member var vars))
                                      (push var vars))))
                              cl))
