@@ -623,6 +623,7 @@
 (assertf #'p-simplify-flatten '(not (not p)) '(not (not p)))
 (assertf #'p-simplify-flatten '(not (iff (iff) (and) (or) q)) '(not (iff t t nil q)))
 
+;; TODO: last + butlast in one shot?
 (defun p-simplify-not (f)
   (match f
     ((list 'not a)
@@ -634,7 +635,7 @@
             (nil nil)  ; (not (iff)) -> nil
             ((list a) `(not ,a))  ; (not (iff a)) -> (not a)
             ((list a b) `(xor ,a ,b))  ; (not (iff a b)) -> (xor a b)
-            (_ ; (not (iff a b ... c)) -> (xor (iff a b ...) c) by left associativity of iff
+            (_ ; (not (iff a b ... c)) -> (xor (iff a b ...) c)
              (let ((butlast (butlast bs))
                    (last-elem (car (last bs))))
                `(xor (iff ,@butlast) ,last-elem))))))
@@ -644,7 +645,7 @@
             (nil t)  ; (not (xor)) -> t
             ((list a) `(not ,a))  ; (not (xor a)) -> (not a)
             ((list a b) `(iff ,a ,b))  ; (not (xor a b)) -> (iff a b)
-            (_ ; (not (xor a b ... c)) -> (iff (xor a b ...) c) by left associativity of xor
+            (_ ; (not (xor a b ... c)) -> (iff (xor a b ...) c)
              (let ((butlast (butlast bs))
                    (last-elem (car (last bs))))
                `(iff (xor ,@butlast) ,last-elem))))))
@@ -1027,6 +1028,7 @@
            `(,op ,@args))))
     (_ f)))
 
+;; TODO: handle top-level iff
 (defun tseitin-transform (f)
   "Transform formula f to CNF using Tseitin transformation.
    Returns CNF as (and clause1 clause2 ...)"
@@ -1575,6 +1577,7 @@
          (cls (cnf->clauses cnf vm)) ;; mutates vm
          (asgn (make-assignment))
          (result (dp-sat cls asgn))) ;; mutates asgn
+    ;; TODO: reconstruct sat assignment
     (values result
             (when (eq result 'sat)
               (assignment->alist asgn vm)))))
