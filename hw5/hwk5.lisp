@@ -1376,17 +1376,39 @@
   "Set variable to value in assignment (mutates asgn)"
   (setf (gethash var asgn) val))
 
-(defun assignment->alist (asgn vm &optional vars)
+(defun assignment->alist (asgn vm vars amap)
   "Convert numeric assignment hash table to symbolic alist using var-manager.
-   If vars is provided, only include assignments for those variables."
-  (let ((amap nil))
+   asgn contains assigned variables in the original formula, tseitin-generated variables, and skeleton variables.
+   The output includes assignments for all the original variables and atoms.
+   Variables/atoms not in asgn are assigned t arbitrarily."
+  (let ((result nil))
+    ;; First, process all variables in asgn
     (maphash #'(lambda (num-var val)
-                 (let ((sym-var (var-manager-get-sym vm num-var)))
+                 (let* ((sym-var (var-manager-get-sym vm num-var))
+                        ;; Check if this generated var represents an atom
+                        (orig-atom (and amap (car (rassoc sym-var amap :test #'equal))))
+                        ;; Use original atom if found, otherwise use the variable
+                        (key (or orig-atom sym-var)))
                    (when (or (null vars)
-                             (in sym-var vars))
-                     (push (cons sym-var val) amap))))
+                             (in key vars)
+                             orig-atom)  ;; Include atoms even if not in vars
+                     (push (cons key val) result))))
              asgn)
-    amap))
+    
+    ;; Add missing variables from vars (assign t arbitrarily)
+    (when vars
+      (dolist (var vars)
+        (unless (assoc var result :test #'equal)
+          (push (cons var t) result))))
+    
+    ;; Add missing atoms from amap (assign t arbitrarily)
+    (when amap
+      (dolist (pair amap)
+        (let ((atom (car pair)))
+          (unless (assoc atom result :test #'equal)
+            (push (cons atom t) result)))))
+    
+    result))
 
 ;;; ============================================================
 ;;; CNF -> Clauses Conversion
@@ -1617,30 +1639,36 @@
 (defun dp (f)
   "Main DP function: takes a formula f, converts to CNF, and applies DP algorithm.
    Returns 'sat or 'unsat with assignment alist."
-  (let* ((vm (make-var-manager))
-         (cnf (tseitin f))
-         (cls (cnf->clauses cnf vm)) ;; mutates vm
-         (asgn (make-assignment)))
-    (let+ (((&values result resolved-vars) (dp-sat cls asgn nil))) ;; mutates asgn
+  (let* ((vm (make-var-manager)))
+    (let+ (((&values cnf amap) (tseitin f))
+           (cls (cnf->clauses cnf vm)) ;; mutates vm
+           (asgn (make-assignment))
+           ((&values result resolved-vars) (dp-sat cls asgn nil))) ;; mutates asgn
       (values result
               (when (eq result 'sat)
                 (dp-reconstruct cls asgn resolved-vars) ;; mutates asgn
-                (assignment->alist asgn vm (pvars f)))))))
+                (assignment->alist asgn vm (pvars f) amap))))))
 
-(defun subst-formula (f amap)
-  "Substitute variables in formula f according to amap (alist)"
+(defun subst-formula (f asgn)
+  "Substitute variables in formula f according to asgn (alist)"
   (match f
     ((type boolean) f)
     ((type symbol)
-     (let ((val (assoc f amap :test #'equal)))
+     (let ((val (assoc f asgn :test #'equal)))
        (if val (cdr val) f)))
-    ((list* op args) `(,op ,@(mapcar #'(lambda (a) (subst-formula a amap)) args)))
+    ((list* op args)
+     (if (p-funp op)
+         ;; Propositional operator - recurse into arguments
+         `(,op ,@(mapcar #'(lambda (a) (subst-formula a asgn)) args))
+         ;; Atom - look up in assignment like a symbol
+         (let ((val (assoc f asgn :test #'equal)))
+           (if val (cdr val) f))))
     (_ f)))
 
-(defun verify-sat (f result amap &optional expected)
-  "Verify if result and amap are correct for formula f.
+(defun verify-sat (f result asgn &optional expected)
+  "Verify if result and asgn are correct for formula f.
    If expected is provided, assert that result matches expected.
-   If result is 'sat, verify that substituting amap makes f valid.
+   If result is 'sat, verify that substituting asgn makes f valid.
    If result is 'unsat, verify using ACL2s."
   ;; First check if result matches expected (if provided)
   (when expected
@@ -1650,11 +1678,11 @@
   ;; Then verify the result is correct
   (case result
     (sat
-     (let* ((subst-f (subst-formula f amap)))
-       ;; After partial substitution, remaining formula should be valid (tautology)
+     (let* ((subst-f (subst-formula f asgn)))
+       ;; After substitution, remaining formula should be valid (tautology)
        (assert (acl2s-valid? subst-f) ()
-               "Partial assignment does not make formula valid: ~A~%Assignment: ~A~%Result: ~A"
-               f amap subst-f)))
+               "Assignment does not make formula valid: ~A~%Assignment: ~A~%Result: ~A"
+               f asgn subst-f)))
     (unsat
      (assert (acl2s-unsat? f) () "Formula is not UNSAT: ~A" f))
     (otherwise
@@ -1663,8 +1691,8 @@
 (defun test-dp (f &optional (expected 'sat))
   "Test dp on formula f by verifying its result.
    Expected defaults to 'sat unless specified as 'unsat."
-  (let+ (((&values result amap) (dp f)))
-    (verify-sat f result amap expected)))
+  (let+ (((&values result asgn) (dp f)))
+    (verify-sat f result asgn expected)))
 
 ;; Tests generated with Claude
 ;; Basic SAT tests
