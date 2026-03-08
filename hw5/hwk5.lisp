@@ -654,8 +654,6 @@
 (defun has-opposite (f args)
   (in (negate f) args))
 
-;; TODO: revisit gethash
-
 (defun p-simplify-dup (f)
   "Simplify duplicated and opposite subformulas"
   (match f
@@ -675,6 +673,7 @@
          ;; iff: p iff p = t (identity), p iff (not p) = nil
          ((== op 'iff)
           (let* ((pairs (make-hash-table :test #'equal))
+                 (seen (make-hash-table :test #'equal))
                  (neg-count 0)
                  (result nil))
             ;; Count occurrences
@@ -683,20 +682,21 @@
             ;; Check for opposites and count odd occurrences
             (maphash #'(lambda (k v)
                          (let ((neg (negate k)))
-                           (when (and (gethash neg pairs)
-                                      (not (gethash (list :seen k neg) pairs)))
-                             (setf (gethash (list :seen k neg) pairs) t)
-                             (setf (gethash (list :seen neg k) pairs) t)
-                             (let ((n (min (gethash k pairs) (gethash neg pairs))))
-                               (incf neg-count n)
-                               (decf (gethash k pairs) n)
-                               (decf (gethash neg pairs) n)))))
+                           (let+ (((&values neg-val neg-present?) (gethash neg pairs)))
+                             (when (and neg-present? (not (gethash neg seen)))
+                               ;; Mark both as seen
+                               (setf (gethash k seen) t)
+                               (setf (gethash neg seen) t)
+                               ;; Reduce counts
+                               (let ((n (min v neg-val)))
+                                 (incf neg-count n)
+                                 (decf (gethash k pairs) n)
+                                 (decf (gethash neg pairs) n))))))
                      pairs)
             ;; Build result: keep odd occurrences
             (maphash #'(lambda (k v)
-                         (unless (and (listp k) (eq (car k) :seen))
-                           (when (oddp v)
-                             (push k result))))
+                         (when (oddp v)
+                           (push k result)))
                      pairs)
             ;; Add nil for each opposite pair (nil is not identity for iff)
             (dotimes (i neg-count)
@@ -708,6 +708,7 @@
          ;; xor: p xor p = nil (identity), p xor (not p) = t
          ((== op 'xor)
           (let* ((pairs (make-hash-table :test #'equal))
+                 (seen (make-hash-table :test #'equal))
                  (neg-count 0)
                  (result nil))
             ;; Count occurrences
@@ -716,20 +717,21 @@
             ;; Check for opposites
             (maphash #'(lambda (k v)
                          (let ((neg (negate k)))
-                           (when (and (gethash neg pairs)
-                                      (not (gethash (list :seen k neg) pairs)))
-                             (setf (gethash (list :seen k neg) pairs) t)
-                             (setf (gethash (list :seen neg k) pairs) t)
-                             (let ((n (min (gethash k pairs) (gethash neg pairs))))
-                               (incf neg-count n)
-                               (decf (gethash k pairs) n)
-                               (decf (gethash neg pairs) n)))))
+                           (let+ (((&values neg-val neg-present?) (gethash neg pairs)))
+                             (when (and neg-present? (not (gethash neg seen)))
+                               ;; Mark both as seen
+                               (setf (gethash k seen) t)
+                               (setf (gethash neg seen) t)
+                               ;; Reduce counts
+                               (let ((n (min v neg-val)))
+                                 (incf neg-count n)
+                                 (decf (gethash k pairs) n)
+                                 (decf (gethash neg pairs) n))))))
                      pairs)
             ;; Build result: keep odd occurrences
             (maphash #'(lambda (k v)
-                         (unless (and (listp k) (eq (car k) :seen))
-                           (when (oddp v)
-                             (push k result))))
+                         (when (oddp v)
+                           (push k result)))
                      pairs)
             ;; Add t for each opposite pair
             (dotimes (i neg-count)
@@ -1592,10 +1594,10 @@
     ;; Collect variable occurrences
     (dolist (cl cls)
       (clause-map #'(lambda (lit)
-                      (let* ((var (lit-var lit))
+                      (let+ ((var (lit-var lit))
                              (pos? (lit-sign lit))
-                             (counts (gethash var var-counts)))
-                        (if counts
+                             ((&values counts present?) (gethash var var-counts)))
+                        (if present?
                             (if pos?
                                 (incf (car counts))
                                 (incf (cdr counts)))
