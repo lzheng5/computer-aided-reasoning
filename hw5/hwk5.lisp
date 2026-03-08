@@ -1258,6 +1258,16 @@
         sym
         `(not ,sym))))
 
+(defun var-manager->string (vm)
+  "Convert variable manager mappings to string"
+  (let ((pairs nil))
+    (maphash #'(lambda (sym num)
+                 (push (format nil "~A -> ~A" sym num) pairs))
+             (var-manager-sym->num vm))
+    (if pairs
+        (format nil "Variable Mapping: ~%~{  ~A~%~}" (sort pairs #'string<))
+        "Variable Mapping: (empty)")))
+
 ;;; ============================================================
 ;;; Numeric Literal Operations
 ;;; Encoding: variable n -> literal 2n (positive), literal 2n+1 (negative)
@@ -1291,6 +1301,19 @@
        (if pos?
            (* 2 var-num)
            (1+ (* 2 var-num)))))
+
+(defun lit->string (lit &optional vm)
+  "Convert numeric literal to string. If vm provided, use symbolic names."
+  (let ((var (lit-var lit))
+        (sign (lit-sign lit)))
+    (if vm
+        (let ((sym (var-manager-get-sym vm var)))
+          (if sign
+              (format nil "~A" sym)
+              (format nil "~~~A" sym)))
+        (if sign
+            (format nil "~A" var)
+            (format nil "~~~A" var)))))
 
 ;;; ============================================================
 ;;; Clause API - Abstraction over clause representation
@@ -1365,6 +1388,20 @@
   "Destructively remove literal from clause (mutates clause)"
   (remhash lit cl))
 
+(defun clause->string (cl &optional vm)
+  "Convert clause to string (disjunction of literals)"
+  (if (clause-empty? cl)
+      "[]"
+      (let ((lits nil))
+        (clause-map #'(lambda (lit) (push (lit->string lit vm) lits)) cl)
+        (format nil "[~{~A~^ v ~}]" (sort lits #'string<)))))
+
+(defun clauses->string (cls &optional vm)
+  "Convert list of clauses to string (conjunction of clauses)"
+  (if (null cls)
+      "TRUE"
+      (format nil "~{~A~^ & ~}" (mapcar #'(lambda (cl) (clause->string cl vm)) cls))))
+
 ;;; ============================================================
 ;;; Assignment Hash Table API
 ;;; ============================================================
@@ -1412,6 +1449,34 @@
             (push (cons atom t) result)))))
 
     result))
+
+(defun assignment->string (asgn vm)
+  "Convert assignment hash table to string"
+  (let ((pairs nil))
+    (maphash #'(lambda (num-var val)
+                 (let ((sym-var (var-manager-get-sym vm num-var)))
+                   (push (format nil "~A=~A" sym-var val) pairs)))
+             asgn)
+    (if pairs
+        (format nil "{~{~A~^, ~}}" (sort pairs #'string<))
+        "{}")))
+
+;;; ============================================================
+;;; Resolve Map String Conversion
+;;; ============================================================
+
+(defun resolve-map->string (resolve-map vm)
+  "Convert resolve-map to string for debugging"
+  (if (null resolve-map)
+      "[]"
+      (format nil "[~{~A~^, ~}]"
+              (mapcar #'(lambda (entry)
+                          (let ((var (car entry))
+                                (cls (cdr entry)))
+                            (format nil "~A: ~A" 
+                                    (var-manager-get-sym vm var)
+                                    (clauses->string cls vm))))
+                      resolve-map))))
 
 ;;; ============================================================
 ;;; CNF -> Clauses Conversion
@@ -1557,7 +1622,8 @@
     (nreverse result)))
 
 (defun resolve-var (cls var)
-  "Resolve on variable var, returning new clause set"
+  "Resolve on variable var, returning (values new-clause-set containing-clauses).
+   containing-clauses is the list of clauses that contained var (pos-cls and neg-cls)."
   (let ((pos-lit (make-lit var t))
         (neg-lit (make-lit var nil))
         (pos-cls nil)
@@ -1587,32 +1653,35 @@
                                     (hash-set-add resolvent lit)))
                               ncl)
               (push resolvent resolvents)))))
-      (append other-cls resolvents))))
+      (values (append other-cls resolvents)
+              (append pos-cls neg-cls)))))
 
 (defun dp-resolve (cls var)
   "Resolve on variable var and apply subsumption to keep clause set small.
-   Return new clause set. "
-  (remove-subsumed
-    (resolve-var cls var)))
+   Returns (values new-clause-set containing-clauses)."
+  (let+ (((&values new-cls var-cls) (resolve-var cls var)))
+    (values (remove-subsumed new-cls)
+            var-cls)))
 
-(defun dp-sat (cls asgn resolved-vars)
+(defun dp-sat (cls asgn resolve-map)
   "Main DP loop: apply unit propagation, pure literal elimination, and resolution recursively.
-   Returns (values result resolved-vars) where resolved-vars is a stack of variables eliminated by resolution."
+   Returns (values result resolve-map) where resolve-map is an alist of (var . containing-clauses)."
   (let ((cls (dp-unit cls asgn)))
-    (cond ((null cls) (values 'sat resolved-vars))
-          ((some #'clause-empty? cls) (values 'unsat resolved-vars))
+    (cond ((null cls) (values 'sat resolve-map))
+          ((some #'clause-empty? cls) (values 'unsat resolve-map))
           (t
            (let ((cls (dp-pure cls asgn)))
-             (cond ((null cls) (values 'sat resolved-vars))
-                   ((some #'clause-empty? cls) (values 'unsat resolved-vars))
+             (cond ((null cls) (values 'sat resolve-map))
+                   ((some #'clause-empty? cls) (values 'unsat resolve-map))
                    (t
-                    (let* ((var (dp-decide cls))
-                           (new-cls (dp-resolve cls var)))
-                      (dp-sat new-cls asgn (cons var resolved-vars))))))))))
+                    (let* ((var (dp-decide cls)))
+                      (let+ (((&values new-cls var-cls) (dp-resolve cls var)))
+                        (dp-sat new-cls asgn (cons (cons var var-cls) resolve-map)))))))))))
 
-(defun dp-reconstruct (cls asgn resolved-vars)
+(defun dp-reconstruct (cls asgn resolve-map)
   "Reconstruct assignment for resolved variables by assigning them arbitrarily and propagating.
-   Mutates asgn to add assignments for resolved variables."
+   Mutates asgn to add assignments for resolved variables.
+   resolve-map is an alist of (var . containing-clauses)."
   (labels ((simplify-clauses (cls)
              (mapcar #'(lambda (cl)
                          ;; Copy clause and remove false literals
@@ -1634,23 +1703,19 @@
                                                             (eq (gethash var asgn) sign))))
                                                  cl))
                                 cls))))
-    (let ((working-cls cls))
-      ;; Assign resolved variable arbitrarily and perform dp-unit if not already assigned
-      (dolist (var resolved-vars)
-        (unless (gethash var asgn)
-          (assignment-set asgn var t)
-          (pprint (format nil "dp-reconstruct try assgin ~A to be T" var))
-          (let ((new-working-cls (dp-unit (simplify-clauses working-cls) asgn)))
-            (cond ((null new-working-cls) (return))
-                  ((some #'clause-empty? new-working-cls)
-                   ;; Backtrack
-                   ;; TODO: undo assignments
-                   (pprint (format nil "dp-reconstruct assgined ~A to be NIL" var))
-                   (assignment-set asgn var nil)
-                   (setf working-cls (dp-unit (simplify-clauses working-cls) asgn)))
-                  (t
-                   (pprint (format nil "dp-reconstruct assgined ~A to be T" var))
-                   (setf working-cls new-working-cls)))))))))
+    (dolist (entry resolve-map)
+      (let ((var (car entry))
+            (var-cls (cdr entry)))
+        (let ((cls (simplify-clauses var-cls)))
+          (cond ((null cls) (assignment-set asgn var t))  ;; If all clauses are satisfied, assign arbitrarily
+                ((null (cdr cls)) 
+                 ;; There has to be exactly one clause left after simplification, which must be a unit clause containing var or its negation
+                 (if (clause-unit? (first cls)) 
+                     (let ((unit (clause-unit-lit (first cls)))
+                           (sign (lit-sign unit)))
+                       (assignment-set asgn var sign))
+                     (t (error "Unexpected non-unit clause during reconstruction: ~A" cl))))
+                (t (error "Unexpected simplified clauses during reconstruction: ~A" cls))))))
 
 (defun dp (f)
   "Main DP function: takes a formula f, converts to CNF, and applies DP algorithm.
@@ -1659,9 +1724,9 @@
     (let+ (((&values cnf amap) (tseitin f))
            (cls (cnf->clauses cnf vm)) ;; mutates vm
            (asgn (make-assignment))
-           ((&values result resolved-vars) (dp-sat cls asgn nil)) ;; mutates asgn
+           ((&values result resolve-map) (dp-sat cls asgn nil)) ;; mutates asgn
            (result-asgn (when (eq result 'sat)
-                          (dp-reconstruct cls asgn resolved-vars) ;; mutates asgn
+                          (dp-reconstruct cls asgn resolve-map) ;; mutates asgn
                           (assignment->alist asgn vm (pvars f) amap))))
       (values result result-asgn))))
 
