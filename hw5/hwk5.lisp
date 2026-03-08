@@ -624,8 +624,26 @@
     ((list 'not a)
      (match a
        ((list 'not b) (p-simplify-not b))
-       ((list* 'iff bs) `(xor ,@(mapcar #'p-simplify-not bs)))
-       ((list* 'xor bs) `(iff ,@(mapcar #'p-simplify-not bs)))
+       ((list* 'iff bs) 
+        (let ((bs (mapcar #'p-simplify-not bs)))
+          (match bs
+            (nil nil)  ; (not (iff)) -> nil
+            ((list a) `(not ,a))  ; (not (iff a)) -> (not a)
+            ((list a b) `(xor ,a ,b))  ; (not (iff a b)) -> (xor a b)
+            (_ ; (not (iff a b ... c)) -> (xor (iff a b ...) c) by left associativity of iff
+             (let ((butlast (butlast bs))
+                   (last-elem (car (last bs))))
+               `(xor (iff ,@butlast) ,last-elem))))))
+       ((list* 'xor bs) 
+        (let ((bs (mapcar #'p-simplify-not bs)))
+          (match bs
+            (nil t)  ; (not (xor)) -> t
+            ((list a) `(not ,a))  ; (not (xor a)) -> (not a)
+            ((list a b) `(iff ,a ,b))  ; (not (xor a b)) -> (iff a b)
+            (_ ; (not (xor a b ... c)) -> (iff (xor a b ...) c) by left associativity of xor
+             (let ((butlast (butlast bs))
+                   (last-elem (car (last bs))))
+               `(iff (xor ,@butlast) ,last-elem))))))
        ((list* op bs) `(not (,op ,@(mapcar #'p-simplify-not bs))))
        (_ `(not ,a))))
     ((list* op as) `(,op ,@(mapcar #'p-simplify-not as)))
@@ -865,6 +883,16 @@
 (test-simplify '(not (xor p)))
 (test-simplify '(not (xor p q)))
 (test-simplify '(not (iff p q)))
+(test-simplify '(not (iff (and) (or) q)))
+
+;; TODO: bug
+(assertf #'p-simplify '(iff (and) (or) q) '(not q))
+(assertf #'p-simplify '(xor (and) (or) q) '(not q))
+
+(assertf #'p-simplify-flatten '(not (iff (and) (or) q)) '(not (iff t nil q)))
+(assertf #'p-simplify-not '(not (iff t nil q)) '(xor t nil q))
+(assertf #'p-simplify-const '(xor t nil q) '(not q))
+
 (test-simplify '(not (iff (and) (or) q)))
 
 ;; E. Shannon expansion example from spec
