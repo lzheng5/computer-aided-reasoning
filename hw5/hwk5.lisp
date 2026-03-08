@@ -2017,33 +2017,33 @@
 ;; UNSAT when n ≥ R(s,k) - we CANNOT avoid them
 (defun ramsey (s k n)
   "Generate a formula that is satisfiable iff there exists a red-blue coloring of the edges of K_n with no red K_s and no blue K_k."
-  (let ((edges nil))
+  (let ((edges nil)
+        (no-red-s nil)
+        (no-blue-k nil))
     ;; Generate variables for each edge
     (dotimes (i n)
       (dotimes (j i)
         (push (genvar 'e (format nil "_~A_~A" i j)) edges)))
     ;; No red K_s: for every set of s vertices, at least one edge must be blue
-    (let ((no-red-s nil))
-      (dolist (subset (combinations n s))
-        (let ((clause nil))
-          (dolist (pair (combinations subset 2))
-            (let* ((i (first pair))
-                   (j (second pair))
-                   (edge-var (genvar 'e (format nil "_~A_~A" i j))))
-              ;; edge-var = true means red, so we want at least one to be false
-              (push `(not ,edge-var) clause)))
-          (push `(or ,@clause) no-red-s))))
+    (dolist (subset (combinations n s))
+      (let ((clause nil))
+        (dolist (pair (combinations subset 2))
+          (let* ((i (first pair))
+                 (j (second pair))
+                 (edge-var (genvar 'e (format nil "_~A_~A" i j))))
+            ;; edge-var = true means red, so we want at least one to be false
+            (push `(not ,edge-var) clause)))
+        (push `(or ,@clause) no-red-s)))
     ;; No blue K_k: for every set of k vertices, at least one edge must be red
-    (let ((no-blue-k nil))
-      (dolist (subset (combinations n k))
-        (let ((clause nil))
-          (dolist (pair (combinations subset 2))
-            (let* ((i (first pair))
-                   (j (second pair))
-                   (edge-var (genvar 'e (format nil "_~A_~A" i j))))
-              ;; edge-var = true means red, so we want at least one to be true
-              (push edge-var clause)))
-          (push `(or ,@clause) no-blue-k))))
+    (dolist (subset (combinations n k))
+      (let ((clause nil))
+        (dolist (pair (combinations subset 2))
+          (let* ((i (first pair))
+                 (j (second pair))
+                 (edge-var (genvar 'e (format nil "_~A_~A" i j))))
+            ;; edge-var = true means red, so we want at least one to be true
+            (push edge-var clause)))
+        (push `(or ,@clause) no-blue-k)))
     ;; Combine all constraints
     `(and ,@no-red-s ,@no-blue-k)))
 
