@@ -767,6 +767,7 @@
       (extend (cdr keys) (cdr vals)
               (acons (car keys) (car vals) env))))
 
+;; TODO: skip non-variable atoms 
 ;; pre: no duplicates and opposites
 (defun p-simplify-shannon (f &optional env)
   (match f
@@ -1072,6 +1073,7 @@
             (push top-var clauses)
            `(and ,@(reverse clauses))))))))
 
+;; TODO: perform p-simplify on the skeleton instead
 (defun tseitin (f)
   (let+ ((simplified (p-simplify f))
          ((&values skeleton amap) (p-skeleton simplified))
@@ -1445,6 +1447,7 @@
                      (push (cons key val) result))))
              asgn)
 
+    ;; TODO: no need to add missing vars, which comes from the non-variable atoms 
     ;; Add missing variables from vars (assign t arbitrarily)
     (when vars
       (dolist (var vars)
@@ -1521,6 +1524,7 @@
 ;;; ============================================================
 
 ;; Mode: 'debug | 'stats | nil (default)
+;; Note if we changed this, we should reload the file to recompile the definitions to include debugging/stats information
 (defconstant +dp-mode+ nil)
 
 ;; TODO: rename dp-debug 
@@ -1774,7 +1778,7 @@
 (defun dp-sat (cls asgn resolve-map)
   "Main DP loop: apply unit propagation, pure literal elimination, and resolution recursively.
    Returns (values result resolve-map) where resolve-map is an alist of (var . containing-clauses)."
-  (dp-stats-update-max-clauses (length cls)) ;; TODO: can we avoid length 
+  (dp-stats-update-max-clauses (length cls)) 
   (let ((cls (dp-stats-time :unit (dp-unit cls asgn))))
     (cond ((null cls) (values 'sat resolve-map))
           ((some #'clause-empty? cls) (values 'unsat resolve-map))
@@ -2177,4 +2181,224 @@
 
 |#
 
-(defun dpll (f) ...)
+;; ==============================================================
+;; Trail APIs 
+;; 
+;; Trail is a stack of (var val . level)
+;; where var is the variable assigned, 
+;;       val is the assigned value (t/nil), and 
+;;       level is the decision level at which it was assigned.
+;; The trail is ordered with the most recent assignment at the front (top of stack).
+;; ==============================================================
+
+(defun make-trail-entry (var val level)
+  "Create a trail entry for variable VAR assigned value VAL at decision level LEVEL."
+  `(,var ,val . ,level))
+(defun trail-entry-var (entry) (car entry))
+(defun trail-entry-val (entry) (cadr entry))
+(defun trail-entry-level (entry) (cddr entry))
+
+(defun trail-max-level (trail) 
+  "Returns the maximum decision level in the trail, or -1 if the trail is empty."
+  (if (null trail) -1 (trail-entry-level (first trail))))
+
+(defun trail->asgn (trail vm vars amap) ...)
+
+;; TODO: turn off assertions after dev 
+
+;; ============================================================
+;; DPLL Algorithm 
+;; ===========================================================
+
+(defun dpll-unit (cls trail) ...)
+
+(defun dpll-decide (cls trail) ...)
+
+(defun dpll-analyze (cls trail) ...)
+
+(defun dpll-backtrack (trail bt-level) 
+   "Backtrack the trail to the given backtracking level. 
+    Returns the new trail after backtracking.
+    
+    Pre: bt-level >= 0, trail != nil, and bt-level < current max decision level in trail.
+    Post: the returned trail != nil and its top is a decision at bt-level with the opposite assignment."
+
+  (assert (>= bt-level 0) () "Backtracking level must be non-negative: ~A" bt-level)
+  (assert (not (null trail)) () "Trail cannot be empty when backtracking")
+  (let ((max-level (trail-max-level trail)))
+    (assert (< bt-level max-level) () "Backtracking level ~A must be less than current max decision level ~A in trail" bt-level max-level))
+  
+  (labels ((do-backtrack (tr)
+          (let* ((entry (first tr))
+                 (rest-tr (rest tr))
+                 (lvl (trail-entry-level entry)))
+            (cond
+              ((> lvl bt-level) 
+               (do-backtrack rest-tr))
+              ((= lvl bt-level)
+               ;; Check next entry (two by two comparison)
+               (let ((next-lvl (trail-max-level rest-tr))))
+                 (if (< next-lvl bt-level)
+                     ;; Next entry is at lower level, so this is the decision - flip it
+                     (cons (make-trail-entry (trail-entry-var entry) (not (trail-entry-val entry)) (trail-entry-level entry)) rest-tr)
+                     ;; Next entry at same level, this is propagation - keep popping
+                     (do-backtrack rest-tr))))
+              (t 
+               ;; Impossible case due to preconditions
+               (error "Unexpected level ~A < bt-level ~A" lvl bt-level))))))
+  (do-backtrack trail))
+
+(defun dpll-sat (cls trail level)
+  "Main DPLL loop: apply unit propagation, then either analyze conflict or decide next variable.
+   Returns result and a new trail where result is 'sat or 'unsat and new-trail is the final trail after backtracking if needed.
+   
+   Pre: level should be equal to the max decision level in trail (or -1 if trail is empty)."
+
+  (assert (= level (trail-max-level trail)) () "Current level ~A must be equal to max decision level in trail ~A" level (trail-max-level trail))
+  
+  (let ((trail0 (dpll-unit cls trail)))
+    (if (null trail0)
+        ;; Analyze conflict and backtrack
+        (let+ (((&values conflict-cls bt-level) (dpll-analyze cls trail)))
+          (if (< bt-level 0)
+              (values 'unsat nil)  ; No more backtracking possible, UNSAT
+              (let ((trail1 (dpll-backtrack trail bt-level)))
+                (dpll-sat cls trail1 bt-level))))
+        ;; Decide 
+        (let+ (((&values var val) (dpll-decide cls trail0)))
+          (if (null var)
+              (values 'sat trail0)  ; No more decisions possible, SAT with current assignment
+              (let ((level0 (1+ level))
+                    (trail1 (cons (make-trail-entry var val level0) trail0)))
+                (dpll-sat cls trail1 level0)))))))
+
+(defun dpll (f)
+  "Main DPLL function: takes a formula f, converts to CNF, and applies DPLL algorithm.
+   Returns 'sat or 'unsat with assignment alist."
+  (let* ((vm (make-var-manager)))
+    (let+ (((&values cnf amap) (tseitin f))
+           (cls (cnf->clauses cnf vm)) ;; mutates vm
+           ((&values result trail) (dpll-sat cls nil -1))
+           (result-asgn (when (eq result 'sat)
+                          (trail->asgn trail vm (pvars f) amap))))
+      (values result result-asgn))))
+
+(defun test-dpll (f &optional (expected 'sat))
+  "Test dpll on formula f by verifying its result.
+   Expected defaults to 'sat unless specified as 'unsat."
+  (let+ (((&values result asgn) (dpll f)))
+    (verify-sat f result asgn expected)))
+
+;; DPLL Tests (copied from DP tests)
+;; Basic SAT tests
+(test-dpll 'p)                                    ; single var - SAT
+(test-dpll '(or p q))                             ; simple disjunction - SAT
+(test-dpll '(and p q))                            ; simple conjunction - SAT
+(test-dpll '(implies p q))                        ; implication - SAT
+(test-dpll '(iff p q))                            ; biconditional - SAT
+(test-dpll '(xor p q))
+
+;; Basic UNSAT tests
+(test-dpll '(and p (not p)) 'unsat)              ; contradiction - UNSAT
+(test-dpll '(and (or p q) (not p) (not q)) 'unsat)  ; UNSAT
+(test-dpll '(and p q (or (not p) (not q)) (or p (not q)) (or (not p) q)) 'unsat)  ; UNSAT
+
+;; More complex SAT formulas
+(test-dpll '(and (or p q) (or (not p) r)))        ; SAT
+(test-dpll '(and (or p q r) (or (not p) (not q)) (or (not r) p)))  ; SAT
+(test-dpll '(or (and p q) (and (not p) r)))       ; SAT
+(test-dpll '(iff (and p q) (or r s)))             ; SAT
+
+;; With non-variable atoms
+(test-dpll '(or (foo a) (bar b)))                 ; SAT
+(test-dpll '(and (foo x) (not (foo x))) 'unsat)   ; UNSAT
+(test-dpll '(implies (f a b) (g c)))              ; SAT
+
+;; Nested formulas
+(test-dpll '(and (or p (not q)) (or q (not r)) (or r (not p))))  ; SAT
+(test-dpll '(xor p q))                            ; SAT
+(test-dpll '(if p q r))                           ; SAT
+
+;; Adder tests
+;; Example 1: Single bit full adder
+(test-dpll (fa 'x0 'y0 'cin 's0 'cout))  ; SAT - unconstrained full adder
+
+;; Example 2: 2-bit adder with constraint (checking 1+1=2 with carry-in=0)
+(test-dpll `(and ,(ripplecarry0
+                 #'(lambda (i) (genvar 'x i))
+                 #'(lambda (i) (genvar 'y i))
+                 #'(lambda (i) (genvar 'c i))
+                 #'(lambda (i) (genvar 's i))
+                 2)
+               x0 (not x1)    ; x = 01 (binary) = 1
+               y0 (not y1)    ; y = 01 (binary) = 1
+               (not s0) s1    ; s = 10 (binary) = 2
+               (not c2)))     ; no overflow
+
+;; Example 3: 3-bit adder checking 7+1=8 (overflow)
+(test-dpll `(and ,(ripplecarry0
+                 #'(lambda (i) (genvar 'a i))
+                 #'(lambda (i) (genvar 'b i))
+                 #'(lambda (i) (genvar 'c i))
+                 #'(lambda (i) (genvar 'sum i))
+                 3)
+               a0 a1 a2           ; a = 111 (binary) = 7
+               b0 (not b1) (not b2)  ; b = 001 (binary) = 1
+               (not sum0) (not sum1) (not sum2)  ; sum = 000 (mod 8)
+               c3))               ; carry out = 1 (overflow)
+
+;; Example 4: 4-bit adder unconstrained (always SAT)
+(test-dpll (ripplecarry0
+          #'(lambda (i) (genvar 'x i))
+          #'(lambda (i) (genvar 'y i))
+          #'(lambda (i) (genvar 'c i))
+          #'(lambda (i) (genvar 'z i))
+          4))
+
+;; UNSAT Examples
+;; Example 5: 2-bit adder with impossible constraint (1+1=3, no overflow)
+(test-dpll `(and ,(ripplecarry0
+                 #'(lambda (i) (genvar 'x i))
+                 #'(lambda (i) (genvar 'y i))
+                 #'(lambda (i) (genvar 'c i))
+                 #'(lambda (i) (genvar 's i))
+                 2)
+               x0 (not x1)    ; x = 01 (binary) = 1
+               y0 (not y1)    ; y = 01 (binary) = 1
+               s0 s1          ; s = 11 (binary) = 3 (IMPOSSIBLE!)
+               (not c2))      ; no overflow - UNSAT
+         'unsat)
+
+;; Example 6: 3-bit adder with overflow contradiction (7+1=8, but no carry)
+(test-dpll `(and ,(ripplecarry0
+                 #'(lambda (i) (genvar 'a i))
+                 #'(lambda (i) (genvar 'b i))
+                 #'(lambda (i) (genvar 'c i))
+                 #'(lambda (i) (genvar 'sum i))
+                 3)
+               a0 a1 a2           ; a = 111 (binary) = 7
+               b0 (not b1) (not b2)  ; b = 001 (binary) = 1
+               (not sum0) (not sum1) (not sum2)  ; sum = 000
+               (not c3))          ; no carry - UNSAT (7+1 must overflow!)
+         'unsat)
+
+;; Example 7: 2-bit adder checking impossible result: 2+3=4 with carry
+;; (Actually 2+3=5, so with carry c2=1 and result r=00, we'd get 4, which is wrong)
+(test-dpll `(and ,(ripplecarry0
+                 #'(lambda (i) (genvar 'p i))
+                 #'(lambda (i) (genvar 'q i))
+                 #'(lambda (i) (genvar 'c i))
+                 #'(lambda (i) (genvar 'r i))
+                 2)
+               (not p0) p1     ; p = 10 (binary) = 2
+               q0 q1           ; q = 11 (binary) = 3
+               (not r0) (not r1)  ; r = 00 (binary) = 0
+               c2)             ; with carry - gives 0+4=4, but 2+3=5 - UNSAT
+         'unsat)
+
+;; Ramsey number tests
+;; R(3,3) = 6 means any 2-coloring of K_6 must contain a monochromatic K_3
+(test-dpll (ramsey 3 3 5))      ; n < R(3,3), can avoid monochromatic triangles - SAT
+(test-dpll (ramsey 3 3 6) 'unsat) ; n >= R(3,3), cannot avoid monochromatic triangles - UNSAT
+;;(test-dpll (ramsey 4 4 17)) ; n < R(4,4), can avoid monochromatic K_4 - SAT
+;;(test-dpll (ramsey 4 4 18) 'unsat) ; n >= R(4,4), cannot avoid monochromatic K_4 - UNSAT
