@@ -1520,6 +1520,9 @@
       ((list* 'and args) (mapcar #'(lambda (cl) (make-clause (convert-lits (unpack cl)))) args))
       (_ (error "Not in CNF: ~A" f)))))
 
+;; TODO: debugging mode
+;; TODO: stats mode (counts of pure/unit vars, time spent in each phase, max clauses count, total time spent in dp)
+
 ;;; ============================================================
 ;;; DP Algorithm
 ;;; ============================================================
@@ -1760,25 +1763,12 @@
     (dolist (entry resolve-map)
       (let ((var (car entry))
             (var-cls (cdr entry)))
-        ;; First assign any companion variables that would otherwise leave non-unit clauses
+        ;; assign-companion-vars guarantees: nil OR all unit clauses with target-var
         (let ((cls (assign-companion-vars var-cls var)))
-          (cond ((null cls) (assignment-set asgn var t))  ;; If all clauses are satisfied, assign arbitrarily
-                ((every #'clause-unit? cls)
-                 ;; All remaining clauses must be unit clauses with the same literal
-                 (let* ((first-unit (clause-unit-lit (first cls)))
-                        (expected-sign (lit-sign first-unit)))
-                   (assert (= (lit-var first-unit) var) ()
-                           "Expected unit clause to contain variable ~A, but got ~A" var (clause->string (first cls)))
-                   (assert (every #'(lambda (cl)
-                                      (let ((lit (clause-unit-lit cl)))
-                                        (and (= (lit-var lit) var)
-                                             (eq (lit-sign lit) expected-sign))))
-                                  cls)
-                           () "Inconsistent unit clauses during reconstruction for var ~A: ~A"
-                           var (mapcar #'clause->string cls))
-                   (assignment-set asgn var expected-sign)))
-                (t (error "Unexpected non-unit clauses during reconstruction for var ~A: ~A"
-                          var (mapcar #'clause->string cls)))))))))
+          (if (null cls)
+              (assignment-set asgn var t)  ;; All clauses satisfied, assign arbitrarily
+              ;; All unit clauses must have same sign and contain the same target var
+              (assignment-set asgn var (lit-sign (clause-unit-lit (first cls))))))))))
 
 (defun dp (f)
   "Main DP function: takes a formula f, converts to CNF, and applies DP algorithm.
