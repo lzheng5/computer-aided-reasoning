@@ -767,9 +767,11 @@
       (extend (cdr keys) (cdr vals)
               (acons (car keys) (car vals) env))))
 
-;; TODO: skip non-variable atoms 
-;; pre: no duplicates and opposites
 (defun p-simplify-shannon (f &optional env)
+  "Apply Shannon expansions to simplify formulas. 
+   env is an association list mapping variables to their values (t/nil).
+   
+   Pre: env should not contain duplicates or opposite literals. For example, it should not contain both p and (not p)."
   (match f
     ((type boolean) f)
     ((type symbol) (let+ (((&values v found) (key-alist->val f env)))
@@ -781,8 +783,12 @@
        (_ `(not ,(p-simplify-shannon a env)))))
 
     ((list* op as)
-     (if (in op '(and or))
-         (let+ ((pop (key-alist->val op *p-ops*))
+     (cond
+       ;; Non-variable atom: keep as-is
+       ((p-funp op) f)
+       ;; Logical connectives
+       ((in op '(and or))
+        (let+ ((pop (key-alist->val op *p-ops*))
                 (id (key-list->val :identity pop))
                 (as (mapcar #'(lambda (a)
                                 (match a
@@ -812,7 +818,8 @@
                               (extend nvars (mapcar #'(lambda (v) (not id)) nvars)
                                       env))))
            `(,op ,@vars ,@nlits ,@(mapcar #'(lambda (a) (p-simplify-shannon a nenv)) as)))
-         `(,op ,@(mapcar #'(lambda (a) (p-simplify-shannon a env)) as))))))
+       ;; Other operators
+       (t `(,op ,@(mapcar #'(lambda (a) (p-simplify-shannon a env)) as))))))))
 
 (assertf #'p-simplify-shannon '(iff nil p q) '(iff nil p q))
 (assertf #'p-simplify-shannon '(and (or p q) (or r q p) p) '(and p (or t q) (or r q t)))
@@ -849,6 +856,7 @@
 ;; Non-variable atoms
 (assertf #'p-simplify '(iff (foo a) (foo a) (bar b)) '(bar b))
 (assertf #'p-simplify '(iff (foo a) (bar b) (not (foo a))) '(not (bar b)))
+(assertf #'p-simplify '(or a (foo a) (bar b)) '(or a (foo a) (bar b)))
 
 ;; not + iff/xor
 (assertf #'p-simplify '(iff (and) (or) q) '(not q))
@@ -1073,11 +1081,10 @@
             (push top-var clauses)
            `(and ,@(reverse clauses))))))))
 
-;; TODO: perform p-simplify on the skeleton instead
 (defun tseitin (f)
-  (let+ ((simplified (p-simplify f))
-         ((&values skeleton amap) (p-skeleton simplified))
-         (unchained (tseitin-unchain skeleton))
+  (let+ (((&values skeleton amap) (p-skeleton f))
+         (simplified (p-simplify skeleton))
+         (unchained (tseitin-unchain simplified))
          (cnf (tseitin-transform unchained))
          (simplified-cnf (p-simplify cnf))) ;; p-simplify preserves CNF
     (values simplified-cnf amap)))
@@ -1954,9 +1961,6 @@
 (test-dp '(or (foo a) (bar b)))                 ; SAT
 (test-dp '(and (foo x) (not (foo x))) 'unsat)   ; UNSAT
 (test-dp '(implies (f a b) (g c)))              ; SAT
-
-;; TODO: fix shannon?
-(dp '(or a (foo a) (bar b)))
 
 ;; Nested formulas
 (test-dp '(and (or p (not q)) (or q (not r)) (or r (not p))))  ; SAT
