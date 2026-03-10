@@ -1530,6 +1530,7 @@
 ;;; Debug and Stats
 ;;; ============================================================
 
+;; TODO: rename +dp-mode+ to +mode+ 
 ;; Mode: 'debug | 'stats | nil (default)
 ;; Note if we changed this, we should reload the file to recompile the definitions to include debugging/stats information
 (defconstant +dp-mode+ nil)
@@ -2214,18 +2215,36 @@
 ;; DPLL Algorithm 
 ;; ===========================================================
 
-(defun dpll-unit (cls trail) ...)
+(defun dpll-unit (cls trail)
+  "Apply two literal watching scheme to unit propagate cls under the current trail assignment.
+   Returns (values conflict? new-trail) where conflict? is true if a conflict (empty clause) is found, and new-trail is the updated trail after propagation.
+   
+   Post: if conflict? = true, then new-trail != nil and there is an empty clause in cls under the assignment from new-trail. 
+         else new-trail can be nil or a valid trail without conflicts."
+  ...)
 
-(defun dpll-decide (cls trail) ...)
+(defun dpll-decide (cls trail) 
+  "Decide the next variable to assign based on the current cls and trail.
+   Returns (values var val) where var is the variable chosen for the decision and val is the value assigned to it (t/nil).
+   If there are no more variables to decide, returns (values nil nil)."
+  (if (null cls)
+      (values nil nil)  ; No more clauses means we can stop - SAT
+      ...))
 
-(defun dpll-analyze (cls trail) ...)
+(defun dpll-analyze (cls trail)
+  "Analyze the conflict at the current trail and return (values conflict-clause bt-level).
+   conflict-clause is a new clause derived from the conflict that will be added to the learnt clause set.
+   bt-level is the backtracking level to jump back to, or -1 if unsat.
+
+   Pre: trail != nil and there is a conflict (empty clause) in cls under the current trail assignment."
+  ...)
 
 (defun dpll-backtrack (trail bt-level) 
    "Backtrack the trail to the given backtracking level. 
     Returns the new trail after backtracking.
     
     Pre: bt-level >= 0, trail != nil, and bt-level < current max decision level in trail.
-    Post: the returned trail != nil and its top is a decision at bt-level with the opposite assignment."
+    Post: the returned trail != nil and its top entry is a decision at bt-level with the opposite assignment."
 
   (assert (>= bt-level 0) () "Backtracking level must be non-negative: ~A" bt-level)
   (assert (not (null trail)) () "Trail cannot be empty when backtracking")
@@ -2260,13 +2279,13 @@
 
   (assert (= level (trail-max-level trail)) () "Current level ~A must be equal to max decision level in trail ~A" level (trail-max-level trail))
   
-  (let ((trail0 (dpll-unit cls trail)))
-    (if (null trail0)
+  (let+ (((&values conflict? trail0) (dpll-unit cls trail)))
+    (if conflict?
         ;; Analyze conflict and backtrack
-        (let+ (((&values conflict-cls bt-level) (dpll-analyze cls trail)))
+        (let+ (((&values unused-conflict-cls bt-level) (dpll-analyze cls trail0)))
           (if (< bt-level 0)
               (values 'unsat nil)  ; No more backtracking possible, UNSAT
-              (let ((trail1 (dpll-backtrack trail bt-level)))
+              (let ((trail1 (dpll-backtrack trail0 bt-level)))
                 (dpll-sat cls trail1 bt-level))))
         ;; Decide 
         (let+ (((&values var val) (dpll-decide cls trail0)))
