@@ -1523,16 +1523,13 @@
 ;;; Debug and Stats
 ;;; ============================================================
 
-;; TODO: rename +dp-mode+ to +mode+
 ;; Mode: 'debug | 'stats | nil (default)
 ;; Note if we changed this, we should reload the file to recompile the definitions to include debugging/stats information
-(defconstant +dp-mode+ nil)
+(defconstant +debug-mode+ 'nil)
 
-;; TODO: rename dp-debug
-;; Debug API
-(defmacro dp-debug (fmt &rest args)
-  "Print debug message when +dp-mode+ is 'debug"
-  `(when (eq +dp-mode+ 'debug)
+(defmacro dbg (fmt &rest args)
+  "Print debug message when +debug-mode+ is 'debug"
+  `(when (eq +debug-mode+ 'debug)
      (pprint (format nil ,fmt ,@args))))
 
 ;; DP Stats globals
@@ -1547,7 +1544,7 @@
 
 (defmacro dp-stats-reset ()
   "Reset all stats counters"
-  `(when (eq +dp-mode+ 'stats)
+  `(when (eq +debug-mode+ 'stats)
      (setf *dp-stats-unit-count* 0
            *dp-stats-pure-count* 0
            *dp-stats-resolve-count* 0
@@ -1559,38 +1556,35 @@
 
 (defmacro dp-stats-inc-unit ()
   "Increment unit propagation count"
-  `(when (eq +dp-mode+ 'stats)
+  `(when (eq +debug-mode+ 'stats)
      (incf *dp-stats-unit-count*)))
 
 (defmacro dp-stats-inc-pure (n)
   "Increment pure literal count by n"
-  `(when (eq +dp-mode+ 'stats)
+  `(when (eq +debug-mode+ 'stats)
      (incf *dp-stats-pure-count* ,n)))
 
 (defmacro dp-stats-inc-resolve ()
   "Increment resolution count"
-  `(when (eq +dp-mode+ 'stats)
+  `(when (eq +debug-mode+ 'stats)
      (incf *dp-stats-resolve-count*)))
 
 (defmacro dp-stats-update-max-clauses (n)
   "Update max clauses if n is larger"
-  `(when (eq +dp-mode+ 'stats)
+  `(when (eq +debug-mode+ 'stats)
      (setf *dp-stats-max-clauses* (max *dp-stats-max-clauses* ,n))))
 
 (defmacro dp-stats-time (phase &body body)
-  "Time the body and add to the appropriate phase counter"
-  (let ((start (gensym "START"))
-        (result (gensym "RESULT")))
-    `(if (eq +dp-mode+ 'stats)
+  (let ((start (gensym "START")))
+    `(if (eq +debug-mode+ 'stats)
          (let ((,start (get-internal-real-time)))
-           (let ((,result (progn ,@body)))
+           (multiple-value-prog1 (progn ,@body)
              (incf ,(ecase phase
                       (:unit '*dp-stats-time-unit*)
                       (:pure '*dp-stats-time-pure*)
                       (:resolve '*dp-stats-time-resolve*)
                       (:total '*dp-stats-time-total*))
-                   (- (get-internal-real-time) ,start))
-             ,result))
+                   (- (get-internal-real-time) ,start))))
          (progn ,@body))))
 
 (defmacro dp-stats-time->ms (time)
@@ -1599,7 +1593,7 @@
 
 (defmacro dp-stats-report ()
   "Print stats report"
-  `(when (eq +dp-mode+ 'stats)
+  `(when (eq +debug-mode+ 'stats)
      (format t "~%=== DP Statistics ===~%")
      (format t "Unit propagations:    ~A~%" *dp-stats-unit-count*)
      (format t "Pure literals:        ~A~%" *dp-stats-pure-count*)
@@ -1657,10 +1651,10 @@
                                (mapcar #'(lambda (v) (make-lit v nil)) pure-neg))))
         (dp-stats-inc-pure (length pure-lits))
         (dolist (v pure-pos)
-          (dp-debug "dp-pure assigned ~A to be T" v)
+          (dbg "dp-pure assigned ~A to be T" v)
           (assignment-set asgn v t))
         (dolist (v pure-neg)
-          (dp-debug "dp-pure assigned ~A to be NIL" v)
+          (dbg "dp-pure assigned ~A to be NIL" v)
           (assignment-set asgn v nil))
         (if (null pure-lits)
             cls
@@ -1684,7 +1678,7 @@
                      ;; Destructively remove negated literal from remaining clauses
                      (dolist (cl cls) (clause-remove-lit! cl neg-lit))
                      (assignment-set asgn var val)
-                     (dp-debug "dp-unit assigned ~A to be ~A" var val)
+                     (dbg "dp-unit assigned ~A to be ~A" var val)
                      (dp-stats-inc-unit)
                      (unit-loop cls))))))
     (unit-loop (mapcar #'clause-copy cls))))
@@ -1783,16 +1777,14 @@
   (let ((cls (dp-stats-time :unit (dp-unit cls asgn))))
     (cond ((null cls) (values 'sat resolve-map))
           ((some #'clause-empty? cls) (values 'unsat resolve-map))
-          (t
-           (let ((cls (dp-stats-time :pure (dp-pure cls asgn))))
-             (cond ((null cls) (values 'sat resolve-map))
-                   ((some #'clause-empty? cls) (values 'unsat resolve-map))
-                   (t
-                    (let* ((var (dp-decide cls)))
-                      (dp-debug "dp-sat resolving on var ~A" var)
-                      (dp-stats-inc-resolve)
-                      (let+ (((&values new-cls var-cls) (dp-stats-time :resolve (dp-resolve cls var))))
-                        (dp-sat new-cls asgn (cons (cons var var-cls) resolve-map)))))))))))
+          (t (let ((cls (dp-stats-time :pure (dp-pure cls asgn))))
+               (cond ((null cls) (values 'sat resolve-map))
+                     ((some #'clause-empty? cls) (values 'unsat resolve-map))
+                     (t (let* ((var (dp-decide cls)))
+                          (dbg "dp-sat resolving on var ~A" var)
+                          (dp-stats-inc-resolve)
+                          (let+ (((&values new-cls var-cls) (dp-stats-time :resolve (dp-resolve cls var))))
+                            (dp-sat new-cls asgn (cons (cons var var-cls) resolve-map)))))))))))
 
 (defun dp-reconstruct (cls asgn resolve-map)
   "Reconstruct assignment for resolved variables by assigning them arbitrarily and propagating.
@@ -1874,17 +1866,15 @@
 (defun dp (f)
   "Main DP function: takes a formula f, converts to CNF, and applies DP algorithm.
    Returns 'sat or 'unsat with assignment alist."
-  (dp-stats-reset)
-  (let* ((vm (make-var-manager)))
-    (let+ (((&values cnf amap) (tseitin f))
-           (cls (cnf->clauses cnf vm)) ;; mutates vm
-           (asgn (make-assignment))
-           ((&values result resolve-map) (dp-stats-time :total (dp-sat cls asgn nil))) ;; mutates asgn
-           (result-asgn (when (eq result 'sat)
-                          (dp-reconstruct cls asgn resolve-map) ;; mutates asgn
-                          (assignment->alist asgn vm (pvars f) amap))))
-      (dp-stats-report)
-      (values result result-asgn))))
+  (let+ (((&values cnf amap) (tseitin f))
+         (vm (make-var-manager))
+         (cls (cnf->clauses cnf vm)) ;; mutates vm
+         (asgn (make-assignment))
+         ((&values result resolve-map) (dp-stats-time :total (dp-sat cls asgn nil))) ;; mutates asgn
+         (result-asgn (when (eq result 'sat)
+                        (dp-reconstruct cls asgn resolve-map) ;; mutates asgn
+                        (assignment->alist asgn vm (pvars f) amap))))
+    (values result result-asgn)))
 
 (defun subst-formula (f asgn)
   "Substitute variables in formula f according to asgn (alist)"
@@ -1930,6 +1920,8 @@
    Expected defaults to 'sat unless specified as 'unsat."
   (let+ (((&values result asgn) (dp f)))
     (verify-sat f result asgn expected)))
+
+(dp-stats-reset)
 
 ;; Tests generated with Claude
 ;; Basic SAT tests
@@ -2146,6 +2138,8 @@
 (test-dp (ramsey 3 3 6) 'unsat) ; n >= R(3,3), cannot avoid monochromatic triangles - UNSAT
 ;;(test-dp (ramsey 4 4 17)) ; n < R(4,4), can avoid monochromatic K_4 - SAT
 ;;(test-dp (ramsey 4 4 18) 'unsat) ; n >= R(4,4), cannot avoid monochromatic K_4 - UNSAT
+
+(dp-stats-report)
 
 #|
 
