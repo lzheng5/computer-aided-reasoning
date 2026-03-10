@@ -643,7 +643,7 @@
     (_ f)))
 
 (assertf #'p-simplify-not '(not (not p)) 'p)
-(assertf #'p-simplify-not '(not (iff t nil q)) '(xor (iff t nil) q))
+(assertf #'p-simplify-not '(not (iff t nil q)) '(xor t (iff nil q)))
 
 (defun negate (f)
   "Get the negation of f"
@@ -768,9 +768,9 @@
               (acons (car keys) (car vals) env))))
 
 (defun p-simplify-shannon (f &optional env)
-  "Apply Shannon expansions to simplify formulas. 
+  "Apply Shannon expansions to simplify formulas.
    env is an association list mapping variables to their values (t/nil).
-   
+
    Pre: env should not contain duplicates or opposite literals. For example, it should not contain both p and (not p)."
   (match f
     ((type boolean) f)
@@ -783,43 +783,42 @@
        (_ `(not ,(p-simplify-shannon a env)))))
 
     ((list* op as)
-     (cond
-       ;; Non-variable atom: keep as-is
-       ((p-funp op) f)
-       ;; Logical connectives
-       ((in op '(and or))
-        (let+ ((pop (key-alist->val op *p-ops*))
-                (id (key-list->val :identity pop))
-                (as (mapcar #'(lambda (a)
-                                (match a
-                                  ((type symbol)
-                                    (let+ (((&values v found) (key-alist->val a env)))
-                                      (if found v a)))
-                                  ((list 'not b)
-                                   (match b
-                                     ((type symbol) (let+ (((&values v found) (key-alist->val b env)))
-                                                      (if found (not v) a)))
+     (cond ((in op '(and or))
+            (let+ ((pop (key-alist->val op *p-ops*))
+                   (id (key-list->val :identity pop))
+                   (as (mapcar #'(lambda (a)
+                                   (match a
+                                       ((type symbol)
+                                        (let+ (((&values v found) (key-alist->val a env)))
+                                          (if found v a)))
+                                     ((list 'not b)
+                                      (match b
+                                          ((type symbol) (let+ (((&values v found) (key-alist->val b env)))
+                                                           (if found (not v) a)))
+                                        (_ a)))
                                      (_ a)))
-                                  (_ a)))
-                            as))
-                ((&values vars nvars) (partition #'symbolp as))
-                ((&values nlits as) (partition
-                                     #'(lambda (a)
-                                         (match a
-                                           ((list 'not (type symbol)) a)
-                                           (_ nil)))
-                                     nvars))
-                (nvars (mapcar #'(lambda (lit)
-                                   (match lit
-                                     ((list 'not v) v)
-                                     (_ lit)))
-                               nlits))
-                (nenv (extend vars (mapcar #'(lambda (v) id) vars)
-                              (extend nvars (mapcar #'(lambda (v) (not id)) nvars)
-                                      env))))
-           `(,op ,@vars ,@nlits ,@(mapcar #'(lambda (a) (p-simplify-shannon a nenv)) as)))
-       ;; Other operators
-       (t `(,op ,@(mapcar #'(lambda (a) (p-simplify-shannon a env)) as))))))))
+                               as))
+                   ((&values vars nvars) (partition #'symbolp as))
+                   ((&values nlits as) (partition
+                                        #'(lambda (a)
+                                            (match a
+                                                ((list 'not (type symbol)) a)
+                                              (_ nil)))
+                                        nvars))
+                   (nvars (mapcar #'(lambda (lit)
+                                      (match lit
+                                          ((list 'not v) v)
+                                        (_ lit)))
+                                  nlits))
+                   (nenv (extend vars (mapcar #'(lambda (v) id) vars)
+                                 (extend nvars (mapcar #'(lambda (v) (not id)) nvars)
+                                         env))))
+              `(,op ,@vars ,@nlits ,@(mapcar #'(lambda (a) (p-simplify-shannon a nenv)) as))))
+
+           ((p-funp op) `(,op ,@(mapcar #'(lambda (a) (p-simplify-shannon a env)) as)))
+
+           ;; Non-variable atom: keep as-is
+           (t f)))))
 
 (assertf #'p-simplify-shannon '(iff nil p q) '(iff nil p q))
 (assertf #'p-simplify-shannon '(and (or p q) (or r q p) p) '(and p (or t q) (or r q t)))
@@ -829,6 +828,7 @@
 (assertf #'p-simplify-shannon '(or p q (and r q)) '(or p q (and r nil)))
 (assertf #'p-simplify-shannon '(or (and p q) (and r q p) (not p)) '(or (not p) (and t q) (and r q t)))
 (assertf #'p-simplify-shannon '(or (not p) q (and r q)) '(or q (not p) (and r nil)))
+(assertf #'p-simplify-shannon '(or a (foo a) (bar b)) '(or a (foo a) (bar b)))
 
 (defun p-simplify-fixpoint (f)
   (let ((new-f (p-simplify-const
@@ -1454,15 +1454,8 @@
                      (push (cons key val) result))))
              asgn)
 
-    ;; TODO: no need to add missing vars, which comes from the non-variable atoms 
-    ;; Add missing variables from vars (assign t arbitrarily)
-    (when vars
-      (dolist (var vars)
-        (unless (assoc var result :test #'equal)
-          (dp-debug "assignment->alist assigned var ~A to t" var)
-          (push (cons var t) result))))
-
     ;; Add missing atoms from amap (assign t arbitrarily)
+    ;; Note there no need to add missing vars coming from the non-variable atoms
     (when amap
       (dolist (pair amap)
         (let ((atom (car pair)))
@@ -1530,12 +1523,12 @@
 ;;; Debug and Stats
 ;;; ============================================================
 
-;; TODO: rename +dp-mode+ to +mode+ 
+;; TODO: rename +dp-mode+ to +mode+
 ;; Mode: 'debug | 'stats | nil (default)
 ;; Note if we changed this, we should reload the file to recompile the definitions to include debugging/stats information
 (defconstant +dp-mode+ nil)
 
-;; TODO: rename dp-debug 
+;; TODO: rename dp-debug
 ;; Debug API
 (defmacro dp-debug (fmt &rest args)
   "Print debug message when +dp-mode+ is 'debug"
@@ -1612,13 +1605,13 @@
      (format t "Pure literals:        ~A~%" *dp-stats-pure-count*)
      (format t "Resolution steps:     ~A~%" *dp-stats-resolve-count*)
      (format t "Max clauses:          ~A~%" *dp-stats-max-clauses*)
-     (format t "Time (unit):          ~,3F ms (~,1F%)~%" 
+     (format t "Time (unit):          ~,3F ms (~,1F%)~%"
              (dp-stats-time->ms *dp-stats-time-unit*)
              (if (> *dp-stats-time-total* 0) (* 100.0 (/ *dp-stats-time-unit* *dp-stats-time-total*)) 0))
-     (format t "Time (pure):          ~,3F ms (~,1F%)~%" 
+     (format t "Time (pure):          ~,3F ms (~,1F%)~%"
              (dp-stats-time->ms *dp-stats-time-pure*)
              (if (> *dp-stats-time-total* 0) (* 100.0 (/ *dp-stats-time-pure* *dp-stats-time-total*)) 0))
-     (format t "Time (resolve):       ~,3F ms (~,1F%)~%" 
+     (format t "Time (resolve):       ~,3F ms (~,1F%)~%"
              (dp-stats-time->ms *dp-stats-time-resolve*)
              (if (> *dp-stats-time-total* 0) (* 100.0 (/ *dp-stats-time-resolve* *dp-stats-time-total*)) 0))
      (format t "Time (total):         ~,3F ms~%" (dp-stats-time->ms *dp-stats-time-total*))
@@ -1786,7 +1779,7 @@
 (defun dp-sat (cls asgn resolve-map)
   "Main DP loop: apply unit propagation, pure literal elimination, and resolution recursively.
    Returns (values result resolve-map) where resolve-map is an alist of (var . containing-clauses)."
-  (dp-stats-update-max-clauses (length cls)) 
+  (dp-stats-update-max-clauses (length cls))
   (let ((cls (dp-stats-time :unit (dp-unit cls asgn))))
     (cond ((null cls) (values 'sat resolve-map))
           ((some #'clause-empty? cls) (values 'unsat resolve-map))
@@ -2187,11 +2180,11 @@
 |#
 
 ;; ==============================================================
-;; Trail APIs 
-;; 
+;; Trail APIs
+;;
 ;; Trail is a stack of (var val . level)
-;; where var is the variable assigned, 
-;;       val is the assigned value (t/nil), and 
+;; where var is the variable assigned,
+;;       val is the assigned value (t/nil), and
 ;;       level is the decision level at which it was assigned.
 ;; The trail is ordered with the most recent assignment at the front (top of stack).
 ;; ==============================================================
@@ -2203,46 +2196,51 @@
 (defun trail-entry-val (entry) (cadr entry))
 (defun trail-entry-level (entry) (cddr entry))
 
-(defun trail-max-level (trail) 
+(defun trail-max-level (trail)
   "Returns the maximum decision level in the trail, or -1 if the trail is empty."
   (if (null trail) -1 (trail-entry-level (first trail))))
 
 (defun trail->asgn (trail vm vars amap) ...)
 
-;; TODO: turn off assertions after dev 
+;; TODO: turn off assertions after dev
 
 ;; ============================================================
-;; DPLL Algorithm 
+;; DPLL Algorithm
 ;; ===========================================================
 
 (defun dpll-unit (cls trail)
   "Apply two literal watching scheme to unit propagate cls under the current trail assignment.
-   Returns (values conflict? new-trail) where conflict? is true if a conflict (empty clause) is found, and new-trail is the updated trail after propagation.
-   
-   Post: if conflict? = true, then new-trail != nil and there is an empty clause in cls under the assignment from new-trail. 
+   Returns (values conflict? new-trail)
+   where conflict? is true if a conflict (empty clause) is found
+         new-trail is the updated trail after propagation.
+
+   Post: if conflict? = true, then new-trail != nil and there is an empty clause in cls under the assignment from new-trail.
          else new-trail can be nil or a valid trail without conflicts."
   ...)
 
-(defun dpll-decide (cls trail) 
+(defun dpll-decide (cls trail)
   "Decide the next variable to assign based on the current cls and trail.
-   Returns (values var val) where var is the variable chosen for the decision and val is the value assigned to it (t/nil).
+   Returns (values var val)
+   where var is the variable chosen for the decision and
+         val is the value assigned to it (t/nil).
    If there are no more variables to decide, returns (values nil nil)."
   (if (null cls)
       (values nil nil)  ; No more clauses means we can stop - SAT
       ...))
 
 (defun dpll-analyze (cls trail)
-  "Analyze the conflict at the current trail and return (values conflict-clause bt-level).
-   conflict-clause is a new clause derived from the conflict that will be added to the learnt clause set.
-   bt-level is the backtracking level to jump back to, or -1 if unsat.
+  "Analyze the conflict at the current trail.
+   Return (values conflict-clause bt-level)
+   where conflict-clause is a new clause derived from the conflict that will be added to the learnt clause set.
+         bt-level is the backtracking level to jump back to, or -1 if unsat.
 
    Pre: trail != nil and there is a conflict (empty clause) in cls under the current trail assignment."
   ...)
 
-(defun dpll-backtrack (trail bt-level) 
-   "Backtrack the trail to the given backtracking level. 
+(defun dpll-backtrack (trail bt-level)
+   "Backtrack the trail to the given backtracking level.
     Returns the new trail after backtracking.
-    
+
     Pre: bt-level >= 0, trail != nil, and bt-level < current max decision level in trail.
     Post: the returned trail != nil and its top entry is a decision at bt-level with the opposite assignment."
 
@@ -2250,35 +2248,36 @@
   (assert (not (null trail)) () "Trail cannot be empty when backtracking")
   (let ((max-level (trail-max-level trail)))
     (assert (< bt-level max-level) () "Backtracking level ~A must be less than current max decision level ~A in trail" bt-level max-level))
-  
+
   (labels ((do-backtrack (tr)
           (let* ((entry (first tr))
                  (rest-tr (rest tr))
                  (lvl (trail-entry-level entry)))
-            (cond
-              ((> lvl bt-level) 
-               (do-backtrack rest-tr))
-              ((= lvl bt-level)
-               ;; Check next entry (two by two comparison)
-               (let ((next-lvl (trail-max-level rest-tr))))
-                 (if (< next-lvl bt-level)
-                     ;; Next entry is at lower level, so this is the decision - flip it
-                     (cons (make-trail-entry (trail-entry-var entry) (not (trail-entry-val entry)) (trail-entry-level entry)) rest-tr)
-                     ;; Next entry at same level, this is propagation - keep popping
-                     (do-backtrack rest-tr))))
-              (t 
-               ;; Impossible case due to preconditions
-               (error "Unexpected level ~A < bt-level ~A" lvl bt-level))))))
-  (do-backtrack trail))
+            (cond ((> lvl bt-level)
+                   (do-backtrack rest-tr))
+                  ((= lvl bt-level)
+                   ;; Check next entry (two by two comparison)
+                   (let ((next-lvl (trail-max-level rest-tr))))
+                   (if (< next-lvl bt-level)
+                       ;; Next entry is at lower level, so this is the decision - flip it
+                       (cons (make-trail-entry (trail-entry-var entry) (not (trail-entry-val entry)) (trail-entry-level entry)) rest-tr)
+                       ;; Next entry at same level, this is propagation - keep popping
+                       (do-backtrack rest-tr)))
+                  (t
+                   ;; Impossible case due to preconditions
+                   (error "Unexpected level ~A < bt-level ~A" lvl bt-level))))))
+    (do-backtrack trail)))
 
 (defun dpll-sat (cls trail level)
   "Main DPLL loop: apply unit propagation, then either analyze conflict or decide next variable.
-   Returns result and a new trail where result is 'sat or 'unsat and new-trail is the final trail after backtracking if needed.
-   
+   Returns (values result new-trail)
+   where result is 'sat or 'unsat
+         new-trail is the final trail after backtracking if needed.
+
    Pre: level should be equal to the max decision level in trail (or -1 if trail is empty)."
 
   (assert (= level (trail-max-level trail)) () "Current level ~A must be equal to max decision level in trail ~A" level (trail-max-level trail))
-  
+
   (let+ (((&values conflict? trail0) (dpll-unit cls trail)))
     (if conflict?
         ;; Analyze conflict and backtrack
@@ -2287,7 +2286,7 @@
               (values 'unsat nil)  ; No more backtracking possible, UNSAT
               (let ((trail1 (dpll-backtrack trail0 bt-level)))
                 (dpll-sat cls trail1 bt-level))))
-        ;; Decide 
+        ;; Decide
         (let+ (((&values var val) (dpll-decide cls trail0)))
           (if (null var)
               (values 'sat trail0)  ; No more decisions possible, SAT with current assignment
