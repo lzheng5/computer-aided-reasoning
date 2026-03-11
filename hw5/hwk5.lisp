@@ -1449,8 +1449,8 @@
 (defun assignment->alist (asgn vm vars amap)
   "Convert numeric assignment hash table to symbolic alist using var-manager.
    asgn contains assigned variables in the original formula, tseitin-generated variables, and skeleton variables.
-   The output includes assignments for all the original variables and atoms.
-   Variables/atoms not in asgn are assigned t arbitrarily."
+   The output includes assignments for all the original variables (excluding variables used in atoms) and atoms.
+   Atoms not in asgn are assigned t arbitrarily."
   (let ((result nil))
     ;; First, process all variables in asgn
     (maphash #'(lambda (num-var val)
@@ -2184,24 +2184,23 @@
 
 |#
 
-;; TODO: update Trail to be (lit reason . level) where lit is the literal assigned, and reason is the clause that implied this assignment (nil for decisions). This will make it easier to implement backjumping and conflict analysis in DPLL.
-;;       to get var/val use lit-var and lit-sign on the assigned literal.
-
 ;; ==============================================================
 ;; Trail APIs
 ;;
-;; Trail is a stack of (var val . level)
-;; where var is the variable assigned,
-;;       val is the assigned value (t/nil), and
+;; Trail is a stack of (lit reason . level)
+;; where lit is the literal assigned (encodes both var and val),
+;;       reason is the clause that implied this assignment (nil for decisions), and
 ;;       level is the decision level at which it was assigned.
 ;; The trail is ordered with the most recent assignment at the front (top of stack).
 ;; ==============================================================
 
-(defun make-trail-entry (var val level)
-  "Create a trail entry for variable VAR assigned value VAL at decision level LEVEL."
-  `(,var ,val . ,level))
-(defun trail-entry-var (entry) (car entry))
-(defun trail-entry-val (entry) (cadr entry))
+(defun make-trail-entry (lit level &optional reason)
+  "Create a trail entry for literal LIT at decision level LEVEL with optional REASON clause."
+  `(,lit ,reason . ,level))
+(defun trail-entry-lit (entry) (car entry))
+(defun trail-entry-var (entry) (lit-var (car entry)))
+(defun trail-entry-val (entry) (lit-sign (car entry)))
+(defun trail-entry-reason (entry) (cadr entry))
 (defun trail-entry-level (entry) (cddr entry))
 
 (defun trail-max-level (trail)
@@ -2210,19 +2209,45 @@
 
 (defun trail-get (trail var) 
   "Returns entry for variable VAR in TRAIL, or nil if VAR is not assigned in TRAIL."
-  (assoc var trail))
+  (find var trail :key #'trail-entry-var))
 
-(defun trail-ext (trail var val level)
-  "Returns a new trail with variable VAR assigned value VAL at decision level LEVEL.
+(defun trail-ext (trail lit level &optional reason)
+  "Returns a new trail with literal LIT assigned at decision level LEVEL with optional REASON.
    
-   Pre: VAR is not already assigned in TRAIL."
-  (assert (null (trail-get trail var)) ()
-          "Variable ~A is already assigned in trail: ~A" var trail)
+   Pre: the variable of LIT is not already assigned in TRAIL."
+  (assert (null (trail-get trail (lit-var lit))) ()
+          "Variable ~A is already assigned in trail" (lit-var lit))
 
-  (cons (make-trail-entry var val level) trail))
+  (cons (make-trail-entry lit level reason) trail))
 
-;; TODO: follow assignment->asgn pattern and fill this in 
-(defun trail->asgn (trail vm vars amap) ...)
+(defun trail->alist (trail vm vars amap) 
+  "Convert a trail to symbolic alist using var-manager.
+   trail contains assigned variables in the original formula, tseitin-generated variables, and skeleton variables.
+   The output includes assignments for all the original variables (excluding variables used in atoms) and atoms.
+   Atoms not in trail are assigned t arbitrarily."
+  (let ((result nil))
+    ;; Process all entries in trail
+    (dolist (entry trail)
+      (let* ((num-var (trail-entry-var entry))
+             (val (trail-entry-val entry))
+             (sym-var (var-manager-get-sym vm num-var))
+             ;; Check if this generated var represents an atom
+             (orig-atom (and amap (car (rassoc sym-var amap :test #'equal))))
+             ;; Use original atom if found, otherwise use the variable
+             (key (or orig-atom sym-var)))
+        (when (or (null vars)
+                  (in key vars)
+                  orig-atom)  ;; Include atoms even if not in vars
+          (push (cons key val) result))))
+    
+    ;; Add missing atoms from amap (assign t arbitrarily)
+    (when amap
+      (dolist (pair amap)
+        (let ((atom (car pair)))
+          (unless (assoc atom result :test #'equal)
+            (push (cons atom t) result)))))
+    
+    result))
 
 ;; TODO: turn off assertions after dev
 
@@ -2365,7 +2390,7 @@
             (values t nil))    ;; conflict
         (progn ;; not assigned, assign it and enqueue for propagation
           (enqueue lit propQ)
-          (values nil (trail-ext trail (lit-var lit) (lit-sign lit) level))))))
+          (values nil (trail-ext trail lit level))))))
 
 (defun dpll-init (cls level) 
   "Preprocess the clauses cls by computing the watch lists and initializing the propagation queue.
@@ -2527,11 +2552,9 @@
                    (let ((next-lvl (trail-max-level rest-tr)))
                     (if (< next-lvl bt-level)
                         ;; Next entry is at lower level, so this is the decision - flip it
-                        ;; Instead of: (enqueue (lit-neg (lit ...)) propQ)
-                        (let ((flipped-lit (make-lit (trail-entry-var entry) (not (trail-entry-val entry)))))
+                        (let ((flipped-lit (lit-negate (trail-entry-lit entry))))
                           (enqueue flipped-lit propQ)
-                          ;; TODO: use flipped-lit to construct the new trail entry instead of reconstructing it from var/val
-                          (cons (make-trail-entry (trail-entry-var entry) (not (trail-entry-val entry)) lvl) rest-tr))
+                          (trail-ext rest-tr flipped-lit lvl)))
                         ;; Next entry at same level, this is propagation - keep popping
                         (do-backtrack rest-tr))))
                   (t
@@ -2577,7 +2600,7 @@
           (values 'unsat nil)  ; Conflict from initial unit propagation, UNSAT
           (let+ (((&values result trail) (dpll-sat cls trail watches propQ (trail-max-level trail)))
                  (result-asgn (when (eq result 'sat)
-                                    (trail->asgn trail vm (pvars f) amap))))
+                                    (trail->alist trail vm (pvars f) amap))))
               (values result result-asgn))))))
 
 (defun test-dpll (f &optional (expected 'sat))
