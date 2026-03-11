@@ -2184,6 +2184,9 @@
 
 |#
 
+;; TODO: update Trail to be (lit reason . level) where lit is the literal assigned, and reason is the clause that implied this assignment (nil for decisions). This will make it easier to implement backjumping and conflict analysis in DPLL.
+;;       to get var/val use lit-var and lit-sign on the assigned literal.
+
 ;; ==============================================================
 ;; Trail APIs
 ;;
@@ -2218,6 +2221,7 @@
 
   (cons (make-trail-entry var val level) trail))
 
+;; TODO: follow assignment->asgn pattern and fill this in 
 (defun trail->asgn (trail vm vars amap) ...)
 
 ;; TODO: turn off assertions after dev
@@ -2300,9 +2304,10 @@
   
    Valid watches with respect to a trail assignment must satisfy: 
    1. watches don't contain duplicate clauses under pointer equality, eq, and 
-   2. for any clause cl in watches, 
-         cl doesn't contain duplicate literals and 
-         the two watched literals are unique and not falsified by the trail assignment"
+   2. for any watched clause cl with watches (w1, w2), 
+      - cl doesn't contain duplicate literals,  
+      - w1 and w2 are negations of unique literals in cl,
+      - w1 and w2 arenot falsified by the trail assignment"
 
   (lit->clauses (make-watch-list) :type hash-table)      ; lit -> list of clauses
   (clause->lits (make-clause-watches) :type hash-table)) ; clause -> (lit1 . lit2)
@@ -2373,7 +2378,7 @@
             propQ is the initialized queue of unit literals to propagate.
           else 
             new-cls, trail, watches, and propQ are all nil.
-            
+
   Pre: level = 0 
        each cl in cls doesn't contain duplicate literals
 
@@ -2400,7 +2405,7 @@
         (t (push cl new-cls)
            (let+ ((&values lit1 lit2) (clause-two-lits cl))
              ;; The watches are negated because we want to watch for them when they become false under the trail assignment
-             (watches-add! watches cl (lit-neg lit1) (lit-neg lit2))))))
+             (watches-add! watches cl (lit-negate lit1) (lit-negate lit2))))))
     (values nil new-cls trail watches propQ))
 
 (defun dpll-find-new-watch (cl trail old-watch other-watch)
@@ -2411,8 +2416,8 @@
         old-watch and other-watch are not falsified by trail.
 
    Post: if a new watch is returned, then it is a negated literal in cl that is not falsified by trail and is not old-watch or other-watch."
-  (let ((old-lit (lit-neg old-watch))
-        (other-lit (lit-neg other-watch)))
+  (let ((old-lit (lit-negate old-watch))
+        (other-lit (lit-negate other-watch)))
     ;; old-lit and other-lit are the literals in cl that are currently watched by their negations 
     (clause-map #'(lambda (lit)
                     (unless (or (eql lit old-lit) (eql lit other-lit))
@@ -2420,14 +2425,14 @@
                         ;; Return lit if unassigned or satisfied
                         (when (or (null entry)
                                   (eq (trail-entry-val entry) (lit-sign lit)))
-                          (return-from dpll-find-new-watch (lit-neg lit))))))
+                          (return-from dpll-find-new-watch (lit-negate lit))))))
                 cl)
     nil))
 
 (defun dpll-unit (trail watches propQ)
   "Apply two literal watching scheme to unit propagate under the current trail assignment.
-   Returns (values conflict? new-trail)
-   where conflict? is true if a conflict (empty clause) is found
+   Returns (values conflict-cl new-trail)
+   where conflict-cl is the clause that caused a conflict, or nil if no conflict
          new-trail is the updated trail after propagation.
 
    Pre: watches are valid with respect to trail.
@@ -2437,7 +2442,7 @@
         2. for any lit in propQ, lit is in trail with no conflicts.
         3. watches are valid with respect to new-trail. 
 
-   Post: 1. if conflict? = true, then new-trail != nil.
+   Post: 1. if conflict-cl != nil, then new-trail != nil.
             else new-trail can be nil or a valid trail without conflicts.
          2. propQ is empty.
          3. watches are valid with respect to new-trail."
@@ -2447,14 +2452,14 @@
             (watch (dequeue propQ))) 
         ;; Get clauses that are affected by watch being true
         (let ((watching-clauses (watches-get-clauses watches watch))) 
-          (loop for cl in watching-clauses
+          (loop for cl in (copy-list watching-clauses) ;; Need to copy since we may modify the watch list during iteration
                 do (let ((other-watch (watches-get-other-watch watches cl watch))
-                         (entry (trail-get trail (lit-var other-watch))))
+                         (entry (trail-get new-trail (lit-var other-watch))))
                      ;; other-watch is not falsified by trail 
                      (if (and entry (eq (trail-entry-val entry) (lit-sign other-watch)))
                          nil ;; other-watch is satisfied, cl is satisfied
                          ;; other-watch is unassigned, so try to find a new literal to watch in cl that is not falsified
-                         (let ((new-watch (dpll-find-new-watch cl trail watch other-watch)))
+                         (let ((new-watch (dpll-find-new-watch cl new-trail watch other-watch)))
                             (if new-watch
                                 ;; Found a new watch, update the watches 
                                 ;; Note invariant 3 holds since cl is not already a watch for new-watch
@@ -2464,42 +2469,52 @@
                                    (if conflict? 
                                        (progn 
                                          (clear-queue propQ)
-                                         (return-from dpll-unit (values t trail))) ;; conflict found - return with conflict
+                                         (return-from dpll-unit (values cl new-trail))) ;; conflict found - return with conflict clause and current trail
                                        (setf new-trail result-trail)))))))
          (dpll-unit new-trail watches propQ)))))
 
-(defun dpll-decide (cls trail)
+(defun dpll-decide (cls trail propQ level)
   "Decide the next variable to assign based on the current cls and trail.
-   Returns (values var val)
-   where var is the variable chosen for the decision and
-         val is the value assigned to it (t/nil).
-   If there are no more variables to decide, returns (values nil nil).
+   Returns (values decide? new-trail)
+   where decide? is true if a new decision variable was chosen, false if no more decisions possible (all variables assigned), and
+         new-trail is the updated trail with the new decision if decide? is true, or the same trail if decide? is false.
    
-   Pre: cls is either nil or contains no unit clauses under the current trail assignment."
-  (if (null cls)
-      (values nil nil)  ; No more clauses means we can stop - SAT
-      ...))
-
-(defun dpll-analyze (cls trail)
-  "Analyze the conflict at the current trail.
-   Return (values conflict-clause bt-level)
-   where conflict-clause is a new clause derived from the conflict that will be added to the learnt clause set.
-         bt-level is the backtracking level to jump back to, or -1 if unsat.
-
-   Pre: trail != nil and there is a conflict (empty clause) in cls under the current trail assignment."
+   Pre: cls is either nil or contains no unit clauses under the current trail assignment.
+   
+   Post: if decide? = true, then new-trail is extended with a new decision variable assigned to true at the new decision level (level), and propQ is updated.
+         else new-trail and propQ remain the same."
   ...)
 
-(defun dpll-backtrack (trail bt-level)
+(defun dpll-analyze (conflict-cl trail)
+  "Analyze the conflict clause at the current trail.
+   Return (values learnt-cl bt-level)
+   where learnt-clause is a new clause derived from the conflict that will be added to the learnt clause set.
+         bt-level is the backtracking level to jump back to, or -1 if unsat.
+
+   Pre: conflict-cl != nil and is a clause that is falsified by the current trail assignment (i.e., all its literals are falsified under the current trail).
+        trail != nil and there is a conflict (empty clause) in cls under the current trail assignment."
+  ...)
+
+(defun dpll-backtrack (trail propQ bt-level)
    "Backtrack the trail to the given backtracking level.
+    Update the propagation queue propQ to reflect the new trail after backtracking.
     Returns the new trail after backtracking.
 
+    Watches are not updated during backtracking. 
+    They remain valid since the watch invariant still holds before and after backtracking.  
+    Any stale watches will be corrected lazily at the next propagation when we enqueue the flipped literal.
+
     Pre: bt-level >= 0, trail != nil, and bt-level < current max decision level in trail.
-    Post: the returned trail != nil and its top entry is a decision at bt-level with the opposite assignment."
+         propQ is empty before backtracking.
+
+    Post: the returned trail != nil and its top entry is a decision at bt-level with the opposite assignment.
+          propQ contains the unit literal with the flipped assignment."
 
   (assert (>= bt-level 0) () "Backtracking level must be non-negative: ~A" bt-level)
   (assert (not (null trail)) () "Trail cannot be empty when backtracking")
   (let ((max-level (trail-max-level trail)))
     (assert (< bt-level max-level) () "Backtracking level ~A must be less than current max decision level ~A in trail" bt-level max-level))
+  (assert (queue-empty? propQ) () "Propagation queue must be empty before backtracking")
 
   (labels ((do-backtrack (tr)
           (let* ((entry (first tr))
@@ -2512,7 +2527,11 @@
                    (let ((next-lvl (trail-max-level rest-tr)))
                     (if (< next-lvl bt-level)
                         ;; Next entry is at lower level, so this is the decision - flip it
-                        (cons (make-trail-entry (trail-entry-var entry) (not (trail-entry-val entry)) (trail-entry-level entry)) rest-tr)
+                        ;; Instead of: (enqueue (lit-neg (lit ...)) propQ)
+                        (let ((flipped-lit (make-lit (trail-entry-var entry) (not (trail-entry-val entry)))))
+                          (enqueue flipped-lit propQ)
+                          ;; TODO: use flipped-lit to construct the new trail entry instead of reconstructing it from var/val
+                          (cons (make-trail-entry (trail-entry-var entry) (not (trail-entry-val entry)) lvl) rest-tr))
                         ;; Next entry at same level, this is propagation - keep popping
                         (do-backtrack rest-tr))))
                   (t
@@ -2525,26 +2544,27 @@
    Returns (values result new-trail)
    where result is 'sat or 'unsat
          new-trail is the final trail after backtracking if needed.
+   
+   propQ is updated in-place during propagation, decision, and backtracking.
 
    Pre: level should be equal to the max decision level in trail."
 
   (assert (= level (trail-max-level trail)) () "Current level ~A must be equal to max decision level in trail ~A" level (trail-max-level trail))
 
-  (let+ (((&values conflict? trail0) (dpll-unit trail watches propQ)))
-    (if conflict?
+  (let+ (((&values conflict-cl trail0) (dpll-unit trail watches propQ)))
+    (if conflict-cl
         ;; Analyze conflict and backtrack
-        (let+ (((&values unused-conflict-cls bt-level) (dpll-analyze cls trail0)))
+        (let+ (((&values learnt-cl bt-level) (dpll-analyze conflict-cl trail0)))
           (if (< bt-level 0)
               (values 'unsat nil)  ; No more backtracking possible, UNSAT
-              (let ((trail1 (dpll-backtrack trail0 bt-level)))
+              (let ((trail1 (dpll-backtrack trail0 propQ bt-level)))
                 (dpll-sat cls trail1 watches propQ bt-level))))
         ;; Decide
-        (let+ (((&values var val) (dpll-decide cls trail0)))
-          (if (null var)
+        (let+ ((level0 (1+ level))
+               ((&values decide? trail1) (dpll-decide cls trail0 propQ level0)))
+          (if (not decide?)
               (values 'sat trail0)  ; No more decisions possible, SAT with current assignment
-              (let ((level0 (1+ level)) ;; TODO: update propQ 
-                    (trail1 (cons (make-trail-entry var val level0) trail0)))
-                (dpll-sat cls trail1 watches propQ level0)))))))
+              (dpll-sat cls trail1 watches propQ level0))))))
 
 (defun dpll (f)
   "Main DPLL function: takes a formula f, converts to CNF, and applies DPLL algorithm.
