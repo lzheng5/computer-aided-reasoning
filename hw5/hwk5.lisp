@@ -2199,6 +2199,12 @@
 
 |#
 
+(defmacro dassert (test-form &optional format-string &rest format-args)
+  "Assert that TEST-FORM is true, but only when +debug-mode+ is 'debug.
+   If TEST-FORM is false and debug mode is enabled, signals an error with the optional message."
+  `(when (eq +debug-mode+ 'debug)
+     (assert ,test-form () ,@(when format-string (list* format-string format-args)))))
+
 ;; ==============================================================
 ;; Trail APIs
 ;;
@@ -2230,19 +2236,24 @@
   "Returns entry for variable VAR in TRAIL, or nil if VAR is not assigned in TRAIL."
   (find var trail :key #'trail-entry-var))
 
-;; TODO: return the first two most recent entries at level from trail and in cl 
-;;       return (values entry1 entry2) where entry1 is the most recent, entry2 is the second most recent
-;;       if any is not found, return nil 
-(defun trail-get-at-level-cl (trail level cl)
-  "Returns list of entries assigned at decision level LEVEL in both TRAIL and CL ordered from most recently assigned to least recent."
-  (let ((result nil))
-    (dolist (entry trail (nreverse result))
+(defun trail-most-recent-two (trail level cl)
+  "Returns (values entry1 entry2) for the two most recent entries at decision level LEVEL 
+   that are also in clause CL. entry1 is the most recent, entry2 is the second most recent.
+   Returns (values nil nil) if fewer than two such entries exist."
+  (let ((first nil)
+        (second nil))
+    (dolist (entry trail (values first second))
       (let ((entry-level (trail-entry-level entry)))
         (cond
-          ((= entry-level level) 
-           (if (clause-has-var? cl (trail-entry-var entry))
-               (push entry result)))
-          ((< entry-level level) (return (nreverse result)))
+          ((= entry-level level)
+           (when (clause-has-var? cl (trail-entry-var entry))
+             (if (null first)
+                 (setf first entry)
+                 (progn
+                   (setf second entry)
+                   (return (values first second))))))
+          ((< entry-level level)
+           (return (values first second)))
           (t nil))))))
 
 (defun trail-ext (trail lit level &optional reason)
@@ -2282,8 +2293,6 @@
             (push (cons atom t) result)))))
     
     result))
-
-;; TODO: turn off assertions after dev
 
 ;; ==============================================================
 ;; Simple Queue APIs
@@ -2415,6 +2424,7 @@
 ;;;             We only check for floating-point overflow once per
 ;;;             conflict inside the decay function.
 
+;; Standard VSIDS parameters from literature (can be tuned for better performance)
 (defparameter *literal-decay-factor* 0.95d0)
 (defparameter *rescale-threshold* 1e100)
 (defparameter *rescale-factor* 1e-100)
@@ -2432,6 +2442,10 @@
       ;; initial hunches after the very first conflict.
       (setf (aref arr i) (random 1.0d0)))
     (%make-activities :scores arr :inc 1.0d0)))
+
+(defun activities-num-vars (act) 
+  "Returns the number of variables tracked in activities ACT."
+  (ash (length (activities-scores act)) -1))
 
 (defun bump-lit-activity! (act lit)
   "Increment activity for literal 'lit'. 
@@ -2455,21 +2469,24 @@
   (when (> (activities-inc act) *rescale-threshold*)
     (rescale-activities! act)))
 
-(defun select-literal (act unassigned-vars)
+;; TODO: fix with asgn bundled with trail to speed up the check for unassigned variables
+;;       then we can use trail-assigned? to quickly check if a variable is unassigned instead of looking it up in the trail every time.
+(defun select-literal (act unassgined-vars)
   "Linear scan for the unassigned literal with the highest score.
    Naturally chooses variable and polarity simultaneously."
   (let ((best-lit -1)
         (max-score -1.0d0)
         (scores (activities-scores act)))
-    (dolist (var unassigned-vars)
-      (let* ((pos-lit (* 2 var))
-             (neg-lit (1+ pos-lit))
-             (pos-score (aref scores pos-lit))
-             (neg-score (aref scores neg-lit)))
-        (when (> pos-score max-score)
-          (setf max-score pos-score best-lit pos-lit))
-        (when (> neg-score max-score)
-          (setf max-score neg-score best-lit neg-lit))))
+    (hash-set-map #'(lambda (var)
+                      (let* ((pos-lit (* 2 var))
+                            (neg-lit (1+ pos-lit))
+                            (pos-score (aref scores pos-lit))
+                            (neg-score (aref scores neg-lit)))
+                        (when (> pos-score max-score)
+                          (setf max-score pos-score best-lit pos-lit))
+                        (when (> neg-score max-score)
+                          (setf max-score neg-score best-lit neg-lit))))
+     unassgined-vars)
     best-lit))
 
 ;; ============================================================
@@ -2614,7 +2631,9 @@
    
    Post: if decide? = true, then new-trail is extended with a new decision variable assigned to true at the new decision level (level), and propQ is updated.
          else new-trail and propQ remain the same."
-  ...)
+  (labels ((get-assigned ( trail)
+             (let ((unassigned (make-hash-set))
+               ))))))
 
 ;; Questions: 
 ;; 1. Can the working clause in find-first-uip be empty (resulted from resolution)?  
@@ -2642,7 +2661,7 @@
 ;; While looking for UIP through implications, the reason clause cannot be nil. 
 ;; Then, if no UIP is found, the algorithm will stop at the first decision, where the working clause has exactly one literal (decision) from the current level. 
 
-(defun dpll-analyze (conflict-cl trail)
+(defun dpll-analyze (conflict-cl activities trail)
   "Analyze the conflict clause at the current trail.
    Return (values learnt-cl bt-level)
    where learnt-clause is a new clause derived from the conflict that will be added to the learnt clause set.
@@ -2651,7 +2670,7 @@
    Pre: conflict-cl != nil and is a clause that is falsified by the current trail assignment (i.e., all its literals are falsified under the current trail).
         trail != nil and there is a conflict (empty clause) in cls under the current trail assignment."
   
-  (labels ((find-first-uip (working-cl trail)
+  (labels ((find-first-uip (working-cl trail seen)
              "Find the first Unique Implication Point (UIP) in the conflict clause with respect to the current trail.
               While finding the UIP via resolution, the working clause can become:
               Returns the first UIP if found, or nil if no UIP exists.
@@ -2668,18 +2687,21 @@
              (assert trail () "Trail cannot be nil when finding UIP")
              (assert (trail-max-level trail) > 0 () "Trail must have at least one decision level when finding UIP")
             
-             (let ((most-recent-entries (trail-get-at-level-cl trail (trail-max-level trail) working-cl)))
-              (assert most-recent-entries () "There must be at least one entry from current level in trail for conflict clause ~A" working-cl)
-              (let ((most-recent-entry (first most-recent-entries)))
-                  (if (null (rest most-recent-entries))
-                      ;; Only one literal from current level, this is the UIP
-                      working-cl 
-                      ;; More than one literal from current level, resolve with reason of most recent entry and continue searching
-                      (let ((reason-cl (trail-entry-reason most-recent-entry)))
-                        (assert reason-cl () "Reason clause cannot be nil for non-decision entries in trail")
-                        (let ((resolved-cls (resolve-var (list working-cl reason-cl) (trail-entry-var most-recent-entry))))
-                          (assert resolved-cls () "Resolution must produce at least one clause")
-                          (find-first-uip (first resolved-cls) trail)))))))
+             (let+ (((&values most-recent second-most-recent) (trail-most-recent-two trail (trail-max-level trail) working-cl)))
+              (assert most-recent () "There must be at least one entry from current level in trail for conflict clause ~A" working-cl)
+              (if (null second-most-recent)
+                  ;; Only one literal from current level, this is the UIP
+                  working-cl 
+                  ;; More than one literal from current level, resolve with reason of most recent entry and continue searching
+                  (let ((reason-cl (trail-entry-reason most-recent)))
+                    (assert reason-cl () "Reason clause cannot be nil for non-decision entries in trail")
+                    
+                    ;; Add literals from the reason clause to 'seen'
+                    (clause-map #'(lambda (lit) (hash-set-add seen lit)) reason-cl)
+
+                    (let ((resolved-cls (resolve-var (list working-cl reason-cl) (trail-entry-var most-recent-entry))))
+                      (assert resolved-cls () "Resolution must produce at least one clause")
+                      (find-first-uip (first resolved-cls) trail))))))
 
            (backtrack-level (learnt-cl trail)
              "Returns the second highest level in the learnt clause to jump back to, or -1 if unsat."
@@ -2695,10 +2717,18 @@
                 (cond ((null levels) -1)           ; UNSAT
                       ((null (cdr levels)) 0)      ; Unit, backtrack to 0
                       (t (second levels))))))      ; Return second highest level
+
     (if (zerop (trail-max-level trail))
         (values nil -1)
-        (let ((uip-cl (find-first-uip conflict-cl trail)))
+        (let* ((seen conflict-cl) ;; 'seen' initialized to be all literals in conflict-cl
+               (uip-cl (find-first-uip conflict-cl trail seen)))
           (assert uip-cl () "UIP clause cannot be nil after analysis")
+          
+          ;; BUMP: Reward all involved literals exactly once.
+          (hash-set-map (lambda (lit) (bump-lit-activity! activities lit)) seen)
+          ;; DECAY: Increase the 'inc' value for the next conflict.
+          (decay-activities! activities)
+
           (let ((learnt-cl (clause-negate uip-cl)))
             (values learnt-cl (backtrack-level learnt-cl trail)))))))
 
