@@ -2215,9 +2215,6 @@
 ;; The trail is ordered with the most recent assignment at the front (top of stack).
 ;; ==============================================================
 
-;; TODO: pair asgn, an assignment, with trail to speed up 
-;;       then trail->alist can just call assignment->alist on the asgn part, and we can maintain the invariant that asgn is always consistent with trail.
-
 (defun make-trail-entry (lit level &optional reason)
   "Create a trail entry for literal LIT at decision level LEVEL with optional REASON clause."
   `(,lit ,reason . ,level))
@@ -2265,34 +2262,20 @@
 
   (cons (make-trail-entry lit level reason) trail))
 
-(defun trail->alist (trail vm vars amap) 
-  "Convert a trail to symbolic alist using var-manager.
-   trail contains assigned variables in the original formula, tseitin-generated variables, and skeleton variables.
-   The output includes assignments for all the original variables (excluding variables used in atoms) and atoms.
-   Atoms not in trail are assigned t arbitrarily."
-  (let ((result nil))
-    ;; Process all entries in trail
+;; If we make trail stateful, we can bundle the assignment with the trail and avoid converting back and forth between trail and assignment.
+(defun trail->assignment (trail)
+  "Convert a trail to an assignment (hash table mapping var -> val).
+   Inv: the trail is consistent (no variable is assigned both true and false)."
+  (let ((asgn (make-assignment)))
     (dolist (entry trail)
-      (let* ((num-var (trail-entry-var entry))
-             (val (trail-entry-val entry))
-             (sym-var (var-manager-get-sym vm num-var))
-             ;; Check if this generated var represents an atom
-             (orig-atom (and amap (car (rassoc sym-var amap :test #'equal))))
-             ;; Use original atom if found, otherwise use the variable
-             (key (or orig-atom sym-var)))
-        (when (or (null vars)
-                  (in key vars)
-                  orig-atom)  ;; Include atoms even if not in vars
-          (push (cons key val) result))))
-    
-    ;; Add missing atoms from amap (assign t arbitrarily)
-    (when amap
-      (dolist (pair amap)
-        (let ((atom (car pair)))
-          (unless (assoc atom result :test #'equal)
-            (push (cons atom t) result)))))
-    
-    result))
+      (let ((var (trail-entry-var entry))
+            (val (trail-entry-val entry)))
+        (assert (let+ ((&values assigned-val assigned?) (assignment-get asgn var))
+                  (or (not assigned?) (eql assigned-val val))) 
+                ()
+                "Variable ~A assignment is inconsistent with values ~A and ~A" var assigned-val val)
+        (assignment-set asgn var val)))
+    asgn))
 
 ;; ==============================================================
 ;; Simple Queue APIs
@@ -2469,24 +2452,27 @@
   (when (> (activities-inc act) *rescale-threshold*)
     (rescale-activities! act)))
 
-;; TODO: fix with asgn bundled with trail to speed up the check for unassigned variables
-;;       then we can use trail-assigned? to quickly check if a variable is unassigned instead of looking it up in the trail every time.
-(defun select-literal (act unassgined-vars)
+(defun select-literal (act asgn)
   "Linear scan for the unassigned literal with the highest score.
-   Naturally chooses variable and polarity simultaneously."
-  (let ((best-lit -1)
+   Naturally chooses variable and polarity simultaneously.
+   
+   If all variables assigned, returns nil (caller should check for this case and handle it as a SAT solution)."
+  (let ((best-lit nil)
         (max-score -1.0d0)
-        (scores (activities-scores act)))
-    (hash-set-map #'(lambda (var)
-                      (let* ((pos-lit (* 2 var))
-                            (neg-lit (1+ pos-lit))
-                            (pos-score (aref scores pos-lit))
-                            (neg-score (aref scores neg-lit)))
-                        (when (> pos-score max-score)
-                          (setf max-score pos-score best-lit pos-lit))
-                        (when (> neg-score max-score)
-                          (setf max-score neg-score best-lit neg-lit))))
-     unassgined-vars)
+        (scores (activities-scores act))
+        (num-vars (activities-num-vars act)))
+    ;; Iterate through all variables and check scores for unassigned ones
+    (dotimes (var num-vars)
+      (let+ ((&values _ assigned?) (assignment-get asgn var))
+        (unless assigned?
+          (let* ((pos-lit (* 2 var))
+                 (neg-lit (1+ pos-lit))
+                 (pos-score (aref scores pos-lit))
+                 (neg-score (aref scores neg-lit)))
+            (when (> pos-score max-score)
+              (setf max-score pos-score best-lit pos-lit))
+            (when (> neg-score max-score)
+              (setf max-score neg-score best-lit neg-lit))))))
     best-lit))
 
 ;; ============================================================
@@ -2631,9 +2617,13 @@
    
    Post: if decide? = true, then new-trail is extended with a new decision variable assigned to true at the new decision level (level), and propQ is updated.
          else new-trail and propQ remain the same."
-  (labels ((get-assigned ( trail)
-             (let ((unassigned (make-hash-set))
-               ))))))
+  (let ((asgn (trail->assignment trail)))
+    (let ((lit (select-literal activities asgn)))
+      (if (null lit)
+          (values nil trail) ;; No unassigned variables left, SAT
+          (let+ ((&values conflict? new-trail) (dpll-try-enqueue lit trail propQ (1+ (trail-max-level trail)))))
+            (assert (not conflict?) () "Conflict cannot occur when making a new decision, got ~A for literal ~A" conflict? lit)
+            (values t new-trail)))))
 
 ;; Questions: 
 ;; 1. Can the working clause in find-first-uip be empty (resulted from resolution)?  
@@ -2817,7 +2807,8 @@
           (values 'unsat nil)  ; Conflict from initial unit propagation, UNSAT
           (let+ (((&values result trail) (dpll-sat trail activities watches propQ))
                  (result-asgn (when (eq result 'sat)
-                                    (trail->alist trail vm (pvars f) amap))))
+                                    (let ((asgn (trail->assignment trail)))
+                                      (assignment->alist asgn vm vars amap)))))
               (values result result-asgn))))))
 
 (defun test-dpll (f &optional (expected 'sat))
