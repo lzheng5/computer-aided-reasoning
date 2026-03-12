@@ -1239,7 +1239,7 @@
   "Manages mapping between symbolic variables and numeric variables"
   (sym->num (make-hash-table :test #'equal))  ; symbol -> number
   (num->sym (make-hash-table :test #'eql))    ; number -> symbol
-  (counter 0))                                 ; next available variable number
+  (counter 0))                                ; next available variable number
 
 (defun var-manager-get-num (vm sym)
   "Get or create numeric variable for symbolic variable"
@@ -1284,6 +1284,10 @@
     (if pairs
         (format nil "Variable Mapping: ~%~{  ~A~%~}" (sort pairs #'string<))
         "Variable Mapping: (empty)")))
+
+(defun var-manager-num-vars (vm)
+  "Return number of variables in variable manager"
+  (var-manager-counter vm))
 
 ;;; ============================================================
 ;;; Numeric Literal Operations
@@ -2395,6 +2399,79 @@
   (watch-list-add! (watches-lit->clauses w) new-lit cl)
   (clause-watches-update! (watches-clause->lits w) cl old-lit new-lit))
 
+;;; ============================================================
+;;; VSIDS Strategy: Literal-Level Granularity
+;;; 
+;;; Consulted with Gemini on these design choices. 
+;;; ============================================================
+;;; Decision 1: Use Literal-level instead of Variable-level.
+;;;             Since we aren't using Phase Saving, literal scores
+;;;             act as a built-in polarity heuristic (rewarding
+;;;             the specific assignment that failed).
+;;; Decision 2: Inverse Scaling Trick.
+;;;             Instead of multiplying all scores by 0.95 (O(N)),
+;;;             we divide the increment (inc) by 0.95 (O(1)).
+;;; Decision 3: Centralized Rescaling.
+;;;             We only check for floating-point overflow once per
+;;;             conflict inside the decay function.
+
+(defparameter *literal-decay-factor* 0.95d0)
+(defparameter *rescale-threshold* 1e100)
+(defparameter *rescale-factor* 1e-100)
+
+(defstruct (activities (:constructor %make-activities))
+  scores  ; A simple array: index 2n = +x_n, 2n+1 = -x_n
+  inc)    ; The current "value" of a conflict bump (grows exponentially)
+
+(defun make-activities (num-vars)
+  "Initializes scores for 2 * num-vars literals with subtle random noise."
+  (let* ((num-lits (* 2 num-vars))
+         (arr (make-array num-lits :element-type 'double-float)))
+    (dotimes (i num-lits)
+      ;; Small random noise (0.0-1.0) allows VSIDS to override 
+      ;; initial hunches after the very first conflict.
+      (setf (aref arr i) (random 1.0d0)))
+    (%make-activities :scores arr :inc 1.0d0)))
+
+(defun bump-lit-activity! (act lit)
+  "Increment activity for literal 'lit'. 
+   No overflow check here for speed."
+  (incf (aref (activities-scores act) lit) (activities-inc act)))
+
+(defun rescale-activities! (act)
+  "Normalizes all scores and the 'inc' factor to prevent IEEE 754 overflow."
+  (let ((scores (activities-scores act)))
+    (dotimes (i (length scores))
+      (setf (aref scores i) (* (aref scores i) *rescale-factor*)))
+    ;; Scale the 'inc' down so future bumps remain proportional to old scores
+    (setf (activities-inc act) (* (activities-inc act) *rescale-factor*))))
+
+(defun decay-activities! (act)
+  "Effectively decays past activities by increasing the future increment.
+   This is called exactly once per conflict."
+  (setf (activities-inc act) 
+        (/ (activities-inc act) *literal-decay-factor*))
+  ;; Check overflow of the global 'inc' rather than checking every literal
+  (when (> (activities-inc act) *rescale-threshold*)
+    (rescale-activities! act)))
+
+(defun select-literal (act unassigned-vars)
+  "Linear scan for the unassigned literal with the highest score.
+   Naturally chooses variable and polarity simultaneously."
+  (let ((best-lit -1)
+        (max-score -1.0d0)
+        (scores (activities-scores act)))
+    (dolist (var unassigned-vars)
+      (let* ((pos-lit (* 2 var))
+             (neg-lit (1+ pos-lit))
+             (pos-score (aref scores pos-lit))
+             (neg-score (aref scores neg-lit)))
+        (when (> pos-score max-score)
+          (setf max-score pos-score best-lit pos-lit))
+        (when (> neg-score max-score)
+          (setf max-score neg-score best-lit neg-lit))))
+    best-lit))
+
 ;; ============================================================
 ;; DPLL Algorithm
 ;; ===========================================================
@@ -2421,17 +2498,18 @@
           (enqueue lit propQ)
           (values nil (trail-ext trail lit level reason))))))
 
-(defun dpll-init (cls) 
+(defun dpll-init (cls num-vars) 
   "Preprocess the clauses cls by computing the watch lists and initializing the propagation queue.
-   Returns (values conflict? new-cls trail watches propQ)
+   Returns (values conflict? new-cls trail activities watches propQ)
    where conflict? if cls are unsat, 
          if conflict? = nil, then 
             new-cls is a list of simplified clauses or nil if the cls are sat, 
             trail is the initial trail propagated from unit clauses with level 0, nil if no unit clauses, 
+            activities is the initial activity scores (randomly determined) for variables,
             watches is the initialized watches structure, and
             propQ is the initialized queue of unit literals to propagate. 
           else 
-            new-cls, trail, watches, and propQ are all nil.
+            new-cls, trail, activities, watches, and propQ are all nil.
 
   Pre: each cl in cls doesn't contain duplicate literals
 
@@ -2452,14 +2530,14 @@
         ((clause-unit? cl)
           (let+ ((&values conflict? new-trail) (dpll-try-enqueue (clause-unit-lit cl) trail propQ 0)))
             (if conflict? 
-                (return-from dpll-init (values t nil nil nil nil)) ;; conflict from unit clause - UNSAT
+                (return-from dpll-init (values t nil nil nil nil nil)) ;; conflict from unit clause - UNSAT
                 (setf trail new-trail))))
         ;; Otherwise, add watches and keep the clause
         (t (push cl new-cls)
            (let+ ((&values lit1 lit2) (clause-two-lits cl))
              ;; The watches are negated because we want to watch for them when they become false under the trail assignment
              (watches-add! watches cl (lit-negate lit1) (lit-negate lit2))))))
-    (values nil new-cls trail watches propQ))
+    (values nil new-cls trail (make-activities num-vars) watches propQ))
 
 (defun dpll-find-new-watch (cl trail old-watch other-watch)
   "Find a new literal in clause cl to watch that is not falsified by the trail, excluding old-watch and other-watch.
@@ -2526,7 +2604,7 @@
                                        (setf new-trail result-trail)))))))
          (dpll-unit new-trail watches propQ)))))
 
-(defun dpll-decide (cls trail propQ)
+(defun dpll-decide (activities trail propQ)
   "Decide the next variable to assign based on the current cls and trail.
    Returns (values decide? new-trail)
    where decide? is true if a new decision variable was chosen, false if no more decisions possible (all variables assigned), and
@@ -2564,7 +2642,7 @@
 ;; While looking for UIP through implications, the reason clause cannot be nil. 
 ;; Then, if no UIP is found, the algorithm will stop at the first decision, where the working clause has exactly one literal (decision) from the current level. 
 
-(defun dpll-analyze (conflict-cl trail watches)
+(defun dpll-analyze (conflict-cl trail)
   "Analyze the conflict clause at the current trail.
    Return (values learnt-cl bt-level)
    where learnt-clause is a new clause derived from the conflict that will be added to the learnt clause set.
@@ -2603,20 +2681,6 @@
                           (assert resolved-cls () "Resolution must produce at least one clause")
                           (find-first-uip (first resolved-cls) trail)))))))
 
-           (derive-learnt-clause (uip-cl watches)
-             "Derive a new learnt clause from uip-cl and update watches accordingly. 
-              Returns the new learnt clause.
-              
-              Pre: uip-cl is neither nil nor empty, but can be unit.
-              Post: if uip-cl is unit, then watches are not updated."
-             (let ((learnt-cl (clause-negate uip-cl)))
-               ;; Update watches for the new learnt clause
-               (assert learnt-cl () "Learnt clause cannot be empty after negating UIP clause")
-               (unless (clause-unit? learnt-cl) ;; No watches needed, backtrack to 0, and propagation will handle it
-                 (let+ ((&values lit1 lit2) (clause-two-lits learnt-cl))
-                   (watches-add! watches learnt-cl (lit-negate lit1) (lit-negate lit2))))
-               learnt-cl))
-
            (backtrack-level (learnt-cl trail)
              "Returns the second highest level in the learnt clause to jump back to, or -1 if unsat."
              (let ((levels nil))
@@ -2635,24 +2699,27 @@
         (values nil -1)
         (let ((uip-cl (find-first-uip conflict-cl trail)))
           (assert uip-cl () "UIP clause cannot be nil after analysis")
-          (let ((learnt-cl (derive-learnt-clause uip-cl watches)))
+          (let ((learnt-cl (clause-negate uip-cl)))
             (values learnt-cl (backtrack-level learnt-cl trail)))))))
 
-(defun dpll-backtrack (learnt-cl trail propQ bt-level)
+;; TODO: fix 
+(defun dpll-backtrack (learnt-cl trail watches propQ bt-level)
    "Backtrack the trail to the given backtracking level.
     Update the propagation queue propQ to reflect the new trail after backtracking.
     Returns the new trail after backtracking.
 
-    Watches are not updated during backtracking. 
-    They remain valid since the watch invariant still holds before and after backtracking.  
+    Watches are updated by adding the new learnt clause (if not unit) during backtracking. 
+    For other clauses, the watches remain valid since the watch invariant still holds before and after backtracking.  
     Any stale watches will be corrected lazily at the next propagation when we enqueue the flipped literal.
 
     Pre: bt-level >= 0, trail != nil, and bt-level < current max decision level in trail.
          propQ is empty before backtracking.
+         learnt-cl != nil 
 
     Post: the returned trail != nil and its top entry is a decision at bt-level with the opposite assignment.
           propQ contains the unit literal with the flipped assignment."
 
+  (assert learnt-cl () "Learnt clause cannot be nil for backtracking")
   (assert (>= bt-level 0) () "Backtracking level must be non-negative: ~A" bt-level)
   (assert (not (null trail)) () "Trail cannot be empty when backtracking")
   (let ((max-level (trail-max-level trail)))
@@ -2660,47 +2727,54 @@
   (assert (queue-empty? propQ) () "Propagation queue must be empty before backtracking")
 
   (labels ((do-backtrack (tr)
-          (let* ((entry (first tr))
-                 (rest-tr (rest tr))
-                 (lvl (trail-entry-level entry)))
-            (cond ((> lvl bt-level)
-                   (do-backtrack rest-tr))
-                  ((= lvl bt-level)
-                   ;; Check next entry (two by two comparison)
-                   (let ((next-lvl (trail-max-level rest-tr)))
-                    (if (< next-lvl bt-level)
-                        ;; Next entry is at lower level, so this is the decision - flip it
-                        (let ((flipped-lit (lit-negate (trail-entry-lit entry))))
-                          (enqueue flipped-lit propQ)
-                          (trail-ext rest-tr flipped-lit lvl)))
-                        ;; Next entry at same level, this is propagation - keep popping
-                        (do-backtrack rest-tr))))
-                  (t
-                   ;; Impossible case due to preconditions
-                   (error "Unexpected level ~A < bt-level ~A" lvl bt-level))))))
+           (let* ((entry (first tr))
+                  (rest-tr (rest tr))
+                  (lvl (trail-entry-level entry)))
+              (cond ((> lvl bt-level)
+                    (do-backtrack rest-tr))
+                    ((= lvl bt-level)
+                    ;; Check next entry (two by two comparison)
+                    (let ((next-lvl (trail-max-level rest-tr)))
+                      (if (< next-lvl bt-level)
+                          ;; Next entry is at lower level, so this is the decision - flip it
+                          (let ((flipped-lit (lit-negate (trail-entry-lit entry))))
+                            (enqueue flipped-lit propQ)
+                            (trail-ext rest-tr flipped-lit lvl)))
+                          ;; Next entry at same level, this is propagation - keep popping
+                          (do-backtrack rest-tr))))
+                    (t
+                    ;; Impossible case due to preconditions
+                    (error "Unexpected level ~A < bt-level ~A" lvl bt-level))))
+                    
+          (add-learnt-clause (learnt-cl watches)
+            ;; Update watches for the new learnt clause
+            (assert learnt-cl () "Learnt clause cannot be empty after negating UIP clause")
+            (unless (clause-unit? learnt-cl) ;; No watches needed, backtrack to 0, and propagation will handle it
+              (let+ ((&values lit1 lit2) (clause-two-lits learnt-cl))
+                (watches-add! watches learnt-cl (lit-negate lit1) (lit-negate lit2))))))
     (do-backtrack trail)))
 
-(defun dpll-sat (cls trail watches propQ)
+(defun dpll-sat (trail activities watches propQ)
   "Main DPLL loop: apply unit propagation, then either analyze conflict or decide next variable.
    Returns (values result new-trail)
    where result is 'sat or 'unsat
          new-trail is the final trail after backtracking if needed.
-   
+
    propQ is updated in-place during propagation, decision, and backtracking."
 
   (let+ (((&values conflict-cl trail0) (dpll-unit trail watches propQ)))
     (if conflict-cl
         ;; Analyze conflict and backtrack
-        (let+ (((&values learnt-cl bt-level) (dpll-analyze conflict-cl trail0 watches)))
+        (let+ (((&values learnt-cl bt-level) (dpll-analyze conflict-cl trail0)))
           (if (< bt-level 0)
               (values 'unsat nil)  ; No more backtracking possible, UNSAT
-              (let ((trail1 (dpll-backtrack learnt-cl trail0 propQ bt-level)))
-                (dpll-sat cls trail1 watches propQ))))
+              (let ((trail1 (dpll-backtrack learnt-cl trail0 watches propQ bt-level)))
+                (dpll-sat trail1 activities watches propQ))))
         ;; Decide
-        (let+ (((&values decide? trail1) (dpll-decide cls trail0 propQ)))
+        (let+ (((&values decide? trail1) (dpll-decide activities trail0 propQ)))
           (if (not decide?)
               (values 'sat trail0)  ; No more decisions possible, SAT with current assignment
-              (dpll-sat cls trail1 watches propQ))))))
+              (dpll-sat trail1 activities watches propQ))))))
 
 (defun dpll (f)
   "Main DPLL function: takes a formula f, converts to CNF, and applies DPLL algorithm.
@@ -2708,10 +2782,10 @@
   (let* ((vm (make-var-manager)))
     (let+ (((&values cnf amap) (tseitin f))
            (cls (cnf->clauses cnf vm)) ;; mutates vm
-           ((&values conflict? cls trail watches propQ) (dpll-init cls)))
+           ((&values conflict? cls trail activities watches propQ) (dpll-init cls (var-manager-num-vars vm))))
       (if conflict?
           (values 'unsat nil)  ; Conflict from initial unit propagation, UNSAT
-          (let+ (((&values result trail) (dpll-sat cls trail watches propQ))
+          (let+ (((&values result trail) (dpll-sat trail activities watches propQ))
                  (result-asgn (when (eq result 'sat)
                                     (trail->alist trail vm (pvars f) amap))))
               (values result result-asgn))))))
