@@ -2421,20 +2421,19 @@
           (enqueue lit propQ)
           (values nil (trail-ext trail lit level reason))))))
 
-(defun dpll-init (cls level) 
+(defun dpll-init (cls) 
   "Preprocess the clauses cls by computing the watch lists and initializing the propagation queue.
    Returns (values conflict? new-cls trail watches propQ)
    where conflict? if cls are unsat, 
          if conflict? = nil, then 
             new-cls is a list of simplified clauses or nil if the cls are sat, 
-            trail is the initial trail propagated from unit clauses with level LEVEL, nil if no unit clauses, 
+            trail is the initial trail propagated from unit clauses with level 0, nil if no unit clauses, 
             watches is the initialized watches structure, and
             propQ is the initialized queue of unit literals to propagate. 
           else 
             new-cls, trail, watches, and propQ are all nil.
 
-  Pre: level = 0 
-       each cl in cls doesn't contain duplicate literals
+  Pre: each cl in cls doesn't contain duplicate literals
 
   Post: any lit in propQ is in trail with no conflicts and is treated as a decision (no reason clause), 
         watches are valid with respect to trail."
@@ -2451,7 +2450,7 @@
         ((clause-empty? cl) (return-from dpll-init (values t nil nil nil nil)))
         ;; If clause is unit, propagate it immediately; treat it as a decision! 
         ((clause-unit? cl)
-          (let+ ((&values conflict? new-trail) (dpll-try-enqueue (clause-unit-lit cl) trail propQ level)))
+          (let+ ((&values conflict? new-trail) (dpll-try-enqueue (clause-unit-lit cl) trail propQ 0)))
             (if conflict? 
                 (return-from dpll-init (values t nil nil nil nil)) ;; conflict from unit clause - UNSAT
                 (setf trail new-trail))))
@@ -2527,7 +2526,7 @@
                                        (setf new-trail result-trail)))))))
          (dpll-unit new-trail watches propQ)))))
 
-(defun dpll-decide (cls trail propQ level)
+(defun dpll-decide (cls trail propQ)
   "Decide the next variable to assign based on the current cls and trail.
    Returns (values decide? new-trail)
    where decide? is true if a new decision variable was chosen, false if no more decisions possible (all variables assigned), and
@@ -2639,7 +2638,7 @@
           (let ((learnt-cl (derive-learnt-clause uip-cl watches)))
             (values learnt-cl (backtrack-level learnt-cl trail)))))))
 
-(defun dpll-backtrack (trail propQ bt-level)
+(defun dpll-backtrack (learnt-cl trail propQ bt-level)
    "Backtrack the trail to the given backtracking level.
     Update the propagation queue propQ to reflect the new trail after backtracking.
     Returns the new trail after backtracking.
@@ -2681,17 +2680,13 @@
                    (error "Unexpected level ~A < bt-level ~A" lvl bt-level))))))
     (do-backtrack trail)))
 
-(defun dpll-sat (cls trail watches propQ level)
+(defun dpll-sat (cls trail watches propQ)
   "Main DPLL loop: apply unit propagation, then either analyze conflict or decide next variable.
    Returns (values result new-trail)
    where result is 'sat or 'unsat
          new-trail is the final trail after backtracking if needed.
    
-   propQ is updated in-place during propagation, decision, and backtracking.
-
-   Pre: level should be equal to the max decision level in trail."
-
-  (assert (= level (trail-max-level trail)) () "Current level ~A must be equal to max decision level in trail ~A" level (trail-max-level trail))
+   propQ is updated in-place during propagation, decision, and backtracking."
 
   (let+ (((&values conflict-cl trail0) (dpll-unit trail watches propQ)))
     (if conflict-cl
@@ -2699,14 +2694,13 @@
         (let+ (((&values learnt-cl bt-level) (dpll-analyze conflict-cl trail0 watches)))
           (if (< bt-level 0)
               (values 'unsat nil)  ; No more backtracking possible, UNSAT
-              (let ((trail1 (dpll-backtrack trail0 propQ bt-level)))
-                (dpll-sat cls trail1 watches propQ bt-level))))
+              (let ((trail1 (dpll-backtrack learnt-cl trail0 propQ bt-level)))
+                (dpll-sat cls trail1 watches propQ))))
         ;; Decide
-        (let+ ((level0 (1+ level))
-               ((&values decide? trail1) (dpll-decide cls trail0 propQ level0)))
+        (let+ (((&values decide? trail1) (dpll-decide cls trail0 propQ)))
           (if (not decide?)
               (values 'sat trail0)  ; No more decisions possible, SAT with current assignment
-              (dpll-sat cls trail1 watches propQ level0))))))
+              (dpll-sat cls trail1 watches propQ))))))
 
 (defun dpll (f)
   "Main DPLL function: takes a formula f, converts to CNF, and applies DPLL algorithm.
@@ -2714,10 +2708,10 @@
   (let* ((vm (make-var-manager)))
     (let+ (((&values cnf amap) (tseitin f))
            (cls (cnf->clauses cnf vm)) ;; mutates vm
-           ((&values conflict? cls trail watches propQ) (dpll-init cls 0)))
+           ((&values conflict? cls trail watches propQ) (dpll-init cls)))
       (if conflict?
           (values 'unsat nil)  ; Conflict from initial unit propagation, UNSAT
-          (let+ (((&values result trail) (dpll-sat cls trail watches propQ (trail-max-level trail)))
+          (let+ (((&values result trail) (dpll-sat cls trail watches propQ))
                  (result-asgn (when (eq result 'sat)
                                     (trail->alist trail vm (pvars f) amap))))
               (values result result-asgn))))))
