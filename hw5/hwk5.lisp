@@ -1558,6 +1558,12 @@
   `(when (eq +debug-mode+ 'debug)
      (pprint (format nil ,fmt ,@args))))
 
+(defmacro dassert (test-form &optional format-string &rest format-args)
+  "Assert that TEST-FORM is true, but only when +debug-mode+ is 'debug.
+   If TEST-FORM is false and debug mode is enabled, signals an error with the optional message."
+  `(when (eq +debug-mode+ 'debug)
+     (assert ,test-form () ,@(when format-string (list* format-string format-args)))))
+
 ;; DP Stats globals
 (defparameter *dp-stats-unit-count* 0)      ; Number of unit propagations
 (defparameter *dp-stats-pure-count* 0)      ; Number of pure literal eliminations
@@ -2213,12 +2219,6 @@
 
 |#
 
-(defmacro dassert (test-form &optional format-string &rest format-args)
-  "Assert that TEST-FORM is true, but only when +debug-mode+ is 'debug.
-   If TEST-FORM is false and debug mode is enabled, signals an error with the optional message."
-  `(when (eq +debug-mode+ 'debug)
-     (assert ,test-form () ,@(when format-string (list* format-string format-args)))))
-
 ;; ==============================================================
 ;; Trail APIs
 ;;
@@ -2437,6 +2437,8 @@
   (watch-list-remove! (watches-lit->clauses w) old-lit cl)
   (watch-list-add! (watches-lit->clauses w) new-lit cl)
   (clause-watches-update! (watches-clause->lits w) cl old-lit new-lit))
+
+;; TODO: incorporate these into notes
 
 ;;; ============================================================
 ;;; VSIDS Strategy: Literal-Level Granularity
@@ -2672,6 +2674,8 @@
             (assert (not conflict?) () "Conflict cannot occur when making a new decision, got ~A for literal ~A" conflict? lit)
             (values t new-trail)))))
 
+;; TODO: incorporate these into notes
+
 ;; Questions: 
 ;; 1. Can the working clause in find-first-uip be empty (resulted from resolution)?  
 ;; No. 
@@ -2697,6 +2701,9 @@
 ;; First, there has to be at least one implication from the decision to the conflict. 
 ;; While looking for UIP through implications, the reason clause cannot be nil. 
 ;; Then, if no UIP is found, the algorithm will stop at the first decision, where the working clause has exactly one literal (decision) from the current level. 
+
+;; 5. Does the conflict clause have to contain two literals from the current level? 
+;; Yes. These are the two watched literals that triggered the conflict.
 
 (defun dpll-analyze (conflict-cl activities trail)
   "Analyze the conflict clause at the current trail.
@@ -2736,9 +2743,9 @@
                     ;; Add literals from the reason clause to 'seen'
                     (clause-map #'(lambda (lit) (hash-set-add seen lit)) reason-cl)
 
-                    (let ((resolved-cls (resolve-var (list working-cl reason-cl) (trail-entry-var most-recent-entry))))
+                    (let ((resolved-cls (resolve-var (list working-cl reason-cl) (trail-entry-var most-recent))))
                       (assert resolved-cls () "Resolution must produce at least one clause")
-                      (find-first-uip (first resolved-cls) trail))))))
+                      (find-first-uip (first resolved-cls) trail seen))))))
 
            (backtrack-level (learnt-cl trail)
              "Returns the second highest level in the learnt clause to jump back to, or -1 if unsat."
@@ -2757,7 +2764,7 @@
 
     (if (zerop (trail-max-level trail))
         (values nil -1)
-        (let* ((seen conflict-cl) ;; 'seen' initialized to be all literals in conflict-cl
+        (let* ((seen (clause-copy conflict-cl)) ;; 'seen' is a COPY of conflict-cl
                (uip-cl (find-first-uip conflict-cl trail seen)))
           (assert uip-cl () "UIP clause cannot be nil after analysis")
           
@@ -2842,7 +2849,7 @@
         (let+ (((&values result trail) (dpll-sat trail activities watches propQ))
                 (result-asgn (when (eq result 'sat)
                                    (let ((asgn (trail->assignment trail)))
-                                     (assignment->alist asgn vm vars amap)))))
+                                     (assignment->alist asgn vm (pvars f) amap)))))
           (values result result-asgn)))))
 
 (defun test-dpll (f &optional (expected 'sat))
