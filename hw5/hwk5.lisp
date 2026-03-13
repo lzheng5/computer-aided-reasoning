@@ -2639,24 +2639,9 @@
   (watch-list-add! (watches-lit->clauses w) new-lit cl)
   (clause-watches-update! (watches-clause->lits w) cl old-lit new-lit))
 
-;; TODO: incorporate these into notes
-
 ;;; ============================================================
 ;;; VSIDS Strategy: Literal-Level Granularity
-;;;
-;;; Consulted with Gemini on these design choices.
 ;;; ============================================================
-;;; Decision 1: Use Literal-level instead of Variable-level.
-;;;             Since we aren't using Phase Saving, literal scores
-;;;             act as a built-in polarity heuristic (rewarding
-;;;             the specific assignment that failed).
-;;; Decision 2: Inverse Scaling Trick.
-;;;             Instead of multiplying all scores by 0.95 (O(N)),
-;;;             we divide the increment (inc) by 0.95 (O(1)).
-;;; Decision 3: Centralized Rescaling.
-;;;             We only check for floating-point overflow once per
-;;;             conflict inside the decay function.
-;;; Decision 4: Use random values between (0.0, 1.0) as initial scores
 
 ;; Standard VSIDS parameters from literature (can be tuned for better performance)
 (defparameter *literal-decay-factor* 0.95d0)
@@ -2879,37 +2864,6 @@
               (dassert (not conflict?) "Conflict cannot occur when making a new decision, got ~A for literal ~A" conflict? lit)
               (values t new-trail)))))))
 
-;; TODO: incorporate these into notes
-
-;; Questions:
-;; 1. Can the working clause in find-first-uip be empty (resulted from resolution)?
-;; No.
-;; If we have made one decision, the initial working (or the conflicting) clause is not empty, and it is not the first UIP,
-;; then it contains at least two literals from the current level.
-;; Then we resolve with the reason clause (non-empty due to an implication), which contains the variable being resolved and at least one other literal from the current level.
-;; The resulted clause cannot be empty since it cannot be satisfied directly and has to contain the other literal after resolution, which is nonempty.
-
-;; 2. Can the working clause in find-first-uip be unit (resulted from resolution)?
-;; Yes. See the example.
-
-;; 3. Can the working clause in find-first-uip be nil/satisfied (resulted from resolution)?
-;;    Note resolve-var takes a list of clauses (in this case only two clauses) and a variable and returns a list of clauses with var resolved
-;; No.
-;; Suppose we end up with nil/satisfied after resolving the two clauses.
-;; Note for this to happen, we need both x and (not x), which are not the variable to be resolved, in the two clauses to be resolved.
-;; Then one of them (say x) must come from the conflict clause, while the other the reason clause.
-;; Through implications, the reason clause contains (not x) and it must be false since x is not the resolved variable.
-;; Thus, x must be true, making the conflict clause satisfied. Contradiction.
-
-;; 4. Can the reason clause in find-first-uip be nil (decision)?
-;; No.
-;; First, there has to be at least one implication from the decision to the conflict.
-;; While looking for UIP through implications, the reason clause cannot be nil.
-;; Then, if no UIP is found, the algorithm will stop at the first decision, where the working clause has exactly one literal (decision) from the current level.
-
-;; 5. Does the conflict clause have to contain two literals from the current level?
-;; Yes. These are the two watched literals that triggered the conflict.
-
 (defun dpll-analyze (conflict-cl activities trail)
   "Analyze the conflict clause at the current trail.
    Return (values learnt-cl bt-level)
@@ -3019,8 +2973,6 @@
             (dassert (not conflict?) "Learnt unit clause cannot cause a conflict during backtracking, got ~A for literal ~A" conflict? (clause-unit-lit learnt-cl))
             new-trail))
         ;; Otherwise, use the asserting lit (unassigned) and the decision literal (falsified) at bt-level as watching literals for learnt-clause
-        ;; Note 1. their negations are *not* falsified by the bt-trail, so they satisfy the watch invariants.
-        ;;      2. bt-lit for performance reasoning TODO: why?
         (labels ((find-watch-literals (learnt-cl bt-trail bt-level)
                    (let ((asserting-lit nil)
                          (bt-lit nil))
