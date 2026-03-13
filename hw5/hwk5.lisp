@@ -1565,10 +1565,19 @@
      (assert ,test-form () ,@(when format-string (list* format-string format-args)))))
 
 ;; DP Stats globals
+;; Formula statistics
+(defparameter *dp-stats-orig-vars* 0)       ; Variables in original skeleton formula
+(defparameter *dp-stats-orig-clauses* 0)    ; Clauses in original skeleton formula
+(defparameter *dp-stats-cnf-vars* 0)        ; Variables after Tseitin transformation
+(defparameter *dp-stats-cnf-clauses* 0)     ; Clauses after Tseitin transformation
+
+;; Search statistics
 (defparameter *dp-stats-unit-count* 0)      ; Number of unit propagations
 (defparameter *dp-stats-pure-count* 0)      ; Number of pure literal eliminations
 (defparameter *dp-stats-resolve-count* 0)   ; Number of resolution steps
 (defparameter *dp-stats-max-clauses* 0)     ; Maximum clause count during solving
+
+;; Timing statistics
 (defparameter *dp-stats-time-unit* 0)       ; Time spent in unit propagation (internal-time-units)
 (defparameter *dp-stats-time-pure* 0)       ; Time spent in pure literal elimination
 (defparameter *dp-stats-time-resolve* 0)    ; Time spent in resolution
@@ -1577,7 +1586,11 @@
 (defmacro dp-stats-reset ()
   "Reset all stats counters"
   `(when (eq +debug-mode+ 'stats)
-     (setf *dp-stats-unit-count* 0
+     (setf *dp-stats-orig-vars* 0
+           *dp-stats-orig-clauses* 0
+           *dp-stats-cnf-vars* 0
+           *dp-stats-cnf-clauses* 0
+           *dp-stats-unit-count* 0
            *dp-stats-pure-count* 0
            *dp-stats-resolve-count* 0
            *dp-stats-max-clauses* 0
@@ -1585,6 +1598,14 @@
            *dp-stats-time-pure* 0
            *dp-stats-time-resolve* 0
            *dp-stats-time-total* 0)))
+
+(defmacro dp-stats-set-formula (orig-vars orig-clauses cnf-vars cnf-clauses)
+  "Set formula statistics"
+  `(when (eq +debug-mode+ 'stats)
+     (setf *dp-stats-orig-vars* ,orig-vars
+           *dp-stats-orig-clauses* ,orig-clauses
+           *dp-stats-cnf-vars* ,cnf-vars
+           *dp-stats-cnf-clauses* ,cnf-clauses)))
 
 (defmacro dp-stats-inc-unit ()
   "Increment unit propagation count"
@@ -1627,10 +1648,17 @@
   "Print stats report"
   `(when (eq +debug-mode+ 'stats)
      (format t "~%=== DP Statistics ===~%")
+     (format t "--- Formula Info ---~%")
+     (format t "Original formula:     ~A vars, ~A clauses~%" 
+             *dp-stats-orig-vars* *dp-stats-orig-clauses*)
+     (format t "After Tseitin:        ~A vars, ~A clauses~%" 
+             *dp-stats-cnf-vars* *dp-stats-cnf-clauses*)
+     (format t "--- Search Stats ---~%")
      (format t "Unit propagations:    ~A~%" *dp-stats-unit-count*)
      (format t "Pure literals:        ~A~%" *dp-stats-pure-count*)
      (format t "Resolution steps:     ~A~%" *dp-stats-resolve-count*)
      (format t "Max clauses:          ~A~%" *dp-stats-max-clauses*)
+     (format t "--- Timing ---~%")
      (format t "Time (unit):          ~,3F ms (~,1F%)~%"
              (dp-stats-time->ms *dp-stats-time-unit*)
              (if (> *dp-stats-time-total* 0) (* 100.0 (/ *dp-stats-time-unit* *dp-stats-time-total*)) 0))
@@ -1898,15 +1926,21 @@
 (defun dp (f)
   "Main DP function: takes a formula f, converts to CNF, and applies DP algorithm.
    Returns 'sat or 'unsat with assignment alist."
-  (let+ (((&values cnf amap) (tseitin f))
+  (let+ ((orig-vars (pvars f))
+         ((&values cnf amap) (tseitin f))
          (vm (make-var-manager))
          (cls (cnf->clauses cnf vm)) ;; mutates vm
-         (asgn (make-assignment))
-         ((&values result resolve-map) (dp-stats-time :total (dp-sat cls asgn nil))) ;; mutates asgn
-         (result-asgn (when (eq result 'sat)
-                        (dp-reconstruct cls asgn resolve-map) ;; mutates asgn
-                        (assignment->alist asgn vm (pvars f) amap))))
-    (values result result-asgn)))
+         (asgn (make-assignment)))
+    ;; Set formula statistics
+    (dp-stats-set-formula (length orig-vars)
+                          (if (and (consp f) (eq (car f) 'and)) (length (cdr f)) 1)
+                          (var-manager-num-vars vm)
+                          (length cls))
+    (let+ (((&values result resolve-map) (dp-stats-time :total (dp-sat cls asgn nil))) ;; mutates asgn
+           (result-asgn (when (eq result 'sat)
+                          (dp-reconstruct cls asgn resolve-map) ;; mutates asgn
+                          (assignment->alist asgn vm orig-vars amap))))
+      (values result result-asgn))))
 
 (defun subst-formula (f asgn)
   "Substitute variables in formula f according to asgn (alist)"
@@ -2229,6 +2263,145 @@
  slow. To generate interesting problems, see your book.
 
 |#
+
+;; ==============================================================
+;; DPLL Statistics
+;; ==============================================================
+
+;; Formula statistics (computed once per problem)
+(defparameter *dpll-stats-orig-vars* 0)        ; Variables in original skeleton formula
+(defparameter *dpll-stats-orig-clauses* 0)     ; Clauses in original skeleton formula  
+(defparameter *dpll-stats-cnf-vars* 0)         ; Variables after Tseitin transformation
+(defparameter *dpll-stats-cnf-clauses* 0)      ; Clauses after Tseitin transformation
+
+;; Search statistics (accumulated during solving)
+(defparameter *dpll-stats-decisions* 0)        ; Number of decisions made
+(defparameter *dpll-stats-propagations* 0)     ; Number of unit propagations
+(defparameter *dpll-stats-conflicts* 0)        ; Number of conflicts encountered
+(defparameter *dpll-stats-learnt-clauses* 0)   ; Number of learnt clauses
+(defparameter *dpll-stats-learnt-lits* 0)      ; Total literals in learnt clauses (for avg)
+(defparameter *dpll-stats-max-level* 0)        ; Maximum decision level reached
+(defparameter *dpll-stats-backjumps* 0)        ; Number of non-chronological backtracks
+
+;; Timing statistics (internal time units)
+(defparameter *dpll-stats-time-total* 0)       ; Total time
+(defparameter *dpll-stats-time-propagate* 0)   ; Time in unit propagation
+(defparameter *dpll-stats-time-analyze* 0)     ; Time in conflict analysis
+(defparameter *dpll-stats-time-backtrack* 0)   ; Time in backtracking
+(defparameter *dpll-stats-time-decide* 0)      ; Time in decision making
+
+(defmacro dpll-stats-reset ()
+  "Reset all DPLL stats counters"
+  `(when (eq +debug-mode+ 'stats)
+     (setf *dpll-stats-orig-vars* 0
+           *dpll-stats-orig-clauses* 0
+           *dpll-stats-cnf-vars* 0
+           *dpll-stats-cnf-clauses* 0
+           *dpll-stats-decisions* 0
+           *dpll-stats-propagations* 0
+           *dpll-stats-conflicts* 0
+           *dpll-stats-learnt-clauses* 0
+           *dpll-stats-learnt-lits* 0
+           *dpll-stats-max-level* 0
+           *dpll-stats-backjumps* 0
+           *dpll-stats-time-total* 0
+           *dpll-stats-time-propagate* 0
+           *dpll-stats-time-analyze* 0
+           *dpll-stats-time-backtrack* 0
+           *dpll-stats-time-decide* 0)))
+
+(defmacro dpll-stats-set-formula (orig-vars orig-clauses cnf-vars cnf-clauses)
+  "Set formula statistics"
+  `(when (eq +debug-mode+ 'stats)
+     (setf *dpll-stats-orig-vars* ,orig-vars
+           *dpll-stats-orig-clauses* ,orig-clauses
+           *dpll-stats-cnf-vars* ,cnf-vars
+           *dpll-stats-cnf-clauses* ,cnf-clauses)))
+
+(defmacro dpll-stats-inc-decisions ()
+  `(when (eq +debug-mode+ 'stats)
+     (incf *dpll-stats-decisions*)))
+
+(defmacro dpll-stats-inc-propagations ()
+  `(when (eq +debug-mode+ 'stats)
+     (incf *dpll-stats-propagations*)))
+
+(defmacro dpll-stats-inc-conflicts ()
+  `(when (eq +debug-mode+ 'stats)
+     (incf *dpll-stats-conflicts*)))
+
+(defmacro dpll-stats-add-learnt (clause-size)
+  `(when (eq +debug-mode+ 'stats)
+     (incf *dpll-stats-learnt-clauses*)
+     (incf *dpll-stats-learnt-lits* ,clause-size)))
+
+(defmacro dpll-stats-update-max-level (level)
+  `(when (eq +debug-mode+ 'stats)
+     (setf *dpll-stats-max-level* (max *dpll-stats-max-level* ,level))))
+
+(defmacro dpll-stats-inc-backjumps ()
+  `(when (eq +debug-mode+ 'stats)
+     (incf *dpll-stats-backjumps*)))
+
+(defmacro dpll-stats-time (phase &body body)
+  "Time a phase of DPLL and accumulate to the corresponding counter"
+  (let ((start (gensym "START")))
+    `(if (eq +debug-mode+ 'stats)
+         (let ((,start (get-internal-real-time)))
+           (multiple-value-prog1 (progn ,@body)
+             (incf ,(ecase phase
+                      (:propagate '*dpll-stats-time-propagate*)
+                      (:analyze '*dpll-stats-time-analyze*)
+                      (:backtrack '*dpll-stats-time-backtrack*)
+                      (:decide '*dpll-stats-time-decide*)
+                      (:total '*dpll-stats-time-total*))
+                   (- (get-internal-real-time) ,start))))
+         (progn ,@body))))
+
+(defmacro dpll-stats-time->ms (time)
+  "Convert internal time units to milliseconds"
+  `(* 1000.0 (/ ,time internal-time-units-per-second)))
+
+(defmacro dpll-stats-report ()
+  "Print DPLL statistics report"
+  `(when (eq +debug-mode+ 'stats)
+     (format t "~%=== DPLL Statistics ===~%")
+     (format t "--- Formula Info ---~%")
+     (format t "Original formula:     ~A vars, ~A clauses~%" 
+             *dpll-stats-orig-vars* *dpll-stats-orig-clauses*)
+     (format t "After Tseitin:        ~A vars, ~A clauses~%" 
+             *dpll-stats-cnf-vars* *dpll-stats-cnf-clauses*)
+     (format t "--- Search Stats ---~%")
+     (format t "Decisions:            ~A~%" *dpll-stats-decisions*)
+     (format t "Propagations:         ~A~%" *dpll-stats-propagations*)
+     (format t "Conflicts:            ~A~%" *dpll-stats-conflicts*)
+     (format t "Learnt clauses:       ~A~%" *dpll-stats-learnt-clauses*)
+     (format t "Avg learnt size:      ~,2F~%" 
+             (if (> *dpll-stats-learnt-clauses* 0) 
+                 (/ *dpll-stats-learnt-lits* *dpll-stats-learnt-clauses*) 
+                 0.0))
+     (format t "Max decision level:   ~A~%" *dpll-stats-max-level*)
+     (format t "Backjumps:            ~A~%" *dpll-stats-backjumps*)
+     (format t "--- Timing ---~%")
+     (format t "Time (propagate):     ~,3F ms (~,1F%)~%"
+             (dpll-stats-time->ms *dpll-stats-time-propagate*)
+             (if (> *dpll-stats-time-total* 0) 
+                 (* 100.0 (/ *dpll-stats-time-propagate* *dpll-stats-time-total*)) 0))
+     (format t "Time (analyze):       ~,3F ms (~,1F%)~%"
+             (dpll-stats-time->ms *dpll-stats-time-analyze*)
+             (if (> *dpll-stats-time-total* 0) 
+                 (* 100.0 (/ *dpll-stats-time-analyze* *dpll-stats-time-total*)) 0))
+     (format t "Time (backtrack):     ~,3F ms (~,1F%)~%"
+             (dpll-stats-time->ms *dpll-stats-time-backtrack*)
+             (if (> *dpll-stats-time-total* 0) 
+                 (* 100.0 (/ *dpll-stats-time-backtrack* *dpll-stats-time-total*)) 0))
+     (format t "Time (decide):        ~,3F ms (~,1F%)~%"
+             (dpll-stats-time->ms *dpll-stats-time-decide*)
+             (if (> *dpll-stats-time-total* 0) 
+                 (* 100.0 (/ *dpll-stats-time-decide* *dpll-stats-time-total*)) 0))
+     (format t "Time (total):         ~,3F ms~%" 
+             (dpll-stats-time->ms *dpll-stats-time-total*))
+     (format t "=======================~%")))
 
 ;; ==============================================================
 ;; Trail APIs
@@ -2566,6 +2739,7 @@
             (values nil trail) ;; satisfied
             (values t nil)) ;; conflict
         (progn ;; not assigned, assign it and enqueue for propagation
+          (when reason (dpll-stats-inc-propagations)) ;; Count propagations (not decisions)
           (enqueue lit propQ)
           (values nil (trail-push trail lit level reason))))))
 
@@ -2688,9 +2862,12 @@
     (let ((lit (select-literal activities asgn)))
       (if (null lit)
           (values nil trail) ;; No unassigned variables left, SAT
-          (let+ (((&values conflict? new-trail) (dpll-try-enqueue lit trail propQ (1+ (trail-max-level trail)))))
-            (assert (not conflict?) () "Conflict cannot occur when making a new decision, got ~A for literal ~A" conflict? lit)
-            (values t new-trail))))))
+          (let* ((new-level (1+ (trail-max-level trail))))
+            (dpll-stats-inc-decisions)
+            (dpll-stats-update-max-level new-level)
+            (let+ (((&values conflict? new-trail) (dpll-try-enqueue lit trail propQ new-level)))
+              (assert (not conflict?) () "Conflict cannot occur when making a new decision, got ~A for literal ~A" conflict? lit)
+              (values t new-trail)))))))
 
 ;; TODO: incorporate these into notes
 
@@ -2783,7 +2960,11 @@
         (let* ((seen (clause-copy conflict-cl)) ;; 'seen' is a COPY of conflict-cl
                (learnt-cl (find-first-uip conflict-cl trail seen)))
           (assert learnt-cl () "Learnt clause cannot be nil after analysis")
-h
+
+          ;; Stats: track conflict and learnt clause
+          (dpll-stats-inc-conflicts)
+          (dpll-stats-add-learnt (clause-size learnt-cl))
+
           ;; BUMP: Reward all involved literals exactly once.
           (hash-set-map (lambda (lit) (bump-lit-activity! activities lit)) seen)
           ;; DECAY: Increase the 'inc' value for the next conflict.
@@ -2813,6 +2994,10 @@ h
   (let ((max-level (trail-max-level trail)))
     (assert (< bt-level max-level) () "Backtracking level ~A must be less than current max decision level ~A in trail" bt-level max-level))
   (assert (queue-empty? propQ) () "Propagation queue must be empty before backtracking")
+
+  ;; Stats: track non-chronological backtracks (backjumps)
+  (when (< bt-level (1- (trail-max-level trail)))
+    (dpll-stats-inc-backjumps))
 
   (let ((bt-trail (trail-backtrack trail bt-level)))
     (assert bt-trail () "Trail cannot be nil after backtracking")
@@ -2858,16 +3043,16 @@ h
 
    propQ is updated in-place during propagation, decision, and backtracking."
 
-  (let+ (((&values conflict-cl trail0) (dpll-unit trail watches propQ)))
+  (let+ (((&values conflict-cl trail0) (dpll-stats-time :propagate (dpll-unit trail watches propQ))))
     (if conflict-cl
         ;; Analyze conflict and backtrack
-        (let+ (((&values learnt-cl bt-level) (dpll-analyze conflict-cl activities trail0)))
+        (let+ (((&values learnt-cl bt-level) (dpll-stats-time :analyze (dpll-analyze conflict-cl activities trail0))))
           (if (< bt-level 0)
               (values 'unsat nil)  ; No more backtracking possible, UNSAT
-              (let ((trail1 (dpll-backtrack learnt-cl trail0 watches propQ bt-level)))
+              (let ((trail1 (dpll-stats-time :backtrack (dpll-backtrack learnt-cl trail0 watches propQ bt-level))))
                 (dpll-sat trail1 activities watches propQ))))
         ;; Decide
-        (let+ (((&values decide? trail1) (dpll-decide activities trail0 propQ)))
+        (let+ (((&values decide? trail1) (dpll-stats-time :decide (dpll-decide activities trail0 propQ))))
           (if (not decide?)
               (values 'sat trail0)  ; No more decisions possible, SAT with current assignment
               (dpll-sat trail1 activities watches propQ))))))
@@ -2875,18 +3060,25 @@ h
 (defun dpll (f)
   "Main DPLL function: takes a formula f, converts to CNF, and applies DPLL algorithm.
    Returns 'sat with assignment alist or 'unsat with nil."
-  (let+ (((&values cnf amap) (tseitin f))
-         (vm (make-var-manager))
-         (cls (cnf->clauses cnf vm)) ;; mutates vm
-         ((&values conflict? cls trail activities watches propQ) (dpll-init cls (var-manager-num-vars vm))))
-    (dbg "After init~%")
-    (if conflict?
-        (values 'unsat nil)  ; Conflict with initial unit propagation, UNSAT
-        (let+ (((&values result trail) (dpll-sat trail activities watches propQ))
-                (result-asgn (when (eq result 'sat)
-                                   (let ((asgn (trail->assignment trail)))
-                                     (assignment->alist asgn vm (pvars f) amap)))))
-          (values result result-asgn)))))
+  (dpll-stats-time :total
+    (let+ ((orig-vars (pvars f))
+           ((&values cnf amap) (tseitin f))
+           (vm (make-var-manager))
+           (cls (cnf->clauses cnf vm))) ;; mutates vm
+      ;; Set formula statistics
+      (dpll-stats-set-formula (length orig-vars) 
+                              (if (and (consp f) (eq (car f) 'and)) (length (cdr f)) 1)
+                              (var-manager-num-vars vm)
+                              (length cls))
+      (let+ (((&values conflict? cls trail activities watches propQ) (dpll-init cls (var-manager-num-vars vm))))
+        (dbg "After init~%")
+        (if conflict?
+            (values 'unsat nil)  ; Conflict with initial unit propagation, UNSAT
+            (let+ (((&values result trail) (dpll-sat trail activities watches propQ))
+                   (result-asgn (when (eq result 'sat)
+                                  (let ((asgn (trail->assignment trail)))
+                                    (assignment->alist asgn vm orig-vars amap)))))
+              (values result result-asgn)))))))
 
 (defun test-dpll (f &optional (expected 'sat))
   "Test dpll on formula f by verifying its result.
@@ -2894,18 +3086,16 @@ h
   (let+ (((&values result asgn) (dpll f)))
     (verify-sat f result asgn expected)))
 
-;; TODO: add stats
 (defun run-test-dpll ()
- "Run DPLL tests and report statistics."
- ;;(dpll-stats-reset)
- (run-tests #'test-dpll)
- (test-dpll (ramsey 3 4 8))
- ;; ACL2s cannot prove the case to be unsat (but no counter examples).
- (test-dpll (ramsey 3 4 9) 'unsat)
- ;; Time out:
- ;; (test-dpll (ramsey 4 4 17)) ; n < R(4,4), can avoid monochromatic K_4 - SAT
- ;; (test-dpll (ramsey 4 4 18) 'unsat) ; n >= R(4,4), cannot avoid monochromatic K_4 - UNSAT
- ;;(dpll-stats-report)
-)
+  "Run DPLL tests and report statistics."
+  (dpll-stats-reset)
+  (run-tests #'test-dpll)
+  (test-dpll (ramsey 3 4 8))
+  ;; ACL2s cannot prove the case to be unsat (but no counter examples).
+  (test-dpll (ramsey 3 4 9) 'unsat)
+  ;; Time out:
+  ;; (test-dpll (ramsey 4 4 17)) ; n < R(4,4), can avoid monochromatic K_4 - SAT
+  ;; (test-dpll (ramsey 4 4 18) 'unsat) ; n >= R(4,4), cannot avoid monochromatic K_4 - UNSAT
+  (dpll-stats-report))
 
 (run-test-dpll)
