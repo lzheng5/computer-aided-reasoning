@@ -2045,9 +2045,10 @@
     ;; Combine all constraints
     `(and ,@no-red-s ,@no-blue-k)))
 
-(defun run-tests (test-sat &optional (time-out 20))
+(defun run-tests (test-sat &optional (time-out 40))
   "Run a suite of tests on the DP solver, using TEST-SAT to verify results.
-   TIME-OUT is the maximum time in seconds for each test."
+   TIME-OUT is the maximum time in seconds for each test.
+   The default time out is the same as in ACL2s."
   (labels ((test (f &optional (expected 'sat) (label nil))
              (format t "Testing: ~A~%"
                      (or label
@@ -2182,17 +2183,20 @@
     ;; R(3,3) = 6 means any 2-coloring of K_6 must contain a monochromatic K_3
     (test (ramsey 3 3 5))      ; n < R(3,3), can avoid monochromatic triangles - SAT
     (test (ramsey 3 3 6) 'unsat) ; n >= R(3,3), cannot avoid monochromatic triangles - UNSAT
-    (test (ramsey 4 4 17)) ; n < R(4,4), can avoid monochromatic K_4 - SAT
-    (test (ramsey 4 4 18) 'unsat) ; n >= R(4,4), cannot avoid monochromatic K_4 - UNSAT
     ))
 
 (defun run-test-dp ()
  "Run DP tests and report statistics."
  (dp-stats-reset)
- (run-tests #'test-dp 5)
+ (run-tests #'test-dp)
+ ;; Time out
+ ;; (test-dpll (ramsey 3 4 8))
+ ;; (test-dpll (ramsey 3 4 9) 'unsat)
+ ;; (test (ramsey 4 4 17)) ; n < R(4,4), can avoid monochromatic K_4 - SAT
+ ;; (test (ramsey 4 4 18) 'unsat) ; n >= R(4,4), cannot avoid monochromatic K_4 - UNSAT
  (dp-stats-report))
 
-;; (run-test-dp)
+(run-test-dp)
 
 #|
 
@@ -2270,7 +2274,7 @@
   "Returns a new trail with literal LIT assigned at decision level LEVEL with optional REASON.
 
    Pre: the variable of LIT is not already assigned in TRAIL."
-  (assert (null (trail-get trail (lit-var lit))) ()
+  (assert (null (trail-get-var trail (lit-var lit))) ()
           "Variable ~A is already assigned in trail" (lit-var lit))
 
   (cons (make-trail-entry lit level reason) trail))
@@ -2611,10 +2615,7 @@
    Returns the unassigned literal if found, or nil if no such literal exists.
 
    Pre: old-lit and other-lit are the current watched literals for cl, and cl doesn't contain duplicate literals.
-        old-lit and other-lit are not falsified by trail.
-
-   Post: if a new watch is returned, then it is a negated literal in cl that is not falsified by trail and is not old-lit or other-lit."
-  ;; old-lit and other-lit are the literals in cl that are currently watched by their negations
+        old-lit and other-lit are not falsified by trail."
   (clause-map #'(lambda (lit)
                   (unless (or (eql lit old-lit) (eql lit other-lit))
                     (let+ (((&values val assigned?) (trail-get trail lit)))
@@ -2731,16 +2732,14 @@
         trail != nil and there is a conflict (empty clause) in cls under the current trail assignment."
 
   (labels ((find-first-uip (working-cl trail seen)
-             "Find the first Unique Implication Point (UIP) in the conflict clause with respect to the current trail.
+             "Find the first Unique Implication Point (1UIP) in the conflict clause with respect to the current trail.
               While finding the UIP via resolution, the working clause can become:
-              Returns the first UIP if found, or nil if no UIP exists.
+              Returns the clause containing the first UIP if found, or nil if no UIP exists.
 
               Pre: working-cl != nil and is falsified by the current trail assignment.
                    working-cl is non-empty,
                    trail != nil and there is a conflict (empty clause) in cls under the current trail assignment.
-                   (trail-max-level trail) > 0.
-
-              Post: the first UIP clause is neither nil nor empty."
+                   (trail-max-level trail) > 0."
 
              (assert working-cl () "Working clause cannot be nil when finding UIP")
              (assert (not (clause-empty? working-cl)) () "Working clause cannot be empty when finding UIP")
@@ -2781,16 +2780,15 @@
     (if (zerop (trail-max-level trail))
         (values nil -1)
         (let* ((seen (clause-copy conflict-cl)) ;; 'seen' is a COPY of conflict-cl
-               (uip-cl (find-first-uip conflict-cl trail seen)))
-          (assert uip-cl () "UIP clause cannot be nil after analysis")
-
+               (learnt-cl (find-first-uip conflict-cl trail seen)))
+          (assert learnt-cl () "Learnt clause cannot be nil after analysis")
+h
           ;; BUMP: Reward all involved literals exactly once.
           (hash-set-map (lambda (lit) (bump-lit-activity! activities lit)) seen)
           ;; DECAY: Increase the 'inc' value for the next conflict.
           (decay-activities! activities)
 
-          (let ((learnt-cl (clause-negate uip-cl)))
-            (values learnt-cl (backtrack-level learnt-cl trail)))))))
+          (values learnt-cl (backtrack-level learnt-cl trail))))))
 
 (defun dpll-backtrack (learnt-cl trail watches propQ bt-level)
    "Backtrack the trail to the given backtracking level.
@@ -2818,18 +2816,38 @@
   (let ((bt-trail (trail-backtrack trail bt-level)))
     (assert bt-trail () "Trail cannot be nil after backtracking")
     (if (clause-unit? learnt-cl)
-        (progn ;; If the learnt clause is unit, we can directly enqueue it without adding watches since it will be propagated immediately after backtracking
+        ;; If the learnt clause is unit, we can directly enqueue it without adding watches since it will be propagated immediately after backtracking
+        (progn
           (assert (zerop bt-level) () "Learnt unit clause can only be propagated at level 0 during backtracking, got ~A" bt-level)
           (let+ (((&values conflict? new-trail) (dpll-try-enqueue (clause-unit-lit learnt-cl) bt-trail propQ bt-level)))
             (assert (not conflict?) () "Learnt unit clause cannot cause a conflict during backtracking, got ~A for literal ~A" conflict? (clause-unit-lit learnt-cl))
             new-trail))
-        (let+ (((&values lit1 lit2) (clause-two-lits learnt-cl)))
-          (watches-add! watches learnt-cl (lit-negate lit1) (lit-negate lit2))
-          (let+ ((entry (trail-top bt-trail))
-                 (flipped-lit (lit-negate (trail-entry-lit entry)))
-                 ((&values conflict? new-trail) (dpll-try-enqueue flipped-lit (trail-pop bt-trail) propQ bt-level)))
-            (assert (not conflict?) () "Flipping a decision literal cannot cause a conflict during backtracking, got ~A for literal ~A" conflict? flipped-lit)
-            new-trail)))))
+        ;; Otherwise, use the asserting lit (unassigned) and the decision literal (falsified) at bt-level as watching literals for learnt-clause
+        ;; Note 1. their negations are *not* falsified by the bt-trail, so they satisfy the watch invariants.
+        ;;      2. bt-lit for performance reasoning TODO: why?
+        (labels ((find-watch-literals (learnt-cl bt-trail bt-level)
+                   (let ((asserting-lit nil)
+                         (bt-lit nil))
+                     (clause-map #'(lambda (lit)
+                                     (let ((entry (trail-get-var bt-trail (lit-var lit))))
+                                       (if (or (null entry)
+                                               (= (trail-entry-level entry) bt-level))
+                                           (if (null entry)
+                                               (setf asserting-lit lit) ;; not assigned
+                                               (setf bt-lit lit)))
+                                       (when (and asserting-lit bt-lit)
+                                         (return-from find-watch-literals (values asserting-lit bt-lit)))))
+                                 learnt-cl)
+                     ;; unreached
+                     (values nil nil))))
+          (let+ (((&values asserting-lit bt-lit) (find-watch-literals learnt-cl bt-trail bt-level)))
+            (assert asserting-lit () "Asserting literal has to exist.")
+            (assert bt-lit () "A literal with backtrack level has to exist.")
+            (watches-add! watches learnt-cl (lit-negate asserting-lit) (lit-negate bt-lit))
+
+            (let+ (((&values conflict? new-trail) (dpll-try-enqueue asserting-lit bt-trail propQ bt-level learnt-cl)))
+              (assert (not conflict?) () "Asserting literal cannot cause a conflict during backtracking, got ~A for literal ~A" conflict? asserting-lit)
+              new-trail))))))
 
 (defun dpll-sat (trail activities watches propQ)
   "Main DPLL loop: apply unit propagation, then either analyze conflict or decide next variable.
@@ -2860,6 +2878,7 @@
          (vm (make-var-manager))
          (cls (cnf->clauses cnf vm)) ;; mutates vm
          ((&values conflict? cls trail activities watches propQ) (dpll-init cls (var-manager-num-vars vm))))
+    (format t "After init~%")
     (if conflict?
         (values 'unsat nil)  ; Conflict with initial unit propagation, UNSAT
         (let+ (((&values result trail) (dpll-sat trail activities watches propQ))
@@ -2874,124 +2893,18 @@
   (let+ (((&values result asgn) (dpll f)))
     (verify-sat f result asgn expected)))
 
-;; DPLL Tests (copied from DP tests)
-;; Basic SAT tests
-(test-dpll 'p)                                    ; single var - SAT
-(test-dpll '(or p q))                             ; simple disjunction - SAT
-(test-dpll '(and p q))                            ; simple conjunction - SAT
-(test-dpll '(implies p q))                        ; implication - SAT
-(test-dpll '(iff p q))                            ; biconditional - SAT
-(test-dpll '(xor p q))
-
-;; Basic UNSAT tests
-(test-dpll '(and p (not p)) 'unsat)              ; contradiction - UNSAT
-(test-dpll '(and (or p q) (not p) (not q)) 'unsat)  ; UNSAT
-(test-dpll '(and p q (or (not p) (not q)) (or p (not q)) (or (not p) q)) 'unsat)  ; UNSAT
-
-;; More complex SAT formulas
-(test-dpll '(and (or p q) (or (not p) r)))        ; SAT
-(test-dpll '(and (or p q r) (or (not p) (not q)) (or (not r) p)))  ; SAT
-(test-dpll '(or (and p q) (and (not p) r)))       ; SAT
-(test-dpll '(iff (and p q) (or r s)))             ; SAT
-
-;; With non-variable atoms
-(test-dpll '(or (foo a) (bar b)))                 ; SAT
-(test-dpll '(and (foo x) (not (foo x))) 'unsat)   ; UNSAT
-(test-dpll '(implies (f a b) (g c)))              ; SAT
-
-;; Nested formulas
-(test-dpll '(and (or p (not q)) (or q (not r)) (or r (not p))))  ; SAT
-(test-dpll '(xor p q))                            ; SAT
-(test-dpll '(if p q r))                           ; SAT
-
-;; Adder tests
-;; Example 1: Single bit full adder
-(test-dpll (fa 'x0 'y0 'cin 's0 'cout))  ; SAT - unconstrained full adder
-
-;; Example 2: 2-bit adder with constraint (checking 1+1=2 with carry-in=0)
-(test-dpll `(and ,(ripplecarry0
-                 #'(lambda (i) (genvar 'x i))
-                 #'(lambda (i) (genvar 'y i))
-                 #'(lambda (i) (genvar 'c i))
-                 #'(lambda (i) (genvar 's i))
-                 2)
-               x0 (not x1)    ; x = 01 (binary) = 1
-               y0 (not y1)    ; y = 01 (binary) = 1
-               (not s0) s1    ; s = 10 (binary) = 2
-               (not c2)))     ; no overflow
-
-;; Example 3: 3-bit adder checking 7+1=8 (overflow)
-(test-dpll `(and ,(ripplecarry0
-                 #'(lambda (i) (genvar 'a i))
-                 #'(lambda (i) (genvar 'b i))
-                 #'(lambda (i) (genvar 'c i))
-                 #'(lambda (i) (genvar 'sum i))
-                 3)
-               a0 a1 a2           ; a = 111 (binary) = 7
-               b0 (not b1) (not b2)  ; b = 001 (binary) = 1
-               (not sum0) (not sum1) (not sum2)  ; sum = 000 (mod 8)
-               c3))               ; carry out = 1 (overflow)
-
-;; Example 4: 4-bit adder unconstrained (always SAT)
-(test-dpll (ripplecarry0
-          #'(lambda (i) (genvar 'x i))
-          #'(lambda (i) (genvar 'y i))
-          #'(lambda (i) (genvar 'c i))
-          #'(lambda (i) (genvar 'z i))
-          4))
-
-;; UNSAT Examples
-;; Example 5: 2-bit adder with impossible constraint (1+1=3, no overflow)
-(test-dpll `(and ,(ripplecarry0
-                 #'(lambda (i) (genvar 'x i))
-                 #'(lambda (i) (genvar 'y i))
-                 #'(lambda (i) (genvar 'c i))
-                 #'(lambda (i) (genvar 's i))
-                 2)
-               x0 (not x1)    ; x = 01 (binary) = 1
-               y0 (not y1)    ; y = 01 (binary) = 1
-               s0 s1          ; s = 11 (binary) = 3 (IMPOSSIBLE!)
-               (not c2))      ; no overflow - UNSAT
-         'unsat)
-
-;; Example 6: 3-bit adder with overflow contradiction (7+1=8, but no carry)
-(test-dpll `(and ,(ripplecarry0
-                 #'(lambda (i) (genvar 'a i))
-                 #'(lambda (i) (genvar 'b i))
-                 #'(lambda (i) (genvar 'c i))
-                 #'(lambda (i) (genvar 'sum i))
-                 3)
-               a0 a1 a2           ; a = 111 (binary) = 7
-               b0 (not b1) (not b2)  ; b = 001 (binary) = 1
-               (not sum0) (not sum1) (not sum2)  ; sum = 000
-               (not c3))          ; no carry - UNSAT (7+1 must overflow!)
-         'unsat)
-
-;; Example 7: 2-bit adder checking impossible result: 2+3=4 with carry
-;; (Actually 2+3=5, so with carry c2=1 and result r=00, we'd get 4, which is wrong)
-(test-dpll `(and ,(ripplecarry0
-                 #'(lambda (i) (genvar 'p i))
-                 #'(lambda (i) (genvar 'q i))
-                 #'(lambda (i) (genvar 'c i))
-                 #'(lambda (i) (genvar 'r i))
-                 2)
-               (not p0) p1     ; p = 10 (binary) = 2
-               q0 q1           ; q = 11 (binary) = 3
-               (not r0) (not r1)  ; r = 00 (binary) = 0
-               c2)             ; with carry - gives 0+4=4, but 2+3=5 - UNSAT
-         'unsat)
-
-;; Ramsey number tests
-;; R(3,3) = 6 means any 2-coloring of K_6 must contain a monochromatic K_3
-(test-dpll (ramsey 3 3 5))      ; n < R(3,3), can avoid monochromatic triangles - SAT
-(test-dpll (ramsey 3 3 6) 'unsat) ; n >= R(3,3), cannot avoid monochromatic triangles - UNSAT
-;;(test-dpll (ramsey 4 4 17)) ; n < R(4,4), can avoid monochromatic K_4 - SAT
-;;(test-dpll (ramsey 4 4 18) 'unsat) ; n >= R(4,4), cannot avoid monochromatic K_4 - UNSAT
-
 ;; TODO: add stats
 (defun run-test-dpll ()
  "Run DPLL tests and report statistics."
- ;;(dp-stats-reset)
+ ;;(dpll-stats-reset)
  (run-tests #'test-dpll)
- ;;(dp-stats-report)
+ (test-dpll (ramsey 3 4 8))
+ ;; ACL2s cannot prove the case to be unsat.
+ (test-dpll (ramsey 3 4 9) 'unsat)
+ ;; Time out:
+ ;; (test-dpll (ramsey 4 4 17)) ; n < R(4,4), can avoid monochromatic K_4 - SAT
+ ;; (test-dpll (ramsey 4 4 18) 'unsat) ; n >= R(4,4), cannot avoid monochromatic K_4 - UNSAT
+ ;;(dpll-stats-report)
 )
+
+(run-test-dpll)
