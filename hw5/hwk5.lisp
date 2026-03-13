@@ -2447,19 +2447,19 @@
 (defun trail-empty? (trail) (null trail))
 
 (defun trail-top (trail)
-  (assert (not (trail-empty? trail)) () "Trail is empty, no top entry")
+  (dassert (not (trail-empty? trail)) "Trail is empty, no top entry")
   (first trail))
 
 (defun trail-pop (trail)
-  (assert (not (trail-empty? trail)) () "Trail is empty, cannot pop")
+  (dassert (not (trail-empty? trail)) "Trail is empty, cannot pop")
   (rest trail))
 
 (defun trail-push (trail lit level &optional reason)
   "Returns a new trail with literal LIT assigned at decision level LEVEL with optional REASON.
 
    Pre: the variable of LIT is not already assigned in TRAIL."
-  (assert (null (trail-get-var trail (lit-var lit))) ()
-          "Variable ~A is already assigned in trail" (lit-var lit))
+  (dassert (null (trail-get-var trail (lit-var lit)))
+           "Variable ~A is already assigned in trail" (lit-var lit))
 
   (cons (make-trail-entry lit level reason) trail))
 
@@ -2505,8 +2505,8 @@
 
    Pre: LEVEL >= 0 and LEVEL <= (trail-max-level trail)
         The TRAIL is well-formed."
-  (assert (and (>= level 0) (<= level (trail-max-level trail))) ()
-          "Invalid backtrack level ~A for trail with max level ~A" level (trail-max-level trail))
+  (dassert (and (>= level 0) (<= level (trail-max-level trail)))
+           "Invalid backtrack level ~A for trail with max level ~A" level (trail-max-level trail))
   (member-if #'(lambda (entry)
                  (<= (trail-entry-level entry) level))
              trail))
@@ -2519,10 +2519,9 @@
     (dolist (entry trail)
       (let ((var (trail-entry-var entry))
             (val (trail-entry-val entry)))
-        (assert (let+ (((&values assigned-val assigned?) (assignment-get asgn var)))
-                  (or (not assigned?) (eql assigned-val val)))
-                ()
-                "Variable ~A assignment is inconsistent with values ~A and ~A" var assigned-val val)
+        (dassert (let+ (((&values assigned-val assigned?) (assignment-get asgn var)))
+                   (or (not assigned?) (eql assigned-val val)))
+                 "Variable ~A assignment is inconsistent with values ~A and ~A" var assigned-val val)
         (assignment-set asgn var val)))
     asgn))
 
@@ -2743,7 +2742,7 @@
         reason is the clause that caused this propagation (nil for decisions and initial unit clauses)
    Post: if conflict? = nil then propQ has lit enqueued and new-trail is trail extended with lit's assignment at level LEVEL with reason REASON.
          else propQ and new-trail are unchanged (caller should handle the conflict)."
-  (assert (>= level 0) () "Decision level must be non-negative, got ~A" level)
+  (dassert (>= level 0) "Decision level must be non-negative, got ~A" level)
   (let+ (((&values val assigned?) (trail-get trail lit)))
     (if assigned?
         (if val
@@ -2877,7 +2876,7 @@
             (dpll-stats-inc-decisions)
             (dpll-stats-update-max-level new-level)
             (let+ (((&values conflict? new-trail) (dpll-try-enqueue lit trail propQ new-level)))
-              (assert (not conflict?) () "Conflict cannot occur when making a new decision, got ~A for literal ~A" conflict? lit)
+              (dassert (not conflict?) "Conflict cannot occur when making a new decision, got ~A for literal ~A" conflict? lit)
               (values t new-trail)))))))
 
 ;; TODO: incorporate these into notes
@@ -2930,25 +2929,25 @@
                    trail != nil and there is a conflict (empty clause) in cls under the current trail assignment.
                    (trail-max-level trail) > 0."
 
-             (assert working-cl () "Working clause cannot be nil when finding UIP")
-             (assert (not (clause-empty? working-cl)) () "Working clause cannot be empty when finding UIP")
-             (assert trail () "Trail cannot be nil when finding UIP")
-             (assert (> (trail-max-level trail) 0) () "Trail must have at least one decision level when finding UIP")
+             (dassert working-cl "Working clause cannot be nil when finding UIP")
+             (dassert (not (clause-empty? working-cl)) "Working clause cannot be empty when finding UIP")
+             (dassert trail "Trail cannot be nil when finding UIP")
+             (dassert (> (trail-max-level trail) 0) "Trail must have at least one decision level when finding UIP")
 
              (let+ (((&values most-recent second-most-recent) (trail-most-recent-two trail (trail-max-level trail) working-cl)))
-              (assert most-recent () "There must be at least one entry from current level in trail for conflict clause ~A" working-cl)
+              (dassert most-recent "There must be at least one entry from current level in trail for conflict clause ~A" working-cl)
               (if (null second-most-recent)
                   ;; Only one literal from current level, this is the UIP
                   working-cl
                   ;; More than one literal from current level, resolve with reason of most recent entry and continue searching
                   (let ((reason-cl (trail-entry-reason most-recent)))
-                    (assert reason-cl () "Reason clause cannot be nil for non-decision entries in trail")
+                    (dassert reason-cl "Reason clause cannot be nil for non-decision entries in trail")
 
                     ;; Add literals from the reason clause to 'seen'
                     (clause-map #'(lambda (lit) (hash-set-add seen lit)) reason-cl)
 
                     (let ((resolved-cls (resolve-var (list working-cl reason-cl) (trail-entry-var most-recent))))
-                      (assert resolved-cls () "Resolution must produce at least one clause")
+                      (dassert resolved-cls "Resolution must produce at least one clause")
                       (find-first-uip (first resolved-cls) trail seen))))))
 
            (backtrack-level (learnt-cl trail)
@@ -2970,7 +2969,7 @@
         (values nil -1)
         (let* ((seen (clause-copy conflict-cl)) ;; 'seen' is a COPY of conflict-cl
                (learnt-cl (find-first-uip conflict-cl trail seen)))
-          (assert learnt-cl () "Learnt clause cannot be nil after analysis")
+          (dassert learnt-cl "Learnt clause cannot be nil after analysis")
 
           ;; Stats: track conflict and learnt clause
           (dpll-stats-inc-conflicts)
@@ -2999,25 +2998,25 @@
     Post: the returned trail != nil and its top entry is a decision at bt-level with the opposite assignment.
           propQ contains the unit literal with the flipped assignment."
 
-  (assert learnt-cl () "Learnt clause cannot be nil for backtracking")
-  (assert trail () "Trail cannot be empty when backtracking")
-  (assert (>= bt-level 0) () "Backtracking level must be non-negative: ~A" bt-level)
+  (dassert learnt-cl "Learnt clause cannot be nil for backtracking")
+  (dassert trail "Trail cannot be empty when backtracking")
+  (dassert (>= bt-level 0) "Backtracking level must be non-negative: ~A" bt-level)
   (let ((max-level (trail-max-level trail)))
-    (assert (< bt-level max-level) () "Backtracking level ~A must be less than current max decision level ~A in trail" bt-level max-level))
-  (assert (queue-empty? propQ) () "Propagation queue must be empty before backtracking")
+    (dassert (< bt-level max-level) "Backtracking level ~A must be less than current max decision level ~A in trail" bt-level max-level))
+  (dassert (queue-empty? propQ) "Propagation queue must be empty before backtracking")
 
   ;; Stats: track non-chronological backtracks (backjumps)
   (when (< bt-level (1- (trail-max-level trail)))
     (dpll-stats-inc-backjumps))
 
   (let ((bt-trail (trail-backtrack trail bt-level)))
-    (assert bt-trail () "Trail cannot be nil after backtracking")
+    (dassert bt-trail "Trail cannot be nil after backtracking")
     (if (clause-unit? learnt-cl)
         ;; If the learnt clause is unit, we can directly enqueue it without adding watches since it will be propagated immediately after backtracking
         (progn
-          (assert (zerop bt-level) () "Learnt unit clause can only be propagated at level 0 during backtracking, got ~A" bt-level)
+          (dassert (zerop bt-level) "Learnt unit clause can only be propagated at level 0 during backtracking, got ~A" bt-level)
           (let+ (((&values conflict? new-trail) (dpll-try-enqueue (clause-unit-lit learnt-cl) bt-trail propQ bt-level)))
-            (assert (not conflict?) () "Learnt unit clause cannot cause a conflict during backtracking, got ~A for literal ~A" conflict? (clause-unit-lit learnt-cl))
+            (dassert (not conflict?) "Learnt unit clause cannot cause a conflict during backtracking, got ~A for literal ~A" conflict? (clause-unit-lit learnt-cl))
             new-trail))
         ;; Otherwise, use the asserting lit (unassigned) and the decision literal (falsified) at bt-level as watching literals for learnt-clause
         ;; Note 1. their negations are *not* falsified by the bt-trail, so they satisfy the watch invariants.
@@ -3038,12 +3037,12 @@
                      ;; unreached
                      (values nil nil))))
           (let+ (((&values asserting-lit bt-lit) (find-watch-literals learnt-cl bt-trail bt-level)))
-            (assert asserting-lit () "Asserting literal has to exist.")
-            (assert bt-lit () "A literal with backtrack level has to exist.")
+            (dassert asserting-lit "Asserting literal has to exist.")
+            (dassert bt-lit "A literal with backtrack level has to exist.")
             (watches-add! watches learnt-cl (lit-negate asserting-lit) (lit-negate bt-lit))
 
             (let+ (((&values conflict? new-trail) (dpll-try-enqueue asserting-lit bt-trail propQ bt-level learnt-cl)))
-              (assert (not conflict?) () "Asserting literal cannot cause a conflict during backtracking, got ~A for literal ~A" conflict? asserting-lit)
+              (dassert (not conflict?) "Asserting literal cannot cause a conflict during backtracking, got ~A for literal ~A" conflict? asserting-lit)
               new-trail))))))
 
 (defun dpll-sat (trail activities watches propQ)
