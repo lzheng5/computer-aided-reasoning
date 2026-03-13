@@ -2190,10 +2190,10 @@
  (dp-stats-reset)
  (run-tests #'test-dp)
  ;; Time out
- ;; (test-dpll (ramsey 3 4 8))
- ;; (test-dpll (ramsey 3 4 9) 'unsat)
- ;; (test (ramsey 4 4 17)) ; n < R(4,4), can avoid monochromatic K_4 - SAT
- ;; (test (ramsey 4 4 18) 'unsat) ; n >= R(4,4), cannot avoid monochromatic K_4 - UNSAT
+ ;; (test-dp (ramsey 3 4 8))
+ ;; (test-dp (ramsey 3 4 9) 'unsat)
+ ;; (test-dp (ramsey 4 4 17)) ; n < R(4,4), can avoid monochromatic K_4 - SAT
+ ;; (test-dp (ramsey 4 4 18) 'unsat) ; n >= R(4,4), cannot avoid monochromatic K_4 - UNSAT
  (dp-stats-report))
 
 (run-test-dp)
@@ -2473,6 +2473,7 @@
 ;;; Decision 3: Centralized Rescaling.
 ;;;             We only check for floating-point overflow once per
 ;;;             conflict inside the decay function.
+;;; Decision 4: Use random values between (0.0, 1.0) as initial scores
 
 ;; Standard VSIDS parameters from literature (can be tuned for better performance)
 (defparameter *literal-decay-factor* 0.95d0)
@@ -2488,7 +2489,7 @@
   (let* ((num-lits (* 2 num-vars))
          (arr (make-array num-lits :element-type 'double-float)))
     (dotimes (i num-lits)
-      ;; Small random noise (0.0-1.0) allows VSIDS to override
+      ;; Small random noise (0.0, 1.0) allows VSIDS to override
       ;; initial hunches after the very first conflict.
       (setf (aref arr i) (random 1.0d0)))
     (%make-activities :scores arr :inc 1.0d0)))
@@ -2878,7 +2879,7 @@ h
          (vm (make-var-manager))
          (cls (cnf->clauses cnf vm)) ;; mutates vm
          ((&values conflict? cls trail activities watches propQ) (dpll-init cls (var-manager-num-vars vm))))
-    (format t "After init~%")
+    (dbg "After init~%")
     (if conflict?
         (values 'unsat nil)  ; Conflict with initial unit propagation, UNSAT
         (let+ (((&values result trail) (dpll-sat trail activities watches propQ))
@@ -2899,7 +2900,7 @@ h
  ;;(dpll-stats-reset)
  (run-tests #'test-dpll)
  (test-dpll (ramsey 3 4 8))
- ;; ACL2s cannot prove the case to be unsat.
+ ;; ACL2s cannot prove the case to be unsat (but no counter examples).
  (test-dpll (ramsey 3 4 9) 'unsat)
  ;; Time out:
  ;; (test-dpll (ramsey 4 4 17)) ; n < R(4,4), can avoid monochromatic K_4 - SAT
