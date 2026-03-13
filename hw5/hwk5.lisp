@@ -1087,7 +1087,7 @@
          (unchained (tseitin-unchain simplified))
          (cnf (tseitin-transform unchained))
          (simplified-cnf (p-simplify cnf))) ;; p-simplify preserves CNF
-    (values simplified-cnf amap)))
+    (values simplified-cnf skeleton amap)))
 
 (defun acl2s-valid? (f)
   "Check if f is valid (tautology) using ACL2s"
@@ -1461,7 +1461,7 @@
   "Get variable's value from assignment. Returns (values val present-p)."
   (gethash var asgn))
 
-(defun assignment->alist (asgn vm vars amap)
+(defun assignment->alist (asgn vm amap)
   "Convert numeric assignment hash table to symbolic alist using var-manager.
    asgn contains assigned variables in the original formula, tseitin-generated variables, and skeleton variables.
    The output includes assignments for all the original variables (excluding variables used in atoms) and atoms.
@@ -1474,9 +1474,7 @@
                         (orig-atom (and amap (car (rassoc sym-var amap :test #'equal))))
                         ;; Use original atom if found, otherwise use the variable
                         (key (or orig-atom sym-var)))
-                   (when (or (null vars)
-                             (in key vars)
-                             orig-atom)  ;; Include atoms even if not in vars
+                   (when key
                      (push (cons key val) result))))
              asgn)
 
@@ -1486,7 +1484,7 @@
       (dolist (pair amap)
         (let ((atom (car pair)))
           (unless (assoc atom result :test #'equal)
-            (dp-debug "assignment->alist assigned atom ~A to t" atom)
+            (dbg "assignment->alist assigned atom ~A to t" atom)
             (push (cons atom t) result)))))
 
     result))
@@ -1564,12 +1562,15 @@
   `(when (eq +debug-mode+ 'debug)
      (assert ,test-form () ,@(when format-string (list* format-string format-args)))))
 
-;; DP Stats globals
+;;; ============================================================
+;;; DP Stats
+;;; ============================================================
+
 ;; Formula statistics
 (defparameter *dp-stats-orig-vars* 0)       ; Variables in original skeleton formula
-(defparameter *dp-stats-orig-clauses* 0)    ; Clauses in original skeleton formula
 (defparameter *dp-stats-cnf-vars* 0)        ; Variables after Tseitin transformation
 (defparameter *dp-stats-cnf-clauses* 0)     ; Clauses after Tseitin transformation
+(defparameter *dp-stats-max-clause-size* 0) ; Maximum number of literals in a clause
 
 ;; Search statistics
 (defparameter *dp-stats-unit-count* 0)      ; Number of unit propagations
@@ -1581,15 +1582,16 @@
 (defparameter *dp-stats-time-unit* 0)       ; Time spent in unit propagation (internal-time-units)
 (defparameter *dp-stats-time-pure* 0)       ; Time spent in pure literal elimination
 (defparameter *dp-stats-time-resolve* 0)    ; Time spent in resolution
-(defparameter *dp-stats-time-total* 0)      ; Total time spent in dp
+(defparameter *dp-stats-time-sat* 0)        ; Time spent in SAT solving (dp-sat)
+(defparameter *dp-stats-time-total* 0)      ; Total time including preprocessing
 
 (defmacro dp-stats-reset ()
   "Reset all stats counters"
   `(when (eq +debug-mode+ 'stats)
      (setf *dp-stats-orig-vars* 0
-           *dp-stats-orig-clauses* 0
            *dp-stats-cnf-vars* 0
            *dp-stats-cnf-clauses* 0
+           *dp-stats-max-clause-size* 0
            *dp-stats-unit-count* 0
            *dp-stats-pure-count* 0
            *dp-stats-resolve-count* 0
@@ -1597,15 +1599,16 @@
            *dp-stats-time-unit* 0
            *dp-stats-time-pure* 0
            *dp-stats-time-resolve* 0
+           *dp-stats-time-sat* 0
            *dp-stats-time-total* 0)))
 
-(defmacro dp-stats-set-formula (orig-vars orig-clauses cnf-vars cnf-clauses)
+(defmacro dp-stats-set-formula (orig-vars cnf-vars cnf-clauses max-clause-size)
   "Set formula statistics"
   `(when (eq +debug-mode+ 'stats)
      (setf *dp-stats-orig-vars* ,orig-vars
-           *dp-stats-orig-clauses* ,orig-clauses
            *dp-stats-cnf-vars* ,cnf-vars
-           *dp-stats-cnf-clauses* ,cnf-clauses)))
+           *dp-stats-cnf-clauses* ,cnf-clauses
+           *dp-stats-max-clause-size* ,max-clause-size)))
 
 (defmacro dp-stats-inc-unit ()
   "Increment unit propagation count"
@@ -1636,11 +1639,12 @@
                       (:unit '*dp-stats-time-unit*)
                       (:pure '*dp-stats-time-pure*)
                       (:resolve '*dp-stats-time-resolve*)
+                      (:sat '*dp-stats-time-sat*)
                       (:total '*dp-stats-time-total*))
                    (- (get-internal-real-time) ,start))))
          (progn ,@body))))
 
-(defmacro dp-stats-time->ms (time)
+(defmacro stats-time->ms (time)
   "Convert internal time units to milliseconds"
   `(* 1000.0 (/ ,time internal-time-units-per-second)))
 
@@ -1649,26 +1653,29 @@
   `(when (eq +debug-mode+ 'stats)
      (format t "~%=== DP Statistics ===~%")
      (format t "--- Formula Info ---~%")
-     (format t "Original formula:     ~A vars, ~A clauses~%" 
-             *dp-stats-orig-vars* *dp-stats-orig-clauses*)
+     (format t "Original vars:        ~A~%" *dp-stats-orig-vars*)
      (format t "After Tseitin:        ~A vars, ~A clauses~%" 
              *dp-stats-cnf-vars* *dp-stats-cnf-clauses*)
+     (format t "Max clause size:      ~A~%" *dp-stats-max-clause-size*)
      (format t "--- Search Stats ---~%")
      (format t "Unit propagations:    ~A~%" *dp-stats-unit-count*)
      (format t "Pure literals:        ~A~%" *dp-stats-pure-count*)
      (format t "Resolution steps:     ~A~%" *dp-stats-resolve-count*)
      (format t "Max clauses:          ~A~%" *dp-stats-max-clauses*)
      (format t "--- Timing ---~%")
-     (format t "Time (unit):          ~,3F ms (~,1F%)~%"
-             (dp-stats-time->ms *dp-stats-time-unit*)
-             (if (> *dp-stats-time-total* 0) (* 100.0 (/ *dp-stats-time-unit* *dp-stats-time-total*)) 0))
-     (format t "Time (pure):          ~,3F ms (~,1F%)~%"
-             (dp-stats-time->ms *dp-stats-time-pure*)
-             (if (> *dp-stats-time-total* 0) (* 100.0 (/ *dp-stats-time-pure* *dp-stats-time-total*)) 0))
-     (format t "Time (resolve):       ~,3F ms (~,1F%)~%"
-             (dp-stats-time->ms *dp-stats-time-resolve*)
-             (if (> *dp-stats-time-total* 0) (* 100.0 (/ *dp-stats-time-resolve* *dp-stats-time-total*)) 0))
-     (format t "Time (total):         ~,3F ms~%" (dp-stats-time->ms *dp-stats-time-total*))
+     (format t "Time (unit/sat):      ~,3F ms (~,1F%)~%"
+             (stats-time->ms *dp-stats-time-unit*)
+             (if (> *dp-stats-time-sat* 0) (* 100.0 (/ *dp-stats-time-unit* *dp-stats-time-sat*)) 0))
+     (format t "Time (pure/sat):      ~,3F ms (~,1F%)~%"
+             (stats-time->ms *dp-stats-time-pure*)
+             (if (> *dp-stats-time-sat* 0) (* 100.0 (/ *dp-stats-time-pure* *dp-stats-time-sat*)) 0))
+     (format t "Time (resolve/sat):   ~,3F ms (~,1F%)~%"
+             (stats-time->ms *dp-stats-time-resolve*)
+             (if (> *dp-stats-time-sat* 0) (* 100.0 (/ *dp-stats-time-resolve* *dp-stats-time-sat*)) 0))
+     (format t "Time (sat/total):     ~,3F ms (~,1F%)~%" 
+             (stats-time->ms *dp-stats-time-sat*)
+             (if (> *dp-stats-time-total* 0) (* 100.0 (/ *dp-stats-time-sat* *dp-stats-time-total*)) 0))
+     (format t "Time (total):         ~,3F ms~%" (stats-time->ms *dp-stats-time-total*))
      (format t "=====================~%")))
 
 ;;; ============================================================
@@ -1926,21 +1933,22 @@
 (defun dp (f)
   "Main DP function: takes a formula f, converts to CNF, and applies DP algorithm.
    Returns 'sat or 'unsat with assignment alist."
-  (let+ ((orig-vars (pvars f))
-         ((&values cnf amap) (tseitin f))
-         (vm (make-var-manager))
-         (cls (cnf->clauses cnf vm)) ;; mutates vm
-         (asgn (make-assignment)))
-    ;; Set formula statistics
-    (dp-stats-set-formula (length orig-vars)
-                          (if (and (consp f) (eq (car f) 'and)) (length (cdr f)) 1)
-                          (var-manager-num-vars vm)
-                          (length cls))
-    (let+ (((&values result resolve-map) (dp-stats-time :total (dp-sat cls asgn nil))) ;; mutates asgn
-           (result-asgn (when (eq result 'sat)
-                          (dp-reconstruct cls asgn resolve-map) ;; mutates asgn
-                          (assignment->alist asgn vm orig-vars amap))))
-      (values result result-asgn))))
+  (dp-stats-time :total
+    (let+ (((&values cnf skeleton amap) (tseitin f))
+           (vm (make-var-manager))
+           (cls (cnf->clauses cnf vm)) ;; mutates vm
+           (asgn (make-assignment)))
+
+      (dp-stats-set-formula (length (pvars skeleton))
+                            (var-manager-num-vars vm)
+                            (length cls)
+                            (if cls (apply #'max (mapcar #'clause-size cls)) 0))
+
+      (let+ (((&values result resolve-map) (dp-stats-time :sat (dp-sat cls asgn nil))) ;; mutates asgn
+             (result-asgn (when (eq result 'sat)
+                            (dp-reconstruct cls asgn resolve-map) ;; mutates asgn
+                            (assignment->alist asgn vm amap))))
+        (values result result-asgn)))))
 
 (defun subst-formula (f asgn)
   "Substitute variables in formula f according to asgn (alist)"
@@ -2270,9 +2278,9 @@
 
 ;; Formula statistics (computed once per problem)
 (defparameter *dpll-stats-orig-vars* 0)        ; Variables in original skeleton formula
-(defparameter *dpll-stats-orig-clauses* 0)     ; Clauses in original skeleton formula  
 (defparameter *dpll-stats-cnf-vars* 0)         ; Variables after Tseitin transformation
 (defparameter *dpll-stats-cnf-clauses* 0)      ; Clauses after Tseitin transformation
+(defparameter *dpll-stats-max-clause-size* 0)  ; Maximum number of literals in a clause
 
 ;; Search statistics (accumulated during solving)
 (defparameter *dpll-stats-decisions* 0)        ; Number of decisions made
@@ -2284,7 +2292,8 @@
 (defparameter *dpll-stats-backjumps* 0)        ; Number of non-chronological backtracks
 
 ;; Timing statistics (internal time units)
-(defparameter *dpll-stats-time-total* 0)       ; Total time
+(defparameter *dpll-stats-time-total* 0)       ; Total time including preprocessing
+(defparameter *dpll-stats-time-sat* 0)         ; Time in SAT solving (init + solve)
 (defparameter *dpll-stats-time-propagate* 0)   ; Time in unit propagation
 (defparameter *dpll-stats-time-analyze* 0)     ; Time in conflict analysis
 (defparameter *dpll-stats-time-backtrack* 0)   ; Time in backtracking
@@ -2294,9 +2303,9 @@
   "Reset all DPLL stats counters"
   `(when (eq +debug-mode+ 'stats)
      (setf *dpll-stats-orig-vars* 0
-           *dpll-stats-orig-clauses* 0
            *dpll-stats-cnf-vars* 0
            *dpll-stats-cnf-clauses* 0
+           *dpll-stats-max-clause-size* 0
            *dpll-stats-decisions* 0
            *dpll-stats-propagations* 0
            *dpll-stats-conflicts* 0
@@ -2305,18 +2314,19 @@
            *dpll-stats-max-level* 0
            *dpll-stats-backjumps* 0
            *dpll-stats-time-total* 0
+           *dpll-stats-time-sat* 0
            *dpll-stats-time-propagate* 0
            *dpll-stats-time-analyze* 0
            *dpll-stats-time-backtrack* 0
            *dpll-stats-time-decide* 0)))
 
-(defmacro dpll-stats-set-formula (orig-vars orig-clauses cnf-vars cnf-clauses)
+(defmacro dpll-stats-set-formula (orig-vars cnf-vars cnf-clauses max-clause-size)
   "Set formula statistics"
   `(when (eq +debug-mode+ 'stats)
      (setf *dpll-stats-orig-vars* ,orig-vars
-           *dpll-stats-orig-clauses* ,orig-clauses
            *dpll-stats-cnf-vars* ,cnf-vars
-           *dpll-stats-cnf-clauses* ,cnf-clauses)))
+           *dpll-stats-cnf-clauses* ,cnf-clauses
+           *dpll-stats-max-clause-size* ,max-clause-size)))
 
 (defmacro dpll-stats-inc-decisions ()
   `(when (eq +debug-mode+ 'stats)
@@ -2354,23 +2364,20 @@
                       (:analyze '*dpll-stats-time-analyze*)
                       (:backtrack '*dpll-stats-time-backtrack*)
                       (:decide '*dpll-stats-time-decide*)
+                      (:sat '*dpll-stats-time-sat*)
                       (:total '*dpll-stats-time-total*))
                    (- (get-internal-real-time) ,start))))
          (progn ,@body))))
-
-(defmacro dpll-stats-time->ms (time)
-  "Convert internal time units to milliseconds"
-  `(* 1000.0 (/ ,time internal-time-units-per-second)))
 
 (defmacro dpll-stats-report ()
   "Print DPLL statistics report"
   `(when (eq +debug-mode+ 'stats)
      (format t "~%=== DPLL Statistics ===~%")
      (format t "--- Formula Info ---~%")
-     (format t "Original formula:     ~A vars, ~A clauses~%" 
-             *dpll-stats-orig-vars* *dpll-stats-orig-clauses*)
+     (format t "Original vars:        ~A~%" *dpll-stats-orig-vars*)
      (format t "After Tseitin:        ~A vars, ~A clauses~%" 
              *dpll-stats-cnf-vars* *dpll-stats-cnf-clauses*)
+     (format t "Max clause size:      ~A~%" *dpll-stats-max-clause-size*)
      (format t "--- Search Stats ---~%")
      (format t "Decisions:            ~A~%" *dpll-stats-decisions*)
      (format t "Propagations:         ~A~%" *dpll-stats-propagations*)
@@ -2383,24 +2390,28 @@
      (format t "Max decision level:   ~A~%" *dpll-stats-max-level*)
      (format t "Backjumps:            ~A~%" *dpll-stats-backjumps*)
      (format t "--- Timing ---~%")
-     (format t "Time (propagate):     ~,3F ms (~,1F%)~%"
-             (dpll-stats-time->ms *dpll-stats-time-propagate*)
+     (format t "Time (propagate/sat): ~,3F ms (~,1F%)~%"
+             (stats-time->ms *dpll-stats-time-propagate*)
+             (if (> *dpll-stats-time-sat* 0) 
+                 (* 100.0 (/ *dpll-stats-time-propagate* *dpll-stats-time-sat*)) 0))
+     (format t "Time (analyze/sat):   ~,3F ms (~,1F%)~%"
+             (stats-time->ms *dpll-stats-time-analyze*)
+             (if (> *dpll-stats-time-sat* 0) 
+                 (* 100.0 (/ *dpll-stats-time-analyze* *dpll-stats-time-sat*)) 0))
+     (format t "Time (backtrack/sat): ~,3F ms (~,1F%)~%"
+             (stats-time->ms *dpll-stats-time-backtrack*)
+             (if (> *dpll-stats-time-sat* 0) 
+                 (* 100.0 (/ *dpll-stats-time-backtrack* *dpll-stats-time-sat*)) 0))
+     (format t "Time (decide/sat):    ~,3F ms (~,1F%)~%"
+             (stats-time->ms *dpll-stats-time-decide*)
+             (if (> *dpll-stats-time-sat* 0) 
+                 (* 100.0 (/ *dpll-stats-time-decide* *dpll-stats-time-sat*)) 0))
+     (format t "Time (sat/total):     ~,3F ms (~,1F%)~%" 
+             (stats-time->ms *dpll-stats-time-sat*)
              (if (> *dpll-stats-time-total* 0) 
-                 (* 100.0 (/ *dpll-stats-time-propagate* *dpll-stats-time-total*)) 0))
-     (format t "Time (analyze):       ~,3F ms (~,1F%)~%"
-             (dpll-stats-time->ms *dpll-stats-time-analyze*)
-             (if (> *dpll-stats-time-total* 0) 
-                 (* 100.0 (/ *dpll-stats-time-analyze* *dpll-stats-time-total*)) 0))
-     (format t "Time (backtrack):     ~,3F ms (~,1F%)~%"
-             (dpll-stats-time->ms *dpll-stats-time-backtrack*)
-             (if (> *dpll-stats-time-total* 0) 
-                 (* 100.0 (/ *dpll-stats-time-backtrack* *dpll-stats-time-total*)) 0))
-     (format t "Time (decide):        ~,3F ms (~,1F%)~%"
-             (dpll-stats-time->ms *dpll-stats-time-decide*)
-             (if (> *dpll-stats-time-total* 0) 
-                 (* 100.0 (/ *dpll-stats-time-decide* *dpll-stats-time-total*)) 0))
+                 (* 100.0 (/ *dpll-stats-time-sat* *dpll-stats-time-total*)) 0))
      (format t "Time (total):         ~,3F ms~%" 
-             (dpll-stats-time->ms *dpll-stats-time-total*))
+             (stats-time->ms *dpll-stats-time-total*))
      (format t "=======================~%")))
 
 ;; ==============================================================
@@ -3061,23 +3072,22 @@
   "Main DPLL function: takes a formula f, converts to CNF, and applies DPLL algorithm.
    Returns 'sat with assignment alist or 'unsat with nil."
   (dpll-stats-time :total
-    (let+ ((orig-vars (pvars f))
-           ((&values cnf amap) (tseitin f))
+    (let+ (((&values cnf skeleton amap) (tseitin f))
            (vm (make-var-manager))
            (cls (cnf->clauses cnf vm))) ;; mutates vm
-      ;; Set formula statistics
-      (dpll-stats-set-formula (length orig-vars) 
-                              (if (and (consp f) (eq (car f) 'and)) (length (cdr f)) 1)
+
+      (dpll-stats-set-formula (length (pvars skeleton)) 
                               (var-manager-num-vars vm)
-                              (length cls))
-      (let+ (((&values conflict? cls trail activities watches propQ) (dpll-init cls (var-manager-num-vars vm))))
-        (dbg "After init~%")
+                              (length cls)
+                              (if cls (apply #'max (mapcar #'clause-size cls)) 0))
+      (dbg "After init~%")
+      (let+ (((&values conflict? cls trail activities watches propQ) (dpll-stats-time :sat (dpll-init cls (var-manager-num-vars vm)))))
         (if conflict?
             (values 'unsat nil)  ; Conflict with initial unit propagation, UNSAT
-            (let+ (((&values result trail) (dpll-sat trail activities watches propQ))
-                   (result-asgn (when (eq result 'sat)
+            (let+ (((&values result trail) (dpll-stats-time :sat (dpll-sat trail activities watches propQ)))
+                    (result-asgn (when (eq result 'sat)
                                   (let ((asgn (trail->assignment trail)))
-                                    (assignment->alist asgn vm orig-vars amap)))))
+                                    (assignment->alist asgn vm amap)))))
               (values result result-asgn)))))))
 
 (defun test-dpll (f &optional (expected 'sat))
