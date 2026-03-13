@@ -1396,7 +1396,7 @@
   "Apply function fn to each literal in clause (for side effects only)"
   (hash-set-map fn cl))
 
-(defun clause-negate (cl) 
+(defun clause-negate (cl)
   "Negate a clause"
   (let ((new-cl (make-hash-set)))
     (clause-map #'(lambda (lit) (hash-set-add new-cl (lit-negate lit))) cl)
@@ -1954,7 +1954,7 @@
     (verify-sat f result asgn expected)))
 
 ;; ================================================
-;; Tests 
+;; Tests
 ;; ================================================
 
 ;; Adder circuit example
@@ -2048,18 +2048,23 @@
 (defun run-tests (test-sat &optional (time-out 20))
   "Run a suite of tests on the DP solver, using TEST-SAT to verify results.
    TIME-OUT is the maximum time in seconds for each test."
-  (labels ((test (f &optional expected)
-             (format t "Testing formula: ~A~%" f)
+  (labels ((test (f &optional (expected 'sat) (label nil))
+             (format t "Testing: ~A~%"
+                     (or label
+                         (let ((s (write-to-string f)))
+                           (if (> (length s) 80)
+                               (concatenate 'string (subseq s 0 80) "...")
+                               s))))
              (handler-case
-                (sb-ext:with-timeout time-out ; seconds
-                    (funcall test-sat f expected))
-                (sb-ext:timeout-error ()
-                  (format t "Solver timed out!~%")
-                  :timeout)))) 
+                 (sb-ext:with-timeout time-out
+                   (funcall test-sat f expected))
+               (sb-ext:timeout ()
+                 (format t "Solver timed out!~%")
+                 :timeout))))
     (format t "Running tests...~%")
-    
+
     ;; Basic SAT tests
-    (test 'nil)
+    (test 'nil 'unsat)
     (test 't)
     (test 'p)                                    ; single var - SAT
     (test '(or p q))                             ; simple disjunction - SAT
@@ -2184,8 +2189,10 @@
 (defun run-test-dp ()
  "Run DP tests and report statistics."
  (dp-stats-reset)
- (run-tests #'test-dp)
+ (run-tests #'test-dp 5)
  (dp-stats-report))
+
+;; (run-test-dp)
 
 #|
 
@@ -2222,13 +2229,13 @@
 ;; ==============================================================
 ;; Trail APIs
 ;;
-;; Trail is a stack of trail entries 
+;; Trail is a stack of trail entries
 ;; Trail entry is a triple of (lit reason . level)
 ;; where lit is the literal assigned (encodes both var and val),
 ;;       reason is the clause that implied this assignment (nil for decisions), and
 ;;       level is the decision level at which it was assigned.
-;; 
-;; Well formed trail invariants: 
+;;
+;; Well formed trail invariants:
 ;; 1) Decision levels are non-negative integers.
 ;; 2) Trail is ordered by non-increasing decision levels (newer entries have same or higher level than older entries).
 ;; 3) No variable is assigned more than once in the trail (i.e., no conflicting assignments).
@@ -2236,7 +2243,7 @@
 ;; 5) For any entry with a non-nil reason, the reason clause is not satisfied by the trail at the time of assignment (i.e., the reason clause was unit under the trail when the literal was assigned).
 ;; ==============================================================
 
-;; Trail entry 
+;; Trail entry
 (defun make-trail-entry (lit level &optional reason)
   "Create a trail entry for literal LIT at decision level LEVEL with optional REASON clause."
   `(,lit ,reason . ,level))
@@ -2247,21 +2254,21 @@
 (defun trail-entry-reason (entry) (cadr entry))
 (defun trail-entry-level (entry) (cddr entry))
 
-;; Trail 
+;; Trail
 (defun empty-trail () nil)
 (defun trail-empty? (trail) (null trail))
 
-(defun trail-top (trail) 
+(defun trail-top (trail)
   (assert (not (trail-empty? trail)) () "Trail is empty, no top entry")
   (first trail))
 
-(defun trail-pop (trail) 
+(defun trail-pop (trail)
   (assert (not (trail-empty? trail)) () "Trail is empty, cannot pop")
   (rest trail))
 
 (defun trail-push (trail lit level &optional reason)
   "Returns a new trail with literal LIT assigned at decision level LEVEL with optional REASON.
-   
+
    Pre: the variable of LIT is not already assigned in TRAIL."
   (assert (null (trail-get trail (lit-var lit))) ()
           "Variable ~A is already assigned in trail" (lit-var lit))
@@ -2272,12 +2279,20 @@
   "Returns the maximum decision level in the trail, or -1 if the trail is empty."
   (if (null trail) -1 (trail-entry-level (trail-top trail))))
 
-(defun trail-get (trail var) 
+(defun trail-get-var (trail var)
   "Returns entry for variable VAR in TRAIL, or nil if VAR is not assigned in TRAIL."
   (find var trail :key #'trail-entry-var))
 
+(defun trail-get (trail lit)
+  "Apply trail to lit.
+   Return (val assigned?)"
+  (let ((entry (trail-get-var trail (lit-var lit))))
+    (if (null entry)
+        (values nil nil)
+        (values (eq (trail-entry-val entry) (lit-sign lit)) t))))
+
 (defun trail-most-recent-two (trail level cl)
-  "Returns (values entry1 entry2) for the two most recent entries at decision level LEVEL 
+  "Returns (values entry1 entry2) for the two most recent entries at decision level LEVEL
    that are also in clause CL. entry1 is the most recent, entry2 is the second most recent.
    Returns (values nil nil) if fewer than two such entries exist."
   (let ((first nil)
@@ -2298,16 +2313,15 @@
 
 (defun trail-backtrack (trail level)
   "Returns a new trail with all entries at decision levels greater than LEVEL removed.
-   The top of new trail is a decision entry at LEVEL. 
-   
+   The top of new trail is a decision entry at LEVEL.
+
    Pre: LEVEL >= 0 and LEVEL <= (trail-max-level trail)
         The TRAIL is well-formed."
   (assert (and (>= level 0) (<= level (trail-max-level trail))) ()
           "Invalid backtrack level ~A for trail with max level ~A" level (trail-max-level trail))
-  (drop-while #'(lambda (entry) 
-                  (and (trail-entry-reason entry) 
-                       (> (trail-entry-level entry) level)))
-    trail))
+  (member-if #'(lambda (entry)
+                 (<= (trail-entry-level entry) level))
+             trail))
 
 ;; If we make trail stateful, we can bundle the assignment with the trail and avoid converting back and forth between trail and assignment.
 (defun trail->assignment (trail)
@@ -2317,8 +2331,8 @@
     (dolist (entry trail)
       (let ((var (trail-entry-var entry))
             (val (trail-entry-val entry)))
-        (assert (let+ ((&values assigned-val assigned?) (assignment-get asgn var))
-                  (or (not assigned?) (eql assigned-val val))) 
+        (assert (let+ (((&values assigned-val assigned?) (assignment-get asgn var)))
+                  (or (not assigned?) (eql assigned-val val)))
                 ()
                 "Variable ~A assignment is inconsistent with values ~A and ~A" var assigned-val val)
         (assignment-set asgn var val)))
@@ -2366,7 +2380,7 @@
 
 (defun watch-list-remove! (wl lit cl)
   "Remove clause cl from the watch list for literal lit (destructive)"
-  ;; Note the two gethash calls are necessary; the first is really a puthash, while the second is a gethash. 
+  ;; Note the two gethash calls are necessary; the first is really a puthash, while the second is a gethash.
   (setf (gethash lit wl) (delete cl (gethash lit wl) :test #'eq :count 1)))
 
 ;; Clause Watches: maps a clause to its two watched literals (cons cell)
@@ -2399,11 +2413,11 @@
 
 (defstruct (watches (:constructor make-watches-internal))
   "Combined watch structure containing both watch-list and clause-watches
-  
-   Valid watches invariants respect to a trail assignment: 
-   1. watches don't contain duplicate clauses under pointer equality, eq, and 
-   2. for any watched clause cl with watches (w1, w2), 
-      - cl doesn't contain duplicate literals,  
+
+   Valid watches invariants respect to a trail assignment:
+   1. watches don't contain duplicate clauses under pointer equality, eq, and
+   2. for any watched clause cl with watches (w1, w2),
+      - cl doesn't contain duplicate literals,
       - w1 and w2 are negations of unique literals in cl,
       - w1 and w2 arenot falsified by the trail assignment"
 
@@ -2442,8 +2456,8 @@
 
 ;;; ============================================================
 ;;; VSIDS Strategy: Literal-Level Granularity
-;;; 
-;;; Consulted with Gemini on these design choices. 
+;;;
+;;; Consulted with Gemini on these design choices.
 ;;; ============================================================
 ;;; Decision 1: Use Literal-level instead of Variable-level.
 ;;;             Since we aren't using Phase Saving, literal scores
@@ -2470,17 +2484,17 @@
   (let* ((num-lits (* 2 num-vars))
          (arr (make-array num-lits :element-type 'double-float)))
     (dotimes (i num-lits)
-      ;; Small random noise (0.0-1.0) allows VSIDS to override 
+      ;; Small random noise (0.0-1.0) allows VSIDS to override
       ;; initial hunches after the very first conflict.
       (setf (aref arr i) (random 1.0d0)))
     (%make-activities :scores arr :inc 1.0d0)))
 
-(defun activities-num-vars (act) 
+(defun activities-num-vars (act)
   "Returns the number of variables tracked in activities ACT."
   (ash (length (activities-scores act)) -1))
 
 (defun bump-lit-activity! (act lit)
-  "Increment activity for literal 'lit'. 
+  "Increment activity for literal 'lit'.
    No overflow check here for speed."
   (incf (aref (activities-scores act) lit) (activities-inc act)))
 
@@ -2495,7 +2509,7 @@
 (defun decay-activities! (act)
   "Effectively decays past activities by increasing the future increment.
    This is called exactly once per conflict."
-  (setf (activities-inc act) 
+  (setf (activities-inc act)
         (/ (activities-inc act) *literal-decay-factor*))
   ;; Check overflow of the global 'inc' rather than checking every literal
   (when (> (activities-inc act) *rescale-threshold*)
@@ -2504,7 +2518,7 @@
 (defun select-literal (act asgn)
   "Linear scan for the unassigned literal with the highest score.
    Naturally chooses variable and polarity simultaneously.
-   
+
    If all variables assigned, returns nil (caller should check for this case and handle it as a SAT solution)."
   (let ((best-lit nil)
         (max-score -1.0d0)
@@ -2512,7 +2526,7 @@
         (num-vars (activities-num-vars act)))
     ;; Iterate through all variables and check scores for unassigned ones
     (dotimes (var num-vars)
-      (let+ ((&values _ assigned?) (assignment-get asgn var))
+      (let+ (((&values _ assigned?) (assignment-get asgn var)))
         (unless assigned?
           (let* ((pos-lit (* 2 var))
                  (neg-lit (1+ pos-lit))
@@ -2533,41 +2547,42 @@
    Returns (values conflict? new-trail)
    where conflict? is true if lit is falsified by the trail (conflict), and
          new-trail is the updated trail with lit assigned if no conflict, or nil if conflict.
-         
-   Inv: any lit in propQ is in trail with no conflicts 
+
+   Inv: any lit in propQ is in trail with no conflicts
 
    Pre: level >= 0
         reason is the clause that caused this propagation (nil for decisions and initial unit clauses)
    Post: if conflict? = nil then propQ has lit enqueued and new-trail is trail extended with lit's assignment at level LEVEL with reason REASON.
          else propQ and new-trail are unchanged (caller should handle the conflict)."
   (assert (>= level 0) () "Decision level must be non-negative, got ~A" level)
-  (let ((entry (trail-get trail (lit-var lit))))
-    (if entry 
-        (if (eq (trail-entry-val entry) (lit-sign lit)) 
-            (values nil trail) ;; already satisfied 
-            (values t nil))    ;; conflict
+  (let+ (((&values val assigned?) (trail-get trail lit)))
+    (if assigned?
+        (if val
+            (values nil trail) ;; satisfied
+            (values t nil)) ;; conflict
         (progn ;; not assigned, assign it and enqueue for propagation
           (enqueue lit propQ)
           (values nil (trail-push trail lit level reason))))))
 
-(defun dpll-init (cls num-vars) 
+(defun dpll-init (cls num-vars)
   "Preprocess the clauses cls by computing the watch lists and initializing the propagation queue.
    Returns (values conflict? new-cls trail activities watches propQ)
-   where conflict? if cls are unsat, 
-         if conflict? = nil, then 
-            new-cls is a list of simplified clauses or nil if the cls are sat, 
-            trail is the initial trail propagated from unit clauses with level 0, nil if no unit clauses, 
+   where conflict? if cls are unsat,
+         if conflict? = nil, then
+            new-cls is a list of simplified clauses or nil if the cls are sat,
+            trail is the initial trail propagated from unit clauses with level 0, nil if no unit clauses,
             activities is the initial activity scores (randomly determined) for variables,
             watches is the initialized watches structure, and
-            propQ is the initialized queue of unit literals to propagate. 
-          else 
+            propQ is the initialized queue of unit literals to propagate.
+          else
             new-cls, trail, activities, watches, and propQ are all nil.
 
   Pre: each cl in cls doesn't contain duplicate literals
 
-  Post: any lit in propQ is in trail with no conflicts and is treated as a decision (no reason clause), 
-        watches are valid with respect to trail."
-         
+  Post: any lit in propQ is in trail with no conflicts and is treated as a decision (no reason clause),
+        watches are valid with respect to trail,
+        propQ is empty."
+
   (let ((trail nil)
         (new-cls nil)
         (watches (make-watches))
@@ -2578,39 +2593,36 @@
         ((null cl) nil)
         ;; If clause is empty, we have a conflict - UNSAT
         ((clause-empty? cl) (return-from dpll-init (values t nil nil nil nil)))
-        ;; If clause is unit, propagate it immediately; treat it as a decision! 
+        ;; If clause is unit, propagate it immediately; treat it as a decision!
         ((clause-unit? cl)
-          (let+ ((&values conflict? new-trail) (dpll-try-enqueue (clause-unit-lit cl) trail propQ 0)))
-            (if conflict? 
-                (return-from dpll-init (values t nil nil nil nil nil)) ;; conflict from unit clause - UNSAT
-                (setf trail new-trail))))
+         (let+ (((&values conflict? new-trail) (dpll-try-enqueue (clause-unit-lit cl) trail propQ 0)))
+           (if conflict?
+               (return-from dpll-init (values t nil nil nil nil nil)) ;; conflict from unit clause - UNSAT
+               (setf trail new-trail))))
         ;; Otherwise, add watches and keep the clause
         (t (push cl new-cls)
-           (let+ ((&values lit1 lit2) (clause-two-lits cl))
+           (let+ (((&values lit1 lit2) (clause-two-lits cl)))
              ;; The watches are negated because we want to watch for them when they become false under the trail assignment
              (watches-add! watches cl (lit-negate lit1) (lit-negate lit2))))))
-    (values nil new-cls trail (make-activities num-vars) watches propQ))
+    (values nil new-cls trail (make-activities num-vars) watches propQ)))
 
-(defun dpll-find-new-watch (cl trail old-watch other-watch)
-  "Find a new literal in clause cl to watch that is not falsified by the trail, excluding old-watch and other-watch.
-   Returns the new literal if found, or nil if no such literal exists.
+(defun dpll-find-new-unassigned (cl trail old-lit other-lit)
+  "Find an unassigned literal in clause cl to watch that is not falsified by the trail, excluding old-lit and other-lit.
+   Returns the unassigned literal if found, or nil if no such literal exists.
 
-   Pre: old-watch and other-watch are the current watched literals for cl, and cl doesn't contain duplicate literals.
-        old-watch and other-watch are not falsified by trail.
+   Pre: old-lit and other-lit are the current watched literals for cl, and cl doesn't contain duplicate literals.
+        old-lit and other-lit are not falsified by trail.
 
-   Post: if a new watch is returned, then it is a negated literal in cl that is not falsified by trail and is not old-watch or other-watch."
-  (let ((old-lit (lit-negate old-watch))
-        (other-lit (lit-negate other-watch)))
-    ;; old-lit and other-lit are the literals in cl that are currently watched by their negations 
-    (clause-map #'(lambda (lit)
-                    (unless (or (eql lit old-lit) (eql lit other-lit))
-                      (let ((entry (trail-get trail (lit-var lit))))
-                        ;; Return lit if unassigned or satisfied
-                        (when (or (null entry)
-                                  (eq (trail-entry-val entry) (lit-sign lit)))
-                          (return-from dpll-find-new-watch (lit-negate lit))))))
-                cl)
-    nil))
+   Post: if a new watch is returned, then it is a negated literal in cl that is not falsified by trail and is not old-lit or other-lit."
+  ;; old-lit and other-lit are the literals in cl that are currently watched by their negations
+  (clause-map #'(lambda (lit)
+                  (unless (or (eql lit old-lit) (eql lit other-lit))
+                    (let+ (((&values val assigned?) (trail-get trail lit)))
+                      ;; Return lit if unassigned or satisfied
+                      (when (or (not assigned?) val)
+                        (return-from dpll-find-new-unassigned lit)))))
+              cl)
+  nil)
 
 (defun dpll-unit (trail watches propQ)
   "Apply two literal watching scheme to unit propagate under the current trail assignment.
@@ -2623,37 +2635,41 @@
 
    Inv: 1. for any clause, the two watched literals are not falsified by the current trail assignment.
         2. for any lit in propQ, lit is in trail with no conflicts.
-        3. watches are valid with respect to new-trail. 
+        3. watches are valid with respect to new-trail.
 
    Post: 1. if conflict-cl != nil, then new-trail != nil.
             else new-trail can be nil or a valid trail without conflicts.
          2. propQ is empty.
          3. watches are valid with respect to new-trail."
-  (if (queue-empty? propQ) 
+  (if (queue-empty? propQ)
       (values nil trail)  ; No more units to propagate, return current trail
-      (let ((new-trail trail) 
-            (watch (dequeue propQ))) 
+      (let ((new-trail trail)
+            (watch (dequeue propQ)))
         ;; Get clauses that are affected by watch being true
-        (let ((watching-clauses (watches-get-clauses watches watch))) 
+        (let ((watching-clauses (watches-get-clauses watches watch)))
           (loop for cl in (copy-list watching-clauses) ;; Need to copy since we may modify the watch list during iteration
-                do (let ((other-watch (watches-get-other-watch watches cl watch))
-                         (entry (trail-get new-trail (lit-var other-watch))))
-                     ;; other-watch is not falsified by trail 
-                     (if (and entry (eq (trail-entry-val entry) (lit-sign other-watch)))
-                         nil ;; other-watch is satisfied, cl is satisfied
-                         ;; other-watch is unassigned, so try to find a new literal to watch in cl that is not falsified
-                         (let ((new-watch (dpll-find-new-watch cl new-trail watch other-watch)))
-                            (if new-watch
-                                ;; Found a new watch, update the watches 
-                                ;; Note invariant 3 holds since cl is not already a watch for new-watch
-                                (watches-update! watches cl watch new-watch)
-                                ;; No new watch found, try enqueue other-watch with cl as the reason
-                                (let+ ((&values conflict? result-trail) (dpll-try-enqueue other-watch new-trail propQ (trail-max-level new-trail) cl))) ;; trail-max-level cannot be < 0 by invariant 2
-                                   (if conflict? 
-                                       (progn 
+                do (let* ((other-watch (watches-get-other-watch watches cl watch))
+                          ;; the two literals in cl
+                          (watch-lit (lit-negate watch))
+                          (other-lit (lit-negate other-watch)))
+                     (let+ (((&values other-val other-assigned?) (trail-get trail other-lit)))
+                       (if (and other-assigned? other-val)
+                           nil ;; other-watch is satisfied, cl is satisfied
+                           ;; other-watch is unassigned, so try to find a new literal to watch in cl that is not falsified
+                           (let ((unassigned-lit (dpll-find-new-unassigned cl new-trail watch-lit other-lit)))
+                             (if unassigned-lit
+                                 ;; Found a new watch, update the watches
+                                 ;; Note invariant 3 holds since cl is not already a watch for new-watch
+                                 (let ((new-watch (lit-negate unassigned-lit)))
+                                   (watches-update! watches cl watch new-watch))
+                                 ;; No new watch found, other-lit is a unit
+                                 ;; So try enqueue other-lit with cl as the reason
+                                 (let+ (((&values conflict? result-trail) (dpll-try-enqueue other-lit new-trail propQ (trail-max-level new-trail) cl))) ;; trail-max-level cannot be < 0 by invariant 2
+                                   (if conflict?
+                                       (progn
                                          (clear-queue propQ)
                                          (return-from dpll-unit (values cl new-trail))) ;; conflict found - return with conflict clause and current trail
-                                       (setf new-trail result-trail)))))))
+                                       (setf new-trail result-trail)))))))))
          (dpll-unit new-trail watches propQ)))))
 
 (defun dpll-decide (activities trail propQ)
@@ -2661,48 +2677,48 @@
    Returns (values decide? new-trail)
    where decide? is true if a new decision variable was chosen, false if no more decisions possible (all variables assigned), and
          new-trail is the updated trail with the new decision if decide? is true, or the same trail if decide? is false.
-   
+
    Pre: cls is either nil or contains no unit clauses under the current trail assignment.
-   
+
    Post: if decide? = true, then new-trail is extended with a new decision variable assigned to true at the new decision level (level), and propQ is updated.
          else new-trail and propQ remain the same."
   (let ((asgn (trail->assignment trail)))
     (let ((lit (select-literal activities asgn)))
       (if (null lit)
           (values nil trail) ;; No unassigned variables left, SAT
-          (let+ ((&values conflict? new-trail) (dpll-try-enqueue lit trail propQ (1+ (trail-max-level trail)))))
+          (let+ (((&values conflict? new-trail) (dpll-try-enqueue lit trail propQ (1+ (trail-max-level trail)))))
             (assert (not conflict?) () "Conflict cannot occur when making a new decision, got ~A for literal ~A" conflict? lit)
-            (values t new-trail)))))
+            (values t new-trail))))))
 
 ;; TODO: incorporate these into notes
 
-;; Questions: 
-;; 1. Can the working clause in find-first-uip be empty (resulted from resolution)?  
-;; No. 
-;; If we have made one decision, the initial working (or the conflicting) clause is not empty, and it is not the first UIP, 
+;; Questions:
+;; 1. Can the working clause in find-first-uip be empty (resulted from resolution)?
+;; No.
+;; If we have made one decision, the initial working (or the conflicting) clause is not empty, and it is not the first UIP,
 ;; then it contains at least two literals from the current level.
-;; Then we resolve with the reason clause (non-empty due to an implication), which contains the variable being resolved and at least one other literal from the current level. 
-;; The resulted clause cannot be empty since it cannot be satisfied directly and has to contain the other literal after resolution, which is nonempty. 
+;; Then we resolve with the reason clause (non-empty due to an implication), which contains the variable being resolved and at least one other literal from the current level.
+;; The resulted clause cannot be empty since it cannot be satisfied directly and has to contain the other literal after resolution, which is nonempty.
 
-;; 2. Can the working clause in find-first-uip be unit (resulted from resolution)?  
-;; Yes. See the example. 
+;; 2. Can the working clause in find-first-uip be unit (resulted from resolution)?
+;; Yes. See the example.
 
 ;; 3. Can the working clause in find-first-uip be nil/satisfied (resulted from resolution)?
 ;;    Note resolve-var takes a list of clauses (in this case only two clauses) and a variable and returns a list of clauses with var resolved
-;; No. 
-;; Suppose we end up with nil/satisfied after resolving the two clauses. 
-;; Note for this to happen, we need both x and (not x), which are not the variable to be resolved, in the two clauses to be resolved. 
-;; Then one of them (say x) must come from the conflict clause, while the other the reason clause. 
-;; Through implications, the reason clause contains (not x) and it must be false since x is not the resolved variable. 
-;; Thus, x must be true, making the conflict clause satisfied. Contradiction.  
+;; No.
+;; Suppose we end up with nil/satisfied after resolving the two clauses.
+;; Note for this to happen, we need both x and (not x), which are not the variable to be resolved, in the two clauses to be resolved.
+;; Then one of them (say x) must come from the conflict clause, while the other the reason clause.
+;; Through implications, the reason clause contains (not x) and it must be false since x is not the resolved variable.
+;; Thus, x must be true, making the conflict clause satisfied. Contradiction.
 
-;; 4. Can the reason clause in find-first-uip be nil (decision)? 
-;; No. 
-;; First, there has to be at least one implication from the decision to the conflict. 
-;; While looking for UIP through implications, the reason clause cannot be nil. 
-;; Then, if no UIP is found, the algorithm will stop at the first decision, where the working clause has exactly one literal (decision) from the current level. 
+;; 4. Can the reason clause in find-first-uip be nil (decision)?
+;; No.
+;; First, there has to be at least one implication from the decision to the conflict.
+;; While looking for UIP through implications, the reason clause cannot be nil.
+;; Then, if no UIP is found, the algorithm will stop at the first decision, where the working clause has exactly one literal (decision) from the current level.
 
-;; 5. Does the conflict clause have to contain two literals from the current level? 
+;; 5. Does the conflict clause have to contain two literals from the current level?
 ;; Yes. These are the two watched literals that triggered the conflict.
 
 (defun dpll-analyze (conflict-cl activities trail)
@@ -2713,12 +2729,12 @@
 
    Pre: conflict-cl != nil and is a clause that is falsified by the current trail assignment (i.e., all its literals are falsified under the current trail).
         trail != nil and there is a conflict (empty clause) in cls under the current trail assignment."
-  
+
   (labels ((find-first-uip (working-cl trail seen)
              "Find the first Unique Implication Point (UIP) in the conflict clause with respect to the current trail.
               While finding the UIP via resolution, the working clause can become:
               Returns the first UIP if found, or nil if no UIP exists.
-        
+
               Pre: working-cl != nil and is falsified by the current trail assignment.
                    working-cl is non-empty,
                    trail != nil and there is a conflict (empty clause) in cls under the current trail assignment.
@@ -2729,17 +2745,17 @@
              (assert working-cl () "Working clause cannot be nil when finding UIP")
              (assert (not (clause-empty? working-cl)) () "Working clause cannot be empty when finding UIP")
              (assert trail () "Trail cannot be nil when finding UIP")
-             (assert (trail-max-level trail) > 0 () "Trail must have at least one decision level when finding UIP")
-            
+             (assert (> (trail-max-level trail) 0) () "Trail must have at least one decision level when finding UIP")
+
              (let+ (((&values most-recent second-most-recent) (trail-most-recent-two trail (trail-max-level trail) working-cl)))
               (assert most-recent () "There must be at least one entry from current level in trail for conflict clause ~A" working-cl)
               (if (null second-most-recent)
                   ;; Only one literal from current level, this is the UIP
-                  working-cl 
+                  working-cl
                   ;; More than one literal from current level, resolve with reason of most recent entry and continue searching
                   (let ((reason-cl (trail-entry-reason most-recent)))
                     (assert reason-cl () "Reason clause cannot be nil for non-decision entries in trail")
-                    
+
                     ;; Add literals from the reason clause to 'seen'
                     (clause-map #'(lambda (lit) (hash-set-add seen lit)) reason-cl)
 
@@ -2752,7 +2768,7 @@
              (let ((levels nil))
                 ;; Collect unique decision levels from literals in learnt-cl
                 (clause-map #'(lambda (lit)
-                                (let ((entry (trail-get trail (lit-var lit))))
+                                (let ((entry (trail-get-var trail (lit-var lit))))
                                   (when entry
                                     (pushnew (trail-entry-level entry) levels))))
                            learnt-cl)
@@ -2767,7 +2783,7 @@
         (let* ((seen (clause-copy conflict-cl)) ;; 'seen' is a COPY of conflict-cl
                (uip-cl (find-first-uip conflict-cl trail seen)))
           (assert uip-cl () "UIP clause cannot be nil after analysis")
-          
+
           ;; BUMP: Reward all involved literals exactly once.
           (hash-set-map (lambda (lit) (bump-lit-activity! activities lit)) seen)
           ;; DECAY: Increase the 'inc' value for the next conflict.
@@ -2781,13 +2797,13 @@
     Update the propagation queue propQ to reflect the new trail after backtracking.
     Returns the new trail after backtracking.
 
-    Watches are updated by adding the new learnt clause (if not unit) during backtracking. 
-    For other clauses, the watches remain valid since the watch invariant still holds before and after backtracking.  
+    Watches are updated by adding the new learnt clause (if not unit) during backtracking.
+    For other clauses, the watches remain valid since the watch invariant still holds before and after backtracking.
     Any stale watches will be corrected lazily at the next propagation when we enqueue the flipped literal.
 
     Pre: bt-level >= 0, trail != nil, and bt-level < current max decision level in trail.
          propQ is empty before backtracking.
-         learnt-cl != nil 
+         learnt-cl != nil
 
     Post: the returned trail != nil and its top entry is a decision at bt-level with the opposite assignment.
           propQ contains the unit literal with the flipped assignment."
@@ -2801,16 +2817,16 @@
 
   (let ((bt-trail (trail-backtrack trail bt-level)))
     (assert bt-trail () "Trail cannot be nil after backtracking")
-    (if (clause-unit? learnt-cl) 
+    (if (clause-unit? learnt-cl)
         (progn ;; If the learnt clause is unit, we can directly enqueue it without adding watches since it will be propagated immediately after backtracking
           (assert (zerop bt-level) () "Learnt unit clause can only be propagated at level 0 during backtracking, got ~A" bt-level)
-          (let+ ((&values conflict? new-trail) (dpll-try-enqueue (clause-unit-lit learnt-cl) bt-trail propQ bt-level))
+          (let+ (((&values conflict? new-trail) (dpll-try-enqueue (clause-unit-lit learnt-cl) bt-trail propQ bt-level)))
             (assert (not conflict?) () "Learnt unit clause cannot cause a conflict during backtracking, got ~A for literal ~A" conflict? (clause-unit-lit learnt-cl))
             new-trail))
         (let+ (((&values lit1 lit2) (clause-two-lits learnt-cl)))
           (watches-add! watches learnt-cl (lit-negate lit1) (lit-negate lit2))
           (let+ ((entry (trail-top bt-trail))
-                 (flipped-lit (lit-negate (trail-entry-lit entry))) 
+                 (flipped-lit (lit-negate (trail-entry-lit entry)))
                  ((&values conflict? new-trail) (dpll-try-enqueue flipped-lit (trail-pop bt-trail) propQ bt-level)))
             (assert (not conflict?) () "Flipping a decision literal cannot cause a conflict during backtracking, got ~A for literal ~A" conflict? flipped-lit)
             new-trail)))))
@@ -2826,7 +2842,7 @@
   (let+ (((&values conflict-cl trail0) (dpll-unit trail watches propQ)))
     (if conflict-cl
         ;; Analyze conflict and backtrack
-        (let+ (((&values learnt-cl bt-level) (dpll-analyze conflict-cl trail0)))
+        (let+ (((&values learnt-cl bt-level) (dpll-analyze conflict-cl activities trail0)))
           (if (< bt-level 0)
               (values 'unsat nil)  ; No more backtracking possible, UNSAT
               (let ((trail1 (dpll-backtrack learnt-cl trail0 watches propQ bt-level)))
