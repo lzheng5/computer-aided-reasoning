@@ -1315,10 +1315,6 @@
         (format nil "Variable Mapping: ~%~{  ~A~%~}" (sort pairs #'string<))
         "Variable Mapping: (empty)")))
 
-(defun var-manager-num-vars (vm)
-  "Return number of variables in variable manager"
-  (var-manager-counter vm))
-
 ;;; ============================================================
 ;;; Numeric Literal Operations
 ;;; Encoding: variable n -> literal 2n (positive), literal 2n+1 (negative)
@@ -1368,98 +1364,280 @@
 
 ;;; ============================================================
 ;;; Clause API - Abstraction over clause representation
-;;; Current implementation: Hash sets with numeric literals
 ;;;
 ;;; This API provides a clean abstraction so that the clause
-;;; representation can be easily changed (e.g., to use numeric
-;;; variables or bit vectors) without modifying the DP algorithm.
+;;; representation can be easily changed without modifying the DP/DPLL algorithms.
 ;;;
 ;;; Current encoding: variable n -> literal 2n (positive), 2n+1 (negative)
+;;;
+;;; Implementations:
+;;;   'hash-set   - Hash table based (sparse, good for small clauses)
+;;;   'bit-vector - Bit vector based (dense, good for subsumption checks)
 ;;; ============================================================
 
-;; TODO: bit vectors for variable sets (pos/neg tracking)
+;; Static clause configuration
+(defconstant +clause-impl+ 'bit-vector)  ; 'hash-set or 'bit-vector
 
-(defun make-clause (&optional (lits nil))
+(defparameter *clause-max-num-lits* 0)
+
+;;; ------------------------------------------------------------
+;;; Bit Vector Implementation
+;;; ------------------------------------------------------------
+
+(defun bv-make-clause (&optional (lits nil))
+  "Create a clause as a bit vector from a list of literals"
+  (let ((cl (make-array *clause-max-num-lits* :element-type 'bit :initial-element 0)))
+    (dolist (lit lits cl)
+      (setf (sbit cl lit) 1))))
+
+(defun bv-clause-has-lit? (cl lit)
+  "Check if literal is in clause (bit vector)"
+  (= 1 (sbit cl lit)))
+
+(defun bv-clause-has-var? (cl var)
+  "Check if variable (regardless of polarity) is in clause"
+  (or (= 1 (sbit cl (make-lit var t)))
+      (= 1 (sbit cl (make-lit var nil)))))
+
+(defun bv-clause-size (cl)
+  "Return number of literals in clause (count set bits)"
+  (count 1 cl))
+
+(defun bv-clause-empty? (cl)
+  "Check if clause is empty"
+  (not (find 1 cl)))
+
+(defun bv-clause-unit? (cl)
+  "Check if clause is a unit clause (size 1)"
+  (= 1 (count 1 cl)))
+
+(defun bv-clause-unit-lit (cl)
+  "Get the single literal from a unit clause"
+  (position 1 cl))
+
+(defun bv-clause-two-lits (cl)
+  "Get two literals from clause (for initialization of watches)"
+  (let ((first-lit (position 1 cl)))
+    (when first-lit
+      (let ((second-lit (position 1 cl :start (1+ first-lit))))
+        (values first-lit second-lit)))))
+
+(defun bv-clause-map (fn cl)
+  "Apply function fn to each literal in clause (for side effects only)"
+  (dotimes (i (length cl))
+    (when (= 1 (sbit cl i))
+      (funcall fn i))))
+
+(defun bv-clause-negate (cl)
+  "Negate a clause - returns new clause with all literals negated"
+  (let ((new-cl (make-array *clause-max-num-lits* :element-type 'bit :initial-element 0)))
+    (bv-clause-map #'(lambda (lit) (setf (sbit new-cl (lit-negate lit)) 1)) cl)
+    new-cl))
+
+(defun bv-clause-any? (pred cl)
+  "Return t if any literal in clause satisfies predicate pred"
+  (dotimes (i (length cl) nil)
+    (when (and (= 1 (sbit cl i)) (funcall pred i))
+      (return t))))
+
+(defun bv-clause-subsumes? (cl1 cl2)
+  "Return t if cl1 subsumes cl2 (cl1 ⊆ cl2).
+   Uses efficient bit operations: cl1 ⊆ cl2 iff (cl1 AND (NOT cl2)) = 0"
+  (not (find 1 (bit-andc2 cl1 cl2))))
+
+(defun bv-clause-copy (cl)
+  "Create a copy of a bit vector clause"
+  (copy-seq cl))
+
+(defun bv-clause-remove-lit! (cl lit)
+  "Destructively remove literal from clause (clears bit)"
+  (setf (sbit cl lit) 0))
+
+(defun bv-clause-add-lit! (cl lit)
+  "Destructively add literal to clause (sets bit)"
+  (setf (sbit cl lit) 1))
+
+;;; ------------------------------------------------------------
+;;; Hash Set Implementation
+;;; ------------------------------------------------------------
+
+(defun hs-make-clause (&optional (lits nil))
   "Create a clause from a list of literals, lits"
   (let ((clause (make-hash-set)))
     (dolist (lit lits clause)
       (hash-set-add clause lit))))
 
-(defun clause-has-lit? (cl lit)
+(defun hs-clause-has-lit? (cl lit)
   "Check if literal is in clause"
   (hash-set-contains? cl lit))
 
-(defun clause-has-var? (cl var)
+(defun hs-clause-has-var? (cl var)
   "Check if variable (regardless of polarity) is in clause"
-  (or (clause-has-lit? cl (make-lit var t))
-      (clause-has-lit? cl (make-lit var nil))))
+  (or (hs-clause-has-lit? cl (make-lit var t))
+      (hs-clause-has-lit? cl (make-lit var nil))))
 
-(defun clause-size (cl)
+(defun hs-clause-size (cl)
   "Return number of literals in clause"
   (hash-set-size cl))
 
-(defun clause-empty? (cl)
+(defun hs-clause-empty? (cl)
   "Check if clause is empty"
   (zerop (hash-set-size cl)))
 
-(defun clause-unit? (cl)
+(defun hs-clause-unit? (cl)
   "Check if clause is a unit clause (size 1)"
   (= 1 (hash-set-size cl)))
 
-(defun clause-unit-lit (cl)
+(defun hs-clause-unit-lit (cl)
   "Get the single literal from a unit clause"
-  (assert (clause-unit? cl) () "Not a unit clause")
-  (hash-set-map #'(lambda (lit) (return-from clause-unit-lit lit)) cl))
+  (hash-set-map #'(lambda (lit) (return-from hs-clause-unit-lit lit)) cl))
 
-(defun clause-two-lits (cl)
+(defun hs-clause-two-lits (cl)
   "Get two literals from clause (for initialization of watches)"
-  (assert (>= (hash-set-size cl) 2) () "Clause has fewer than 2 literals")
   (let ((lits nil))
-    (clause-map #'(lambda (lit)
-                    (push lit lits)
-                    (when (= (length lits) 2)
-                      (return-from clause-two-lits (values (first lits) (second lits)))))
-                cl)
-    (values nil nil)))  ; if clause has < 2 lits
+    (hs-clause-map #'(lambda (lit)
+                       (push lit lits)
+                       (when (= (length lits) 2)
+                         (return-from hs-clause-two-lits (values (first lits) (second lits)))))
+                   cl)
+    (values nil nil)))
 
-(defun clause-map (fn cl)
+(defun hs-clause-map (fn cl)
   "Apply function fn to each literal in clause (for side effects only)"
   (hash-set-map fn cl))
 
-(defun clause-negate (cl)
+(defun hs-clause-negate (cl)
   "Negate a clause"
   (let ((new-cl (make-hash-set)))
-    (clause-map #'(lambda (lit) (hash-set-add new-cl (lit-negate lit))) cl)
+    (hs-clause-map #'(lambda (lit) (hash-set-add new-cl (lit-negate lit))) cl)
     new-cl))
+
+(defun hs-clause-any? (pred cl)
+  "Return t if any literal in clause satisfies predicate pred"
+  (block found
+    (hs-clause-map #'(lambda (lit)
+                       (when (funcall pred lit)
+                         (return-from found t)))
+                   cl)
+    nil))
+
+(defun hs-clause-subsumes? (cl1 cl2)
+  "Return t if cl1 subsumes cl2 (cl1 ⊆ cl2)"
+  (and (<= (hs-clause-size cl1) (hs-clause-size cl2))
+       (block check
+         (hs-clause-map #'(lambda (lit)
+                            (unless (hs-clause-has-lit? cl2 lit)
+                              (return-from check nil)))
+                        cl1)
+         t)))
+
+(defun hs-clause-copy (cl)
+  "Create a deep copy of a clause (copies the hash table)"
+  (let ((new-cl (make-hash-set)))
+    (hs-clause-map #'(lambda (lit) (hash-set-add new-cl lit)) cl)
+    new-cl))
+
+(defun hs-clause-remove-lit! (cl lit)
+  "Destructively remove literal from clause (mutates clause)"
+  (remhash lit cl))
+
+(defun hs-clause-add-lit! (cl lit)
+  "Destructively add literal to clause"
+  (hash-set-add cl lit))
+
+;;; ------------------------------------------------------------
+;;; Unified Clause API (dispatches based on +clause-impl+)
+;;; ------------------------------------------------------------
+
+(defun make-clause (&optional (lits nil))
+  "Create a clause from a list of literals"
+  (ecase +clause-impl+
+    (bit-vector (bv-make-clause lits))
+    (hash-set (hs-make-clause lits))))
+
+(defun clause-has-lit? (cl lit)
+  "Check if literal is in clause"
+  (ecase +clause-impl+
+    (bit-vector (bv-clause-has-lit? cl lit))
+    (hash-set (hs-clause-has-lit? cl lit))))
+
+(defun clause-has-var? (cl var)
+  "Check if variable (regardless of polarity) is in clause"
+  (ecase +clause-impl+
+    (bit-vector (bv-clause-has-var? cl var))
+    (hash-set (hs-clause-has-var? cl var))))
+
+(defun clause-size (cl)
+  "Return number of literals in clause"
+  (ecase +clause-impl+
+    (bit-vector (bv-clause-size cl))
+    (hash-set (hs-clause-size cl))))
+
+(defun clause-empty? (cl)
+  "Check if clause is empty"
+  (ecase +clause-impl+
+    (bit-vector (bv-clause-empty? cl))
+    (hash-set (hs-clause-empty? cl))))
+
+(defun clause-unit? (cl)
+  "Check if clause is a unit clause (size 1)"
+  (ecase +clause-impl+
+    (bit-vector (bv-clause-unit? cl))
+    (hash-set (hs-clause-unit? cl))))
+
+(defun clause-unit-lit (cl)
+  "Get the single literal from a unit clause"
+  (ecase +clause-impl+
+    (bit-vector (bv-clause-unit-lit cl))
+    (hash-set (hs-clause-unit-lit cl))))
+
+(defun clause-two-lits (cl)
+  "Get two literals from clause (for initialization of watches)"
+  (ecase +clause-impl+
+    (bit-vector (bv-clause-two-lits cl))
+    (hash-set (hs-clause-two-lits cl))))
+
+(defun clause-map (fn cl)
+  "Apply function fn to each literal in clause (for side effects only)"
+  (ecase +clause-impl+
+    (bit-vector (bv-clause-map fn cl))
+    (hash-set (hs-clause-map fn cl))))
+
+(defun clause-negate (cl)
+  "Negate a clause"
+  (ecase +clause-impl+
+    (bit-vector (bv-clause-negate cl))
+    (hash-set (hs-clause-negate cl))))
 
 (defun clause-any? (pred cl)
   "Return t if any literal in clause satisfies predicate pred"
-  (block found
-    (clause-map #'(lambda (lit)
-                    (when (funcall pred lit)
-                      (return-from found t)))
-                cl)
-    nil))
+  (ecase +clause-impl+
+    (bit-vector (bv-clause-any? pred cl))
+    (hash-set (hs-clause-any? pred cl))))
 
 (defun clause-subsumes? (cl1 cl2)
   "Return t if cl1 subsumes cl2 (cl1 ⊆ cl2)"
-  (and (<= (clause-size cl1) (clause-size cl2))
-       (block check
-         (clause-map #'(lambda (lit)
-                             (unless (clause-has-lit? cl2 lit)
-                               (return-from check nil)))
-                         cl1)
-         t)))
+  (ecase +clause-impl+
+    (bit-vector (bv-clause-subsumes? cl1 cl2))
+    (hash-set (hs-clause-subsumes? cl1 cl2))))
 
 (defun clause-copy (cl)
-  "Create a deep copy of a clause (copies the hash table)"
-  (let ((new-cl (make-hash-set)))
-    (clause-map #'(lambda (lit) (hash-set-add new-cl lit)) cl)
-    new-cl))
+  "Create a copy of a clause"
+  (ecase +clause-impl+
+    (bit-vector (bv-clause-copy cl))
+    (hash-set (hs-clause-copy cl))))
 
 (defun clause-remove-lit! (cl lit)
-  "Destructively remove literal from clause (mutates clause)"
-  (remhash lit cl))
+  "Destructively remove literal from clause"
+  (ecase +clause-impl+
+    (bit-vector (bv-clause-remove-lit! cl lit))
+    (hash-set (hs-clause-remove-lit! cl lit))))
+
+(defun clause-add-lit! (cl lit)
+  "Destructively add literal to clause"
+  (ecase +clause-impl+
+    (bit-vector (bv-clause-add-lit! cl lit))
+    (hash-set (hs-clause-add-lit! cl lit))))
 
 (defun clause->string (cl &optional vm)
   "Convert clause to string (disjunction of literals)"
@@ -1551,6 +1729,45 @@
 ;;; CNF -> Clauses Conversion
 ;;; ============================================================
 
+(defun cnf-count-vars (f)
+  "Count unique variables in a CNF formula.
+   Returns the count of unique variable symbols."
+  (let ((vars (make-hash-table :test #'equal)))
+    (labels ((extract-var (lit)
+               "Extract variable from a literal"
+               (match lit
+                 ((type boolean) nil)
+                 ((type symbol) lit)
+                 ((list 'not x) (extract-var x))
+                 (_ nil)))
+             (process-clause (cl)
+               "Process a clause to extract variables"
+               (match cl
+                 ((type boolean) nil)
+                 ((type symbol) (let ((v (extract-var cl))) (when v (setf (gethash v vars) t))))
+                 ((list 'not _) (let ((v (extract-var cl))) (when v (setf (gethash v vars) t))))
+                 ((list* 'or args)
+                  (dolist (lit args)
+                    (let ((v (extract-var lit))) (when v (setf (gethash v vars) t)))))
+                 (_ nil))))
+      (match f
+        ((type boolean) nil)
+        ((type symbol) (process-clause f))
+        ((list 'not _) (process-clause f))
+        ((list* 'or _) (process-clause f))
+        ((list* 'and args) (dolist (cl args) (process-clause cl)))
+        (_ nil)))
+    (hash-table-count vars)))
+
+(defmacro with-clause-max-num-lits ((num-vars) &body body)
+  "Execute body with *clause-max-num-lits* bound appropriately for the given number of variables.
+   For bit-vector implementation, this sets the size of bit vectors."
+  `(let ((*clause-max-num-lits* (* 2 ,num-vars)))
+     ,@body))
+
+(defun clause-max-num-lits ()
+  *clause-max-num-lits*)
+
 (defun cnf->clauses (f vm)
   "Convert a CNF formula to a list of clauses with numeric literals.
    vm: variable manager for symbol to number mapping"
@@ -1613,14 +1830,13 @@
            *dp-stats-time-sat* 0
            *dp-stats-time-total* 0)))
 
-;; TODO: inc formula
 (defmacro dp-stats-set-formula (orig-vars cnf-vars cnf-clauses max-clause-size)
-  "Set formula statistics"
+  "Increment formula statistics (accumulates across test runs)"
   `(when (eq +debug-mode+ 'stats)
-     (setf *dp-stats-orig-vars* ,orig-vars
-           *dp-stats-cnf-vars* ,cnf-vars
-           *dp-stats-cnf-clauses* ,cnf-clauses
-           *dp-stats-max-clause-size* ,max-clause-size)))
+     (incf *dp-stats-orig-vars* ,orig-vars)
+     (incf *dp-stats-cnf-vars* ,cnf-vars)
+     (incf *dp-stats-cnf-clauses* ,cnf-clauses)
+     (setf *dp-stats-max-clause-size* (max *dp-stats-max-clause-size* ,max-clause-size))))
 
 (defmacro dp-stats-inc-unit ()
   "Increment unit propagation count"
@@ -1779,17 +1995,21 @@
                                   (if pos? (cons 1 0) (cons 0 1))))))
                   cl))
     ;; Find variable with minimum blowup: m*n - m - n
-    ;; TODO: Early exit if blowup <= 0
+    ;; Early exit if blowup <= 0 (eliminating this variable won't increase clause count)
     (let ((best-var nil)
           (best-score 0))
-      (maphash #'(lambda (var counts)
-                   (let* ((m (car counts))
-                          (n (cdr counts))
-                          (score (- (* m n) m n)))
-                     (when (or (null best-var) (< score best-score))
-                       (setf best-var var
-                             best-score score))))
-               var-counts)
+      (block search
+        (maphash #'(lambda (var counts)
+                     (let* ((m (car counts))
+                            (n (cdr counts))
+                            (score (- (* m n) m n)))
+                       (when (or (null best-var) (< score best-score))
+                         (setf best-var var
+                               best-score score)
+                         ;; Early exit: blowup <= 0 means this variable is optimal
+                         (when (<= score 0)
+                           (return-from search)))))
+                 var-counts))
      best-var)))
 
 (defun remove-subsumed (cls)
@@ -1824,17 +2044,17 @@
         (dolist (ncl neg-cls)
           ;; Build resolvent and detect tautologies on the fly
           (block next-resolvent
-            (let ((resolvent (make-hash-set)))
+            (let ((resolvent (make-clause)))
               (clause-map #'(lambda (lit)
                                   (unless (= lit pos-lit)
-                                    (hash-set-add resolvent lit)))
+                                    (clause-add-lit! resolvent lit)))
                               pcl)
               (clause-map #'(lambda (lit)
                                   (unless (= lit neg-lit)
                                     ;; Check for tautology as we add from ncl
                                     (when (clause-has-lit? resolvent (lit-negate lit))
                                       (return-from next-resolvent))
-                                    (hash-set-add resolvent lit)))
+                                    (clause-add-lit! resolvent lit)))
                               ncl)
               (push resolvent resolvents)))))
       (values (append other-cls resolvents)
@@ -1870,14 +2090,14 @@
   (labels ((simplify-clauses (cls)
              (mapcar #'(lambda (cl)
                          ;; Copy clause and remove false literals
-                         (let ((new-cl (make-hash-set)))
+                         (let ((new-cl (make-clause)))
                            (clause-map #'(lambda (lit)
                                            (let+ ((var (lit-var lit))
                                                   (sign (lit-sign lit))
                                                   ((&values val assigned?) (assignment-get asgn var)))
                                              ;; Keep literal unless it's false (assigned opposite sign)
                                              (unless (and assigned? (not (eq val sign)))
-                                               (hash-set-add new-cl lit))))
+                                               (clause-add-lit! new-cl lit))))
                                        cl)
                            new-cl))
                      ;; Remove satisfied clauses (where any literal is true)
@@ -1940,25 +2160,33 @@
               ;; All unit clauses must have same sign and contain the same target var
               (assignment-set asgn var (lit-sign (clause-unit-lit (first cls))))))))))
 
+;; TODO: come up with a more efficient pvars, count-vars that doesn't build lists but use hash tables 
+;;       then we don't need cnf-count-vars
+
+;; TODO: for var-manager, I think we can remove the counter since we will set the clause-max-num-lits 
+
 (defun dp (f)
   "Main DP function: takes a formula f, converts to CNF, and applies DP algorithm.
    Returns 'sat or 'unsat with assignment alist."
   (dp-stats-time :total
     (let+ (((&values cnf skeleton amap) (tseitin f))
-           (vm (make-var-manager))
-           (cls (cnf->clauses cnf vm)) ;; mutates vm
-           (asgn (make-assignment)))
+           (num-vars (cnf-count-vars cnf))
+           (vm (make-var-manager)))
+      ;; Bind clause size for bit-vector implementation
+      (with-clause-max-num-lits (num-vars)
+        (let+ ((cls (cnf->clauses cnf vm)) ;; mutates vm
+               (asgn (make-assignment)))
 
-      (dp-stats-set-formula (length (pvars skeleton))
-                            (var-manager-num-vars vm)
-                            (length cls)
-                            (if cls (apply #'max (mapcar #'clause-size cls)) 0))
+          (dp-stats-set-formula (length (pvars skeleton))
+                                (clause-max-num-lits)
+                                (length cls)
+                                (if cls (apply #'max (mapcar #'clause-size cls)) 0))
 
-      (let+ (((&values result resolve-map) (dp-stats-time :sat (dp-sat cls asgn nil))) ;; mutates asgn
-             (result-asgn (when (eq result 'sat)
-                            (dp-reconstruct cls asgn resolve-map) ;; mutates asgn
-                            (assignment->alist asgn vm amap))))
-        (values result result-asgn)))))
+          (let+ (((&values result resolve-map) (dp-stats-time :sat (dp-sat cls asgn nil))) ;; mutates asgn
+                 (result-asgn (when (eq result 'sat)
+                                (dp-reconstruct cls asgn resolve-map) ;; mutates asgn
+                                (assignment->alist asgn vm amap))))
+            (values result result-asgn)))))))
 
 (defun subst-formula (f asgn)
   "Substitute variables in formula f according to asgn (alist)"
@@ -2371,12 +2599,12 @@
            *dpll-stats-time-decide* 0)))
 
 (defmacro dpll-stats-set-formula (orig-vars cnf-vars cnf-clauses max-clause-size)
-  "Set formula statistics"
+  "Increment formula statistics (accumulates across test runs)"
   `(when (eq +debug-mode+ 'stats)
-     (setf *dpll-stats-orig-vars* ,orig-vars
-           *dpll-stats-cnf-vars* ,cnf-vars
-           *dpll-stats-cnf-clauses* ,cnf-clauses
-           *dpll-stats-max-clause-size* ,max-clause-size)))
+     (incf *dpll-stats-orig-vars* ,orig-vars)
+     (incf *dpll-stats-cnf-vars* ,cnf-vars)
+     (incf *dpll-stats-cnf-clauses* ,cnf-clauses)
+     (setf *dpll-stats-max-clause-size* (max *dpll-stats-max-clause-size* ,max-clause-size))))
 
 (defmacro dpll-stats-inc-decisions ()
   `(when (eq +debug-mode+ 'stats)
@@ -2986,8 +3214,6 @@
 
           (values learnt-cl (backtrack-level learnt-cl trail))))))
 
-;; TODO: periodically remove clauses
-
 (defun dpll-backtrack (learnt-cl trail watches propQ bt-level)
    "Backtrack the trail to the given backtracking level.
     Update the propagation queue propQ to reflect the new trail after backtracking.
@@ -3076,22 +3302,25 @@
    Returns 'sat with assignment alist or 'unsat with nil."
   (dpll-stats-time :total
     (let+ (((&values cnf skeleton amap) (tseitin f))
-           (vm (make-var-manager))
-           (cls (cnf->clauses cnf vm))) ;; mutates vm
+           (num-vars (cnf-count-vars cnf))
+           (vm (make-var-manager)))
+      ;; Bind clause size for bit-vector implementation
+      (with-clause-max-num-lits (num-vars)
+        (let+ ((cls (cnf->clauses cnf vm))) ;; mutates vm
 
-      (dpll-stats-set-formula (length (pvars skeleton))
-                              (var-manager-num-vars vm)
-                              (length cls)
-                              (if cls (apply #'max (mapcar #'clause-size cls)) 0))
-      (dbg "After init~%")
-      (let+ (((&values conflict? cls trail activities watches propQ) (dpll-stats-time :sat (dpll-init cls (var-manager-num-vars vm)))))
-        (if conflict?
-            (values 'unsat nil)  ; Conflict with initial unit propagation, UNSAT
-            (let+ (((&values result trail) (dpll-stats-time :sat (dpll-sat trail activities watches propQ)))
-                    (result-asgn (when (eq result 'sat)
-                                  (let ((asgn (trail->assignment trail)))
-                                    (assignment->alist asgn vm amap)))))
-              (values result result-asgn)))))))
+          (dpll-stats-set-formula (length (pvars skeleton))
+                                  (clause-max-num-lits)
+                                  (length cls)
+                                  (if cls (apply #'max (mapcar #'clause-size cls)) 0))
+          (dbg "After init~%")
+          (let+ (((&values conflict? cls trail activities watches propQ) (dpll-stats-time :sat (dpll-init cls (clause-max-num-lits)))))
+            (if conflict?
+                (values 'unsat nil)  ; Conflict with initial unit propagation, UNSAT
+                (let+ (((&values result trail) (dpll-stats-time :sat (dpll-sat trail activities watches propQ)))
+                       (result-asgn (when (eq result 'sat)
+                                      (let ((asgn (trail->assignment trail)))
+                                        (assignment->alist asgn vm amap)))))
+                  (values result result-asgn)))))))))
 
 (defun test-dpll (f &optional (expected 'sat))
   "Test dpll on formula f by verifying its result.
