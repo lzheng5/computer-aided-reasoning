@@ -1197,6 +1197,26 @@
 
 |#
 
+
+;;; ============================================================
+;;; Debug and Stats
+;;; ============================================================
+
+;; Mode: 'debug | 'stats | nil (default)
+;; Note if we changed this, we should reload the file to recompile the definitions to include debugging/stats information
+(defconstant +debug-mode+ 'nil)
+
+(defmacro dbg (fmt &rest args)
+  "Print debug message when +debug-mode+ is 'debug"
+  `(when (eq +debug-mode+ 'debug)
+     (pprint (format nil ,fmt ,@args))))
+
+(defmacro dassert (test-form &optional format-string &rest format-args)
+  "Assert that TEST-FORM is true, but only when +debug-mode+ is 'debug.
+   If TEST-FORM is false and debug mode is enabled, signals an error with the optional message."
+  `(when (eq +debug-mode+ 'debug)
+     (assert ,test-form () ,@(when format-string (list* format-string format-args)))))
+
 ;;; ============================================================
 ;;; Common SAT Representations for Variables, Clauses, and Assignments
 ;;; ============================================================
@@ -1554,25 +1574,6 @@
       (_ (error "Not in CNF: ~A" f)))))
 
 ;;; ============================================================
-;;; Debug and Stats
-;;; ============================================================
-
-;; Mode: 'debug | 'stats | nil (default)
-;; Note if we changed this, we should reload the file to recompile the definitions to include debugging/stats information
-(defconstant +debug-mode+ 'nil)
-
-(defmacro dbg (fmt &rest args)
-  "Print debug message when +debug-mode+ is 'debug"
-  `(when (eq +debug-mode+ 'debug)
-     (pprint (format nil ,fmt ,@args))))
-
-(defmacro dassert (test-form &optional format-string &rest format-args)
-  "Assert that TEST-FORM is true, but only when +debug-mode+ is 'debug.
-   If TEST-FORM is false and debug mode is enabled, signals an error with the optional message."
-  `(when (eq +debug-mode+ 'debug)
-     (assert ,test-form () ,@(when format-string (list* format-string format-args)))))
-
-;;; ============================================================
 ;;; DP Stats
 ;;; ============================================================
 
@@ -1779,7 +1780,6 @@
                   cl))
     ;; Find variable with minimum blowup: m*n - m - n
     ;; TODO: Early exit if blowup <= 0
-    ;; TODO: Tie-breaking with MOMS heuristic (prefer variables in smaller clauses)
     (let ((best-var nil)
           (best-score 0))
       (maphash #'(lambda (var counts)
@@ -1792,7 +1792,6 @@
                var-counts)
      best-var)))
 
-;; TODO: use signatures to speed up subsumption
 (defun remove-subsumed (cls)
   "Remove clauses that are subsumed by other clauses in the list.
    The value bound to cls shouldn't be used after the function call as it will be modified in place."
@@ -1982,12 +1981,12 @@
    If expected is provided, assert that result matches expected.
    If result is 'sat, verify that substituting asgn makes f valid.
    If result is 'unsat, verify using ACL2s."
-  ;; First check if result matches expected (if provided)
+
   (when expected
     (assert (eq result expected) ()
             "Result ~A does not match expected ~A for formula: ~A"
             result expected f))
-  ;; Then verify the result is correct
+
   (case result
     (sat
      (let* ((subst-f (subst-formula f asgn)))
@@ -2099,12 +2098,30 @@
     ;; Combine all constraints
     `(and ,@no-red-s ,@no-blue-k)))
 
+;; Random 3SAT to ensure the sat solver doesn't crash
+(defun gen-3sat (vars nclauses)
+  `(and ,@(loop repeat nclauses
+                collect `(or ,@(loop repeat 3
+                                     for var = (nth (random (length vars)) vars)
+                                     collect (if (zerop (random 2))
+                                                 var
+                                                 `(not ,var)))))))
+
+(defun 3sat (n m) (gen-3sat (genvars "X_" n) m))
+
 (defmacro with-timeout (timeout exp)
   `(handler-case
      (sb-ext:with-timeout ,timeout
        ,exp)
      (sb-ext:timeout ()
        (format t "Timed out!~%"))))
+
+(defun run-random-3sat (test-sat s n m &optional (timeout 5))
+  (let ((xs (genvars "X_" n)))
+    (loop repeat s
+          for formula = (gen-3sat xs m)
+          do (with-timeout timeout
+               (funcall test-sat formula nil)))))
 
 (defun run-quick-tests (test-sat &optional (timeout 5))
   "Run a suite of tests on the DP solver, using TEST-SAT to verify results.
@@ -2248,21 +2265,28 @@
      (dp-stats-report)))
 
 (defun run-tests-dp ()
- "Run DP tests and report statistics."
- (with-dp-stats (run-quick-tests #'test-dp))
+  "Run DP tests and report statistics."
 
- ;; Intractable cases no matter how long the timeout is
- (let ((tm 2))
-   (with-timeout tm (test-dp (ramsey 3 4 8)))
-   (with-timeout tm (test-dp (ramsey 3 4 9) 'sat))
+  ;; Quick
+  (with-dp-stats (run-quick-tests #'test-dp))
 
-   (with-timeout tm
-       ;; n < R(4,4), can avoid monochromatic K_4 - STA
-       (test-dp (ramsey 4 4 17)))
+  ;; Random 3SAT
+  (run-random-3sat #'test-dp 10 5 5)
+  (run-random-3sat #'test-dp 20 20 80)
+  (run-random-3sat #'test-dp 20 30 120)
 
-   (with-timeout tm
-       ;; n >= R(4,4), cannot avoid monochromatic K_4 - UNSAT
-       (test-dp (ramsey 4 4 18) 'unsat))))
+  ;; Intractable cases no matter how long the timeout is
+  (let ((tm 2))
+    (with-timeout tm (test-dp (ramsey 3 4 8)))
+    (with-timeout tm (test-dp (ramsey 3 4 9) 'sat))
+
+    (with-timeout tm
+      ;; n < R(4,4), can avoid monochromatic K_4 - STA
+      (test-dp (ramsey 4 4 17)))
+
+    (with-timeout tm
+      ;; n >= R(4,4), cannot avoid monochromatic K_4 - UNSAT
+      (test-dp (ramsey 4 4 18) 'unsat))))
 
 (run-tests-dp)
 
@@ -3083,8 +3107,16 @@
 
 (defun run-tests-dpll ()
   "Run DPLL tests and report statistics."
+
+  ;; Quick
   (with-dpll-stats
       (run-quick-tests #'test-dpll))
+
+  ;; Random 3SAT
+  (run-random-3sat #'test-dpll 20 5 5)
+  (run-random-3sat #'test-dpll 20 30 120)
+  (run-random-3sat #'test-dpll 20 100 400 20)
+  (run-random-3sat #'test-dpll 20 150 600 20)
 
   ;; Other cases
   (with-dpll-stats
@@ -3096,11 +3128,11 @@
 
   ;; Intractable cases
   (with-timeout 5
-      ;; n < R(4,4), can avoid monochromatic K_4 - SAT
-      (test-dpll (ramsey 4 4 17)))
+    ;; n < R(4,4), can avoid monochromatic K_4 - SAT
+    (test-dpll (ramsey 4 4 17)))
 
   (with-timeout 5
-      ;; n >= R(4,4), cannot avoid monochromatic K_4 - UNSAT
-      (test-dpll (ramsey 4 4 18) 'unsat)))
+    ;; n >= R(4,4), cannot avoid monochromatic K_4 - UNSAT
+    (test-dpll (ramsey 4 4 18) 'unsat)))
 
 (run-tests-dpll)
