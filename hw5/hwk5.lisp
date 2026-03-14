@@ -498,8 +498,6 @@
 
 |#
 
-;; TODO: keep atoms intact
-
 (defun partition (pred list)
   "Partition list into (values trues falses) based on pred"
   (loop for x in list
@@ -514,7 +512,9 @@
            (sq (p-simplify-implies q)))
        `(or (not ,sp) ,sq)))
     ((list* op args)
-     `(,op ,@(mapcar #'p-simplify-implies args)))
+     (if (p-funp op)
+         `(,op ,@(mapcar #'p-simplify-implies args))
+         f))
     (_ f)))
 
 (defun p-simplify-const (f)
@@ -541,39 +541,41 @@
               (t `(if ,a ,b ,c)))))
 
     ((list* op as)
-     (let ((as (mapcar #'p-simplify-const as)))
-       (match op
-         ((or 'iff 'xor)
-          (let+ (((&values consts non-consts) (partition #'booleanp as))
-                 (id (pfun-key->val op :identity))
-                 (result (if (== op 'iff)
-                             (evenp (count nil consts))
-                             (oddp (count t consts)))))
-            (if (== result id)
-                (cond ((null non-consts) id)
-                      ((null (cdr non-consts)) (car non-consts))
-                      (t `(,op ,@non-consts)))
-                (cond ((null non-consts) result)
-                      ((null (cdr non-consts)) `(not ,(car non-consts)))
-                      (t `(,op ,result ,@non-consts))))))
+     (if (p-funp op)
+         (let ((as (mapcar #'p-simplify-const as)))
+           (match op
+               ((or 'iff 'xor)
+                (let+ (((&values consts non-consts) (partition #'booleanp as))
+                       (id (pfun-key->val op :identity))
+                       (result (if (== op 'iff)
+                                   (evenp (count nil consts))
+                                   (oddp (count t consts)))))
+                  (if (== result id)
+                      (cond ((null non-consts) id)
+                            ((null (cdr non-consts)) (car non-consts))
+                            (t `(,op ,@non-consts)))
+                      (cond ((null non-consts) result)
+                            ((null (cdr non-consts)) `(not ,(car non-consts)))
+                            (t `(,op ,result ,@non-consts))))))
 
-         ((or 'and 'or)
-          (let* ((pop (key-alist->val op *p-ops*))
-                 (id (key-list->val :identity pop))
-                 (sink (key-list->val :sink pop)))
-            (if (in sink as)
-                sink
-                `(,op
-                  ,@(reduce
-                     #'(lambda (a as)
-                         (if (booleanp a)
-                             (if (== a id) as `(,a ,@as))
-                             `(,a ,@as)))
-                     as
-                     :from-end t
-                     :initial-value nil)))))
+             ((or 'and 'or)
+              (let* ((pop (key-alist->val op *p-ops*))
+                     (id (key-list->val :identity pop))
+                     (sink (key-list->val :sink pop)))
+                (if (in sink as)
+                    sink
+                    `(,op
+                      ,@(reduce
+                         #'(lambda (a as)
+                             (if (booleanp a)
+                                 (if (== a id) as `(,a ,@as))
+                                 `(,a ,@as)))
+                         as
+                         :from-end t
+                         :initial-value nil)))))
 
-         (_ `(,op ,@as)))))
+             (_ `(,op ,@as))))
+         f))
 
     (_ f)))
 
@@ -609,11 +611,10 @@
                                   :from-end t
                                   :initial-value nil))))))
                  (t `(,op ,@(mapcar #'p-simplify-flatten as)))))
-         `(,op ,@(mapcar #'p-simplify-flatten as))))
+         f))
     (_ f)))
 
-(assertf #'p-simplify-flatten '(not (foo (and))) '(not (foo t)))
-(assertf #'p-simplify-flatten '(not (foo (and p))) '(not (foo p)))
+(assertf #'p-simplify-flatten '(not (foo x)) '(not (foo x)))
 (assertf #'p-simplify-flatten '(and p q (and r s) (or u v)) '(and p q r s (or u v)))
 (assertf #'p-simplify-flatten '(not (not p)) '(not (not p)))
 (assertf #'p-simplify-flatten '(not (iff (iff) (and) (or) q)) '(not (iff t t nil q)))
@@ -639,9 +640,15 @@
             ((list a b) `(iff ,a ,b))  ; (not (xor a b)) -> (iff a b)
             ((list* a bs)  ; (not (xor a b c ...)) -> (iff a (xor b c ...))
              `(iff ,a (xor ,@bs))))))
-       ((list* op bs) `(not (,op ,@(mapcar #'p-simplify-not bs))))
-       (_ `(not ,a))))
-    ((list* op as) `(,op ,@(mapcar #'p-simplify-not as)))
+       ((list* op bs)
+        (if (p-funp op)
+            `(not (,op ,@(mapcar #'p-simplify-not bs)))
+            f))
+       (_ f)))
+    ((list* op as)
+     (if (p-funp op)
+         `(,op ,@(mapcar #'p-simplify-not as))
+         f))
     (_ f)))
 
 (assertf #'p-simplify-not '(not (not p)) 'p)
@@ -660,101 +667,103 @@
   "Simplify duplicated and opposite subformulas"
   (match f
     ((list* op as)
-     (let ((as (mapcar #'p-simplify-dup as)))
-       (cond
-         ;; and/or: idempotent, check for p and (not p)
-         ((in op '(and or))
-          (let* ((pop (key-alist->val op *p-ops*))
-                 (sink (key-list->val :sink pop)))
-            ;; Check for opposite: p and (not p) => sink
-            (if (some #'(lambda (a) (has-opposite a as)) as)
-                sink
-              ;; Remove duplicates (idempotent)
-              `(,op ,@(remove-dups as)))))
+     (if (p-funp op)
+         (let ((as (mapcar #'p-simplify-dup as)))
+           (cond
+             ;; and/or: idempotent, check for p and (not p)
+             ((in op '(and or))
+              (let* ((pop (key-alist->val op *p-ops*))
+                     (sink (key-list->val :sink pop)))
+                ;; Check for opposite: p and (not p) => sink
+                (if (some #'(lambda (a) (has-opposite a as)) as)
+                    sink
+                    ;; Remove duplicates (idempotent)
+                    `(,op ,@(remove-dups as)))))
 
-         ;; iff: p iff p = t (identity), p iff (not p) = nil
-         ((== op 'iff)
-          (let* ((pairs (make-hash-table :test #'equal))
-                 (seen (make-hash-table :test #'equal))
-                 (neg-count 0)
-                 (result nil))
-            ;; Count occurrences
-            (dolist (a as)
-              (incf (gethash a pairs 0)))
-            ;; Check for opposites and count odd occurrences
-            (maphash #'(lambda (k v)
-                         (let ((neg (negate k)))
-                           (let+ (((&values neg-val neg-present?) (gethash neg pairs)))
-                             (when (and neg-present? (not (gethash neg seen)))
-                               ;; Mark both as seen
-                               (setf (gethash k seen) t)
-                               (setf (gethash neg seen) t)
-                               ;; Reduce counts
-                               (let ((n (min v neg-val)))
-                                 (incf neg-count n)
-                                 (decf (gethash k pairs) n)
-                                 (decf (gethash neg pairs) n))))))
-                     pairs)
-            ;; Build result: keep odd occurrences
-            (maphash #'(lambda (k v)
-                         (when (oddp v)
-                           (push k result)))
-                     pairs)
-            ;; Add nil for each opposite pair (nil is not identity for iff)
-            (dotimes (i neg-count)
-              (push nil result))
-            (cond ((null result) t)
-                  ((null (cdr result)) (car result))
-                  (t `(iff ,@(reverse result))))))
+             ;; iff: p iff p = t (identity), p iff (not p) = nil
+             ((== op 'iff)
+              (let* ((pairs (make-hash-table :test #'equal))
+                     (seen (make-hash-table :test #'equal))
+                     (neg-count 0)
+                     (result nil))
+                ;; Count occurrences
+                (dolist (a as)
+                  (incf (gethash a pairs 0)))
+                ;; Check for opposites and count odd occurrences
+                (maphash #'(lambda (k v)
+                             (let ((neg (negate k)))
+                               (let+ (((&values neg-val neg-present?) (gethash neg pairs)))
+                                 (when (and neg-present? (not (gethash neg seen)))
+                                   ;; Mark both as seen
+                                   (setf (gethash k seen) t)
+                                   (setf (gethash neg seen) t)
+                                   ;; Reduce counts
+                                   (let ((n (min v neg-val)))
+                                     (incf neg-count n)
+                                     (decf (gethash k pairs) n)
+                                     (decf (gethash neg pairs) n))))))
+                         pairs)
+                ;; Build result: keep odd occurrences
+                (maphash #'(lambda (k v)
+                             (when (oddp v)
+                               (push k result)))
+                         pairs)
+                ;; Add nil for each opposite pair (nil is not identity for iff)
+                (dotimes (i neg-count)
+                  (push nil result))
+                (cond ((null result) t)
+                      ((null (cdr result)) (car result))
+                      (t `(iff ,@(reverse result))))))
 
-         ;; xor: p xor p = nil (identity), p xor (not p) = t
-         ((== op 'xor)
-          (let* ((pairs (make-hash-table :test #'equal))
-                 (seen (make-hash-table :test #'equal))
-                 (neg-count 0)
-                 (result nil))
-            ;; Count occurrences
-            (dolist (a as)
-              (incf (gethash a pairs 0)))
-            ;; Check for opposites
-            (maphash #'(lambda (k v)
-                         (let ((neg (negate k)))
-                           (let+ (((&values neg-val neg-present?) (gethash neg pairs)))
-                             (when (and neg-present? (not (gethash neg seen)))
-                               ;; Mark both as seen
-                               (setf (gethash k seen) t)
-                               (setf (gethash neg seen) t)
-                               ;; Reduce counts
-                               (let ((n (min v neg-val)))
-                                 (incf neg-count n)
-                                 (decf (gethash k pairs) n)
-                                 (decf (gethash neg pairs) n))))))
-                     pairs)
-            ;; Build result: keep odd occurrences
-            (maphash #'(lambda (k v)
-                         (when (oddp v)
-                           (push k result)))
-                     pairs)
-            ;; Add t for each opposite pair
-            (dotimes (i neg-count)
-              (push t result))
-            (cond ((null result) nil)
-                  ((null (cdr result)) (car result))
-                  (t `(xor ,@(reverse result))))))
+             ;; xor: p xor p = nil (identity), p xor (not p) = t
+             ((== op 'xor)
+              (let* ((pairs (make-hash-table :test #'equal))
+                     (seen (make-hash-table :test #'equal))
+                     (neg-count 0)
+                     (result nil))
+                ;; Count occurrences
+                (dolist (a as)
+                  (incf (gethash a pairs 0)))
+                ;; Check for opposites
+                (maphash #'(lambda (k v)
+                             (let ((neg (negate k)))
+                               (let+ (((&values neg-val neg-present?) (gethash neg pairs)))
+                                 (when (and neg-present? (not (gethash neg seen)))
+                                   ;; Mark both as seen
+                                   (setf (gethash k seen) t)
+                                   (setf (gethash neg seen) t)
+                                   ;; Reduce counts
+                                   (let ((n (min v neg-val)))
+                                     (incf neg-count n)
+                                     (decf (gethash k pairs) n)
+                                     (decf (gethash neg pairs) n))))))
+                         pairs)
+                ;; Build result: keep odd occurrences
+                (maphash #'(lambda (k v)
+                             (when (oddp v)
+                               (push k result)))
+                         pairs)
+                ;; Add t for each opposite pair
+                (dotimes (i neg-count)
+                  (push t result))
+                (cond ((null result) nil)
+                      ((null (cdr result)) (car result))
+                      (t `(xor ,@(reverse result))))))
 
-         ;; if: check specific cases
-         ((== op 'if)
-          (match as
-            ((list a b c)
-             (cond ((equal b c) b)
-                   ((equal a b) `(or ,a ,c))      ; (if a a c) = (or a c)
-                   ((equal a c) `(and ,a ,b))     ; (if a b a) = (and a b)
-                   ((equal a (negate b)) `(and ,b ,c))  ; (if a (not a) c) = (and (not a) c)
-                   ((equal a (negate c)) `(or ,b ,c))   ; (if a b (not a)) = (or b (not a))
-                   (t `(if ,@as))))
-            (_ `(if ,@as))))
+             ;; if: check specific cases
+             ((== op 'if)
+              (match as
+                ((list a b c)
+                   (cond ((equal b c) b)
+                         ((equal a b) `(or ,a ,c))      ; (if a a c) = (or a c)
+                         ((equal a c) `(and ,a ,b))     ; (if a b a) = (and a b)
+                         ((equal a (negate b)) `(and ,b ,c))  ; (if a (not a) c) = (and (not a) c)
+                         ((equal a (negate c)) `(or ,b ,c))   ; (if a b (not a)) = (or b (not a))
+                         (t `(if ,@as))))
+                (_ `(if ,@as))))
 
-         (t `(,op ,@as)))))
+             (t `(,op ,@as))))
+         f))
 
     (_ f)))
 
@@ -819,7 +828,6 @@
 
            ((p-funp op) `(,op ,@(mapcar #'(lambda (a) (p-simplify-shannon a env)) as)))
 
-           ;; Non-variable atom: keep as-is
            (t f)))))
 
 (assertf #'p-simplify-shannon '(iff nil p q) '(iff nil p q))
