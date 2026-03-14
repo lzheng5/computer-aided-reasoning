@@ -1268,18 +1268,16 @@
 (defstruct var-manager
   "Manages mapping between symbolic variables and numeric variables"
   (sym->num (make-hash-table :test #'equal))  ; symbol -> number
-  (num->sym (make-hash-table :test #'eql))    ; number -> symbol
-  (counter 0))                                ; next available variable number
+  (num->sym (make-hash-table :test #'eql)))   ; number -> symbol
 
 (defun var-manager-get-num (vm sym)
   "Get or create numeric variable for symbolic variable"
   (let+ (((&values num present?) (gethash sym (var-manager-sym->num vm))))
     (if present?
         num
-        (let ((new-num (var-manager-counter vm)))
+        (let ((new-num (hash-table-count (var-manager-sym->num vm))))
           (setf (gethash sym (var-manager-sym->num vm)) new-num)
           (setf (gethash new-num (var-manager-num->sym vm)) sym)
-          (setf (var-manager-counter vm) (1+ new-num))
           new-num))))
 
 (defun var-manager-get-sym (vm num)
@@ -1729,34 +1727,19 @@
 ;;; CNF -> Clauses Conversion
 ;;; ============================================================
 
-(defun cnf-count-vars (f)
-  "Count unique variables in a CNF formula.
-   Returns the count of unique variable symbols."
+(defun count-vars (f)
+  "Count unique variables in a propositional formula.
+   Returns the count of unique variable symbols.
+   Works on any propositional formula (not just CNF)."
   (let ((vars (make-hash-table :test #'equal)))
-    (labels ((extract-var (lit)
-               "Extract variable from a literal"
-               (match lit
+    (labels ((collect (f)
+               (match f
                  ((type boolean) nil)
-                 ((type symbol) lit)
-                 ((list 'not x) (extract-var x))
-                 (_ nil)))
-             (process-clause (cl)
-               "Process a clause to extract variables"
-               (match cl
-                 ((type boolean) nil)
-                 ((type symbol) (let ((v (extract-var cl))) (when v (setf (gethash v vars) t))))
-                 ((list 'not _) (let ((v (extract-var cl))) (when v (setf (gethash v vars) t))))
-                 ((list* 'or args)
-                  (dolist (lit args)
-                    (let ((v (extract-var lit))) (when v (setf (gethash v vars) t)))))
-                 (_ nil))))
-      (match f
-        ((type boolean) nil)
-        ((type symbol) (process-clause f))
-        ((list 'not _) (process-clause f))
-        ((list* 'or _) (process-clause f))
-        ((list* 'and args) (dolist (cl args) (process-clause cl)))
-        (_ nil)))
+                 ((type symbol) (setf (gethash f vars) t))
+                 ((list* op args)
+                  (when (p-funp op)
+                    (dolist (arg args) (collect arg)))))))
+      (collect f))
     (hash-table-count vars)))
 
 (defmacro with-clause-max-num-lits ((num-vars) &body body)
@@ -2160,24 +2143,19 @@
               ;; All unit clauses must have same sign and contain the same target var
               (assignment-set asgn var (lit-sign (clause-unit-lit (first cls))))))))))
 
-;; TODO: come up with a more efficient pvars, count-vars that doesn't build lists but use hash tables 
-;;       then we don't need cnf-count-vars
-
-;; TODO: for var-manager, I think we can remove the counter since we will set the clause-max-num-lits 
-
 (defun dp (f)
   "Main DP function: takes a formula f, converts to CNF, and applies DP algorithm.
    Returns 'sat or 'unsat with assignment alist."
   (dp-stats-time :total
     (let+ (((&values cnf skeleton amap) (tseitin f))
-           (num-vars (cnf-count-vars cnf))
+           (num-vars (count-vars cnf))
            (vm (make-var-manager)))
-      ;; Bind clause size for bit-vector implementation
+
       (with-clause-max-num-lits (num-vars)
         (let+ ((cls (cnf->clauses cnf vm)) ;; mutates vm
                (asgn (make-assignment)))
 
-          (dp-stats-set-formula (length (pvars skeleton))
+          (dp-stats-set-formula (count-vars skeleton)
                                 (clause-max-num-lits)
                                 (length cls)
                                 (if cls (apply #'max (mapcar #'clause-size cls)) 0))
@@ -3302,13 +3280,13 @@
    Returns 'sat with assignment alist or 'unsat with nil."
   (dpll-stats-time :total
     (let+ (((&values cnf skeleton amap) (tseitin f))
-           (num-vars (cnf-count-vars cnf))
+           (num-vars (count-vars cnf))
            (vm (make-var-manager)))
-      ;; Bind clause size for bit-vector implementation
+
       (with-clause-max-num-lits (num-vars)
         (let+ ((cls (cnf->clauses cnf vm))) ;; mutates vm
 
-          (dpll-stats-set-formula (length (pvars skeleton))
+          (dpll-stats-set-formula (count-vars skeleton)
                                   (clause-max-num-lits)
                                   (length cls)
                                   (if cls (apply #'max (mapcar #'clause-size cls)) 0))
