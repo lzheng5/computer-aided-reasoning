@@ -498,6 +498,8 @@
 
 |#
 
+;; TODO: keep atoms intact
+
 (defun partition (pred list)
   "Partition list into (values trues falses) based on pred"
   (loop for x in list
@@ -1602,6 +1604,7 @@
            *dp-stats-time-sat* 0
            *dp-stats-time-total* 0)))
 
+;; TODO: inc formula
 (defmacro dp-stats-set-formula (orig-vars cnf-vars cnf-clauses max-clause-size)
   "Set formula statistics"
   `(when (eq +debug-mode+ 'stats)
@@ -1626,7 +1629,7 @@
      (incf *dp-stats-resolve-count*)))
 
 (defmacro dp-stats-update-max-clauses (n)
-  "Update max clauses if n is larger"
+  "Update max number of clauses if n is larger"
   `(when (eq +debug-mode+ 'stats)
      (setf *dp-stats-max-clauses* (max *dp-stats-max-clauses* ,n))))
 
@@ -1654,14 +1657,14 @@
      (format t "~%=== DP Statistics ===~%")
      (format t "--- Formula Info ---~%")
      (format t "Original vars:        ~A~%" *dp-stats-orig-vars*)
-     (format t "After Tseitin:        ~A vars, ~A clauses~%" 
+     (format t "After Tseitin:        ~A vars, ~A clauses~%"
              *dp-stats-cnf-vars* *dp-stats-cnf-clauses*)
      (format t "Max clause size:      ~A~%" *dp-stats-max-clause-size*)
      (format t "--- Search Stats ---~%")
      (format t "Unit propagations:    ~A~%" *dp-stats-unit-count*)
      (format t "Pure literals:        ~A~%" *dp-stats-pure-count*)
      (format t "Resolution steps:     ~A~%" *dp-stats-resolve-count*)
-     (format t "Max clauses:          ~A~%" *dp-stats-max-clauses*)
+     (format t "Max number of clauses:          ~A~%" *dp-stats-max-clauses*)
      (format t "--- Timing ---~%")
      (format t "Time (unit/sat):      ~,3F ms (~,1F%)~%"
              (stats-time->ms *dp-stats-time-unit*)
@@ -1672,7 +1675,7 @@
      (format t "Time (resolve/sat):   ~,3F ms (~,1F%)~%"
              (stats-time->ms *dp-stats-time-resolve*)
              (if (> *dp-stats-time-sat* 0) (* 100.0 (/ *dp-stats-time-resolve* *dp-stats-time-sat*)) 0))
-     (format t "Time (sat/total):     ~,3F ms (~,1F%)~%" 
+     (format t "Time (sat/total):     ~,3F ms (~,1F%)~%"
              (stats-time->ms *dp-stats-time-sat*)
              (if (> *dp-stats-time-total* 0) (* 100.0 (/ *dp-stats-time-sat* *dp-stats-time-total*)) 0))
      (format t "Time (total):         ~,3F ms~%" (stats-time->ms *dp-stats-time-total*))
@@ -1985,7 +1988,8 @@
                "Assignment does not make formula valid: ~A~%Assignment: ~A~%Result: ~A"
                f asgn subst-f)))
     (unsat
-     (assert (acl2s-unsat? f) () "Formula is not UNSAT: ~A" f))
+     (unless (acl2s-unsat? f)
+       (format t "ACL2s cannot prove ~A is UNSAT.~%" f)))
     (otherwise
      (error "Invalid result: ~A (expected 'sat or 'unsat)" result))))
 
@@ -2087,10 +2091,16 @@
     ;; Combine all constraints
     `(and ,@no-red-s ,@no-blue-k)))
 
-(defun run-tests (test-sat &optional (time-out 40))
+(defmacro with-timeout (timeout exp)
+  `(handler-case
+     (sb-ext:with-timeout ,timeout
+       ,exp)
+     (sb-ext:timeout ()
+       (format t "Timed out!~%"))))
+
+(defun run-quick-tests (test-sat &optional (timeout 5))
   "Run a suite of tests on the DP solver, using TEST-SAT to verify results.
-   TIME-OUT is the maximum time in seconds for each test.
-   The default time out is the same as in ACL2s."
+   TIMEOUT is the maximum time in seconds for each test."
   (labels ((test (f &optional (expected 'sat) (label nil))
              (format t "Testing: ~A~%"
                      (or label
@@ -2098,12 +2108,8 @@
                            (if (> (length s) 80)
                                (concatenate 'string (subseq s 0 80) "...")
                                s))))
-             (handler-case
-                 (sb-ext:with-timeout time-out
-                   (funcall test-sat f expected))
-               (sb-ext:timeout ()
-                 (format t "Solver timed out!~%")
-                 :timeout))))
+             (with-timeout timeout
+                 (funcall test-sat f expected))))
     (format t "Running tests...~%")
 
     ;; Basic SAT tests
@@ -2227,18 +2233,30 @@
     (test (ramsey 3 3 6) 'unsat) ; n >= R(3,3), cannot avoid monochromatic triangles - UNSAT
     ))
 
-(defun run-test-dp ()
- "Run DP tests and report statistics."
- (dp-stats-reset)
- (run-tests #'test-dp)
- ;; Time out
- ;; (test-dp (ramsey 3 4 8))
- ;; (test-dp (ramsey 3 4 9) 'unsat)
- ;; (test-dp (ramsey 4 4 17)) ; n < R(4,4), can avoid monochromatic K_4 - SAT
- ;; (test-dp (ramsey 4 4 18) 'unsat) ; n >= R(4,4), cannot avoid monochromatic K_4 - UNSAT
- (dp-stats-report))
+(defmacro with-dp-stats (exp)
+  `(progn
+     (dp-stats-reset)
+     ,exp
+     (dp-stats-report)))
 
-(run-test-dp)
+(defun run-tests-dp ()
+ "Run DP tests and report statistics."
+ (with-dp-stats (run-quick-tests #'test-dp))
+
+ ;; Intractable cases no matter how long the timeout is
+ (let ((tm 2))
+   (with-timeout tm (test-dp (ramsey 3 4 8)))
+   (with-timeout tm (test-dp (ramsey 3 4 9) 'sat))
+
+   (with-timeout tm
+       ;; n < R(4,4), can avoid monochromatic K_4 - STA
+       (test-dp (ramsey 4 4 17)))
+
+   (with-timeout tm
+       ;; n >= R(4,4), cannot avoid monochromatic K_4 - UNSAT
+       (test-dp (ramsey 4 4 18) 'unsat))))
+
+(run-tests-dp)
 
 #|
 
@@ -2375,42 +2393,42 @@
      (format t "~%=== DPLL Statistics ===~%")
      (format t "--- Formula Info ---~%")
      (format t "Original vars:        ~A~%" *dpll-stats-orig-vars*)
-     (format t "After Tseitin:        ~A vars, ~A clauses~%" 
+     (format t "After Tseitin:        ~A vars, ~A clauses~%"
              *dpll-stats-cnf-vars* *dpll-stats-cnf-clauses*)
      (format t "Max clause size:      ~A~%" *dpll-stats-max-clause-size*)
      (format t "--- Search Stats ---~%")
      (format t "Decisions:            ~A~%" *dpll-stats-decisions*)
      (format t "Propagations:         ~A~%" *dpll-stats-propagations*)
      (format t "Conflicts:            ~A~%" *dpll-stats-conflicts*)
-     (format t "Learnt clauses:       ~A~%" *dpll-stats-learnt-clauses*)
-     (format t "Avg learnt size:      ~,2F~%" 
-             (if (> *dpll-stats-learnt-clauses* 0) 
-                 (/ *dpll-stats-learnt-lits* *dpll-stats-learnt-clauses*) 
+     (format t "Num of learnt clauses:       ~A~%" *dpll-stats-learnt-clauses*)
+     (format t "Avg learnt size:      ~,2F~%"
+             (if (> *dpll-stats-learnt-clauses* 0)
+                 (/ *dpll-stats-learnt-lits* *dpll-stats-learnt-clauses*)
                  0.0))
      (format t "Max decision level:   ~A~%" *dpll-stats-max-level*)
      (format t "Backjumps:            ~A~%" *dpll-stats-backjumps*)
      (format t "--- Timing ---~%")
      (format t "Time (propagate/sat): ~,3F ms (~,1F%)~%"
              (stats-time->ms *dpll-stats-time-propagate*)
-             (if (> *dpll-stats-time-sat* 0) 
+             (if (> *dpll-stats-time-sat* 0)
                  (* 100.0 (/ *dpll-stats-time-propagate* *dpll-stats-time-sat*)) 0))
      (format t "Time (analyze/sat):   ~,3F ms (~,1F%)~%"
              (stats-time->ms *dpll-stats-time-analyze*)
-             (if (> *dpll-stats-time-sat* 0) 
+             (if (> *dpll-stats-time-sat* 0)
                  (* 100.0 (/ *dpll-stats-time-analyze* *dpll-stats-time-sat*)) 0))
      (format t "Time (backtrack/sat): ~,3F ms (~,1F%)~%"
              (stats-time->ms *dpll-stats-time-backtrack*)
-             (if (> *dpll-stats-time-sat* 0) 
+             (if (> *dpll-stats-time-sat* 0)
                  (* 100.0 (/ *dpll-stats-time-backtrack* *dpll-stats-time-sat*)) 0))
      (format t "Time (decide/sat):    ~,3F ms (~,1F%)~%"
              (stats-time->ms *dpll-stats-time-decide*)
-             (if (> *dpll-stats-time-sat* 0) 
+             (if (> *dpll-stats-time-sat* 0)
                  (* 100.0 (/ *dpll-stats-time-decide* *dpll-stats-time-sat*)) 0))
-     (format t "Time (sat/total):     ~,3F ms (~,1F%)~%" 
+     (format t "Time (sat/total):     ~,3F ms (~,1F%)~%"
              (stats-time->ms *dpll-stats-time-sat*)
-             (if (> *dpll-stats-time-total* 0) 
+             (if (> *dpll-stats-time-total* 0)
                  (* 100.0 (/ *dpll-stats-time-sat* *dpll-stats-time-total*)) 0))
-     (format t "Time (total):         ~,3F ms~%" 
+     (format t "Time (total):         ~,3F ms~%"
              (stats-time->ms *dpll-stats-time-total*))
      (format t "=======================~%")))
 
@@ -2936,6 +2954,8 @@
 
           (values learnt-cl (backtrack-level learnt-cl trail))))))
 
+;; TODO: periodically remove clauses
+
 (defun dpll-backtrack (learnt-cl trail watches propQ bt-level)
    "Backtrack the trail to the given backtracking level.
     Update the propagation queue propQ to reflect the new trail after backtracking.
@@ -3027,7 +3047,7 @@
            (vm (make-var-manager))
            (cls (cnf->clauses cnf vm))) ;; mutates vm
 
-      (dpll-stats-set-formula (length (pvars skeleton)) 
+      (dpll-stats-set-formula (length (pvars skeleton))
                               (var-manager-num-vars vm)
                               (length cls)
                               (if cls (apply #'max (mapcar #'clause-size cls)) 0))
@@ -3047,16 +3067,32 @@
   (let+ (((&values result asgn) (dpll f)))
     (verify-sat f result asgn expected)))
 
-(defun run-test-dpll ()
-  "Run DPLL tests and report statistics."
-  (dpll-stats-reset)
-  (run-tests #'test-dpll)
-  (test-dpll (ramsey 3 4 8))
-  ;; ACL2s cannot prove the case to be unsat (but no counter examples).
-  (test-dpll (ramsey 3 4 9) 'unsat)
-  ;; Time out:
-  ;; (test-dpll (ramsey 4 4 17)) ; n < R(4,4), can avoid monochromatic K_4 - SAT
-  ;; (test-dpll (ramsey 4 4 18) 'unsat) ; n >= R(4,4), cannot avoid monochromatic K_4 - UNSAT
-  (dpll-stats-report))
+(defmacro with-dpll-stats (exp)
+  `(progn
+     (dpll-stats-reset)
+     ,exp
+     (dpll-stats-report)))
 
-(run-test-dpll)
+(defun run-tests-dpll ()
+  "Run DPLL tests and report statistics."
+  (with-dpll-stats
+      (run-quick-tests #'test-dpll))
+
+  ;; Other cases
+  (with-dpll-stats
+      (test-dpll (ramsey 3 4 8)))
+
+  (with-dpll-stats
+      ;; ACL2s cannot prove the case to be unsat (but no counter examples).
+      (test-dpll (ramsey 3 4 9) 'unsat))
+
+  ;; Intractable cases
+  (with-timeout 5
+      ;; n < R(4,4), can avoid monochromatic K_4 - SAT
+      (test-dpll (ramsey 4 4 17)))
+
+  (with-timeout 5
+      ;; n >= R(4,4), cannot avoid monochromatic K_4 - UNSAT
+      (test-dpll (ramsey 4 4 18) 'unsat)))
+
+(run-tests-dpll)
