@@ -1374,7 +1374,7 @@
 ;;; ============================================================
 
 ;; Static clause configuration
-(defconstant +clause-impl+ 'bit-vector)  ; 'hash-set or 'bit-vector
+(defconstant +clause-impl+ 'hash-set)  ; 'hash-set or 'bit-vector
 
 (defparameter *clause-max-num-lits* 0)
 
@@ -1747,9 +1747,6 @@
    For bit-vector implementation, this sets the size of bit vectors."
   `(let ((*clause-max-num-lits* (* 2 ,num-vars)))
      ,@body))
-
-(defun clause-max-num-lits ()
-  *clause-max-num-lits*)
 
 (defun cnf->clauses (f vm)
   "Convert a CNF formula to a list of clauses with numeric literals.
@@ -2156,7 +2153,7 @@
                (asgn (make-assignment)))
 
           (dp-stats-set-formula (count-vars skeleton)
-                                (clause-max-num-lits)
+                                num-vars
                                 (length cls)
                                 (if cls (apply #'max (mapcar #'clause-size cls)) 0))
 
@@ -2322,23 +2319,27 @@
      (sb-ext:timeout ()
        (format t "Timed out!~%"))))
 
+(defun print-testing-msg (f)
+  (format t "Testing: ~A~%"
+          (let ((s (write-to-string f)))
+            (if (> (length s) 80)
+                (concatenate 'string (subseq s 0 80) "...")
+                s))))
+
 (defun run-random-3sat (test-sat s n m &optional (timeout 5))
   (let ((xs (genvars "X_" n)))
     (loop repeat s
           for formula = (gen-3sat xs m)
-          do (with-timeout timeout
-               (funcall test-sat formula nil)))))
+          do (progn
+               (print-testing-msg formula)
+               (with-timeout timeout
+                       (funcall test-sat formula nil))))))
 
 (defun run-quick-tests (test-sat &optional (timeout 5))
   "Run a suite of tests on the DP solver, using TEST-SAT to verify results.
    TIMEOUT is the maximum time in seconds for each test."
-  (labels ((test (f &optional (expected 'sat) (label nil))
-             (format t "Testing: ~A~%"
-                     (or label
-                         (let ((s (write-to-string f)))
-                           (if (> (length s) 80)
-                               (concatenate 'string (subseq s 0 80) "...")
-                               s))))
+  (labels ((test (f &optional (expected 'sat))
+             (print-testing-msg f)
              (with-timeout timeout
                  (funcall test-sat f expected))))
     (format t "Running tests...~%")
@@ -2484,10 +2485,10 @@
   ;; Intractable cases no matter how long the timeout is
   (let ((tm 2))
     (with-timeout tm (test-dp (ramsey 3 4 8)))
-    (with-timeout tm (test-dp (ramsey 3 4 9) 'sat))
+    (with-timeout tm (test-dp (ramsey 3 4 9) 'unsat))
 
     (with-timeout tm
-      ;; n < R(4,4), can avoid monochromatic K_4 - STA
+      ;; n < R(4,4), can avoid monochromatic K_4 - SAT
       (test-dp (ramsey 4 4 17)))
 
     (with-timeout tm
@@ -2908,9 +2909,9 @@
   scores  ; A simple array: index 2n = +x_n, 2n+1 = -x_n
   inc)    ; The current "value" of a conflict bump (grows exponentially)
 
-(defun make-activities (num-vars)
+(defun make-activities ()
   "Initializes scores for 2 * num-vars literals with subtle random noise."
-  (let* ((num-lits (* 2 num-vars))
+  (let* ((num-lits *clause-max-num-lits*)
          (arr (make-array num-lits :element-type 'double-float)))
     (dotimes (i num-lits)
       ;; Small random noise (0.0, 1.0) allows VSIDS to override
@@ -2994,7 +2995,7 @@
           (enqueue lit propQ)
           (values nil (trail-push trail lit level reason))))))
 
-(defun dpll-init (cls num-vars)
+(defun dpll-init (cls)
   "Preprocess the clauses cls by computing the watch lists and initializing the propagation queue.
    Returns (values conflict? new-cls trail activities watches propQ)
    where conflict? if cls are unsat,
@@ -3034,7 +3035,7 @@
            (let+ (((&values lit1 lit2) (clause-two-lits cl)))
              ;; The watches are negated because we want to watch for them when they become false under the trail assignment
              (watches-add! watches cl (lit-negate lit1) (lit-negate lit2))))))
-    (values nil new-cls trail (make-activities num-vars) watches propQ)))
+    (values nil new-cls trail (make-activities) watches propQ)))
 
 (defun dpll-find-new-unassigned (cl trail old-lit other-lit)
   "Find an unassigned literal in clause cl to watch that is not falsified by the trail, excluding old-lit and other-lit.
@@ -3154,7 +3155,7 @@
                     (dassert reason-cl "Reason clause cannot be nil for non-decision entries in trail")
 
                     ;; Add literals from the reason clause to 'seen'
-                    (clause-map #'(lambda (lit) (hash-set-add seen lit)) reason-cl)
+                    (clause-map #'(lambda (lit) (clause-add-lit! seen lit)) reason-cl)
 
                     (let ((resolved-cls (resolve-var (list working-cl reason-cl) (trail-entry-var most-recent))))
                       (dassert resolved-cls "Resolution must produce at least one clause")
@@ -3186,7 +3187,7 @@
           (dpll-stats-add-learnt (clause-size learnt-cl))
 
           ;; BUMP: Reward all involved literals exactly once.
-          (hash-set-map (lambda (lit) (bump-lit-activity! activities lit)) seen)
+          (clause-map (lambda (lit) (bump-lit-activity! activities lit)) seen)
           ;; DECAY: Increase the 'inc' value for the next conflict.
           (decay-activities! activities)
 
@@ -3287,11 +3288,11 @@
         (let+ ((cls (cnf->clauses cnf vm))) ;; mutates vm
 
           (dpll-stats-set-formula (count-vars skeleton)
-                                  (clause-max-num-lits)
+                                  num-vars
                                   (length cls)
                                   (if cls (apply #'max (mapcar #'clause-size cls)) 0))
           (dbg "After init~%")
-          (let+ (((&values conflict? cls trail activities watches propQ) (dpll-stats-time :sat (dpll-init cls (clause-max-num-lits)))))
+          (let+ (((&values conflict? cls trail activities watches propQ) (dpll-stats-time :sat (dpll-init cls))))
             (if conflict?
                 (values 'unsat nil)  ; Conflict with initial unit propagation, UNSAT
                 (let+ (((&values result trail) (dpll-stats-time :sat (dpll-sat trail activities watches propQ)))
@@ -3320,7 +3321,7 @@
       (run-quick-tests #'test-dpll))
 
   ;; Random 3SAT
-  (run-random-3sat #'test-dpll 20 5 5)
+  (run-random-3sat #'test-dpll 20 5 10)
   (run-random-3sat #'test-dpll 20 30 120)
   (run-random-3sat #'test-dpll 20 100 400 20)
   (run-random-3sat #'test-dpll 20 150 600 20)
