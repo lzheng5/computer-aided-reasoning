@@ -311,8 +311,12 @@ ask questions on Piazza.
 ;; if z is false, then y is false
 
 (solver-push)
-(z3-assert (...) ...)
+(z3-assert (x :bool y :bool z :bool)
+           (and (implies x (and y z))
+                (implies y (and (not x) (not z)))
+                (implies (not z) (not y))))
 (check-sat)
+(get-model-as-assignment)
 (solver-pop)
 
 ;; 1b:
@@ -323,8 +327,17 @@ ask questions on Piazza.
 ;; p ends with "ba"
 
 (solver-push)
-(z3-assert (...) ...)
+(z3-assert (x y z p q :string)
+           (and (= (str.++ x y z) (str.++ p q))
+                (and (>= (str.len x) 2)
+                     (>= (str.len y) 2)
+                     (>= (str.len z) 2)
+                     (>= (str.len p) 2)
+                     (>= (str.len q) 2))
+                (str.prefixof "ab" y)
+                (= (seq-last-index p "ba") (- (str.len p) 2))))
 (check-sat)
+(get-model-as-assignment)
 (solver-pop)
 
 
@@ -336,12 +349,18 @@ ask questions on Piazza.
 ;; if x has at least one element and the first element of x is true,
 ;; then the length of x is even. Otherwise, the length of x is odd.
 
+(solver-reset)
 (solver-push)
-(z3-assert (...) ...)
+(z3-assert (x (:seq :bool) y :int)
+           (and (and (<= 0 y) (<= y 32))
+                (= (seq.len x) y)
+                (ite (and (> (seq.len x) 0)
+                          (seq.nth x 0))
+                     (= (mod (seq.len x) 2) 0)
+                     (not (= (mod (seq.len x) 2) 0)))))
 (check-sat)
+(get-model-as-assignment)
 (solver-pop)
-
-
 
 ;; Now, we'll have some fun by encoding logic puzzles as SMT problems.
 
