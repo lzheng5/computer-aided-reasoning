@@ -24,6 +24,21 @@ examples below show how to define the rational interval [0..1]
 and the integers greater than 2^{64}.
 "
 
+(definec div (n :nat m :pos) :nat
+  (floor n m))
+
+(definec map-div1 (ns :pos-list) :tl
+  (cond ((null ns) nil)
+        (t (cons (div 1 (car ns)) (map-div1 (cdr ns))))))
+
+(definec map-div (n :nat ms :pos-list) :nat-list
+  (cond ((null ms) nil)
+        (t (cons (div n (car ms)) (map-div n (cdr ms))))))
+
+(definec test-map-div (n :nat) :nat-list
+  (map-div n '(2 4 8 0)))
+
+
 (defdata probability (range rational (0 <= _ <= 1)))
 (defdata big-nat (range integer ((expt 2 64) < _)))
 

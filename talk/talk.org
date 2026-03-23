@@ -1,0 +1,285 @@
+#+title: Soft Contract Verification of Higher-order Languages
+#+author: Ling Zheng
+#+email: zheng.lingx@northeastern.edu
+
+* Introduction
+** Contracts in ACL2s
+
+   #+begin_src lisp
+   (definec div (n :nat m :pos) :nat
+     (floor n m))
+
+   (definec map-div (n :nat ms :pos-list) :nat-list
+     (cond ((null ms) nil)
+           (t (cons (div n (car ms)) (map-div n (cdr ms))))))
+
+   (definec test-map-div (n :nat) :nat-list
+     (map-div n '(42 0)))
+    => static contract violation!
+   #+end_src lisp
+
+   ACL2s relies on contracts and theorem proving to enforce program invariants.
+   Every function definition in ACL2s must be checked *statically* and then admitted.
+
+   Why this works?
+   When a contract is violated, it becomes a *localized* problem:
+   1. The caller supplied bad arguments to the callee, or
+   2. The callee returned bad data.
+
+   =>
+
+   Contract checking is nice and simple in the first-order world.
+   But can we apply the same style of static reasoning in a higher-order setting?
+
+** Contracts in Higher-order Languages
+
+   #+begin_src racket
+   (map : (any/c -> any/c) list? -> list?)
+   (define (map f xs)
+     (cond ([(null xs) '()]
+            [else (cons (f (car xs)) (map f (cdr xs)))])))
+
+   (div : nat? (>/c 0) -> nat?)
+
+   (test-map-div : nat? -> (listof nat?))
+   (define (test-map-div n)
+     (map (λ (m) (div n m)) '(42 0))) ;; not a problem!
+
+   (test-map-div 42)
+   => dynamic contract violation!
+   #+end_src racket
+
+   Simple localized reasoning no longer works!
+
+   Admitting `map` dones't mean absence of contract violations when it is called with arguments satisfying its input contracts.
+
+   As a result, in Racket, contract checking typically happens dynamically.
+
+   Even though this is semantically sound, there are two major disadvantages:
+   1. Extra runtime monitoring imposes significant overhead.
+
+      If a contract fails, the system must track blame across layers of abstraction. For example, if a function f takes a function g, and g eventually fails, is it f's fault for calling g wrong, or the caller's fault for providing a broken g? Tracking this is computationally expensive and logically complex.
+
+   2. It delays the discovery of faulty program components until runtime.
+
+      And not all inputs are checked.
+
+* Static Contract Verification for Higher-order Languages
+
+  Problem: How to statically verify contracts for higher-order languages?
+
+  * *Soft Contract Verification (2014)*
+
+    Phúc C. Nguyen, Sam Tobin-Hochstadt, and David Van Horn. 2014. Soft contract verification. In Proceedings of the 19th ACM SIGPLAN international conference on Functional programming (ICFP '14). Association for Computing Machinery, New York, NY, USA, 139–152. https://doi.org/10.1145/2628136.2628156
+
+  * Refinement Types (2014)
+
+    Niki Vazou, Eric L. Seidel, Ranjit Jhala, Dimitrios Vytiniotis, and Simon Peyton-Jones. 2014. Refinement types for Haskell. In Proceedings of the 19th ACM SIGPLAN international conference on Functional programming (ICFP '14). Association for Computing Machinery, New York, NY, USA, 269–282. https://doi.org/10.1145/2628136.2628161
+
+** Soft Contract Verification (2014)
+
+    Statically proves either *complete or partial* contract correctness of program components.
+
+    Consequently, compilers can safely remove unnecessary contracts that are already verified to be correct.
+
+    Based on the benchmarks they used, SCV is shown to prove and remove 99% (2329/2335) of the contracts and runtime type checks, resulting in a speed up 5x - 5000x.
+
+*** SCV in a Nutshell
+
+    Symbolic Execution + Abstract Interpretation
+
+    Traditional Symbolic Execution is usually used for testing (bug-finding). It explores paths one by one, often getting stuck in "path explosion" or infinite loops.
+
+    SCV's Goal is *verification* (proving the absence of bugs).
+    To do this, it must be sound; it has to cover all of them and has to terminate too. [Abstract Interpretation slides]
+
+    SCV is effectively Abstracting Abstract Machines (AAM) applied to a symbolic engine. It uses the machinery of symbolic execution (predicates, solvers, and path tracking) but applies the theory of abstract interpretation (widening and state approximation) to ensure the analysis is both automatic and guaranteed to terminate.
+
+*** Higher-order Symbolic Reasoning
+
+   #+begin_src racket
+   (e2o : (even? -> even?) -> (odd? -> odd?))
+   (define (e2o f)
+     (λ (n) (- (f (+ n 1)) 1)))
+   #+end_src racket
+
+   (+ {odd?} 1) ↦ {even?}
+
+   ({even? -> even?} {even?}) -> {even?}
+
+*** Flow Sensitive Reasoning via Heap Refinement
+
+   #+begin_src racket
+   (f : (or/c int? str?) cons? → int?)
+   (define (f x p)
+     (cond [(and (int? x) (int? (car p))) (+ x (car p))]
+           [(int? (car p)) (+ (str-len x) (car p))]
+           [else 0]))
+   #+end_src racket
+
+**** Direct Substitution
+
+   #+begin_src racket
+   (cond [(and (int? {(or/c int? str?)}) (int? (car {cons?})))
+          (+ {(or/c int? str?)} (car {cons?}))] ...)
+   #+end_src racket
+
+**** Heap Refinement
+
+   We bind =f= and =p= with a heap address pointing to the symbolic value instead of the symbolic value directly.
+
+   =f ↦ L1, p ↦ L2=
+
+   Then after substitution, we have
+   #+begin_src racket
+   (cond [(and (int? L1) (int? (car L2)))
+          (+ L1 (car L2))] ...)
+   #+end_src racket
+
+   where in the heap
+   =L1 ↦ { (or/c int? str?) }=
+   =L2 ↦ { cons? }=
+
+   When we reach a condition, we refine the symbolic values in the heap accordingly.
+   Note we have to explore both branches unless we can prove one won't happen.
+
+   =(int? L1) ↦ true, L1 ↦ { int? }=
+             =↦ false, L1 ↦ { str? }=
+
+   What about =(int? (car L2))=?
+   We know =L2= is a =cons?=. So =(car L2)= lazily allocates two additional addresses on the heap and refines =L2=.
+
+   =L3 ↦ { any/c }=
+   =L4 ↦ { any/c }=
+   =L2 ↦ { (L3, L4) }=
+
+   Then, we proceed by refining =L3 ↦ { int? }= and then show =(+ L1 (car L2)) ⟶ (+ L1 L3)= producing an =int?=.
+
+   Note the abstract heap has to be finite to guarantee terminiation.
+   Since abstract addresses might be reused, abstract values are sets.
+
+*** SMT Solver-aided Reasoning
+
+   SCV incorporates an external SMT solver to improve the precision of reasoning on primitives and predicates.
+
+   #+begin_src racket
+   (define (f x g) (g (+ x 1)))
+
+   (h : [x : int?] → [y : (>/c x)] → (>/c y))
+   (define (h x) ...) ; unknown definition
+
+   (main : int? → (>/c 0))
+   (define (main n) (if (≥ n 0) (f n (h n)) 1))
+   #+end_src racket
+
+   n ↦ { int?, (≥/c 0) }
+   n1 ↦ { int?, (=/c (+ n 1)) }
+   n2 ↦ { int?, (>/c n1) }
+
+   #+begin_src lisp
+   (declare-const n Int)
+   (declare-const n1 Int)
+   (declare-const n2 Int)
+   (assert (>= n 0))
+   (assert (= n1 (+ n 1)))
+   (assert (> n2 n1))
+   (assert (not (> n2 0)))
+   (check-sat) ;; unsat
+   #+end_src lisp
+
+*** On-demand Summarization
+
+    As mentioned before, finite abstract heap would guaruntee termination eventually,
+    it can still take a while for the tool to converge when analyzing recursive functions.
+
+    Summarization allows SCV to treat a recursive function as a single "summary",
+    accelerating the convergence.
+
+   #+begin_src racket
+
+   (main : (and/c int? ≥0?) → (and/c int? ≥0?))
+   (define (main n)
+     (let ([l (make-list n)])
+       (if (> n 0) (car (reverse l empty)) 0))
+
+   (define (reverse l ac)
+     (if (empty? l)
+         ac
+         (reverse (cdr l) (cons (car l) ac))))
+
+   (define (make-list n)
+     (if (= n 0)
+         '()
+         (cons n (make-list (- n 1))))))
+
+   #+end_src racket
+
+   At =(make-list n)=, we haven't explored =make-list= yet, so we plug =n= into its body.
+   We then branch non-deterministically.
+
+   If (= n 0), (make-list n) returns '()
+   otherwise, it returns =(cons n (make-list n'))=.
+
+   Before we enter the recursive call, we observe that (make-list n) and (make-list n') are nearly identical; they differ only upto renaming.
+
+   We know already that '() can be returned by (make-list n). So we use it as the result of (make-list n').
+   So we get another return value =(cons n '())= of (make-list n).
+
+   We could continue to use this value as the result of (make-list n') and get =(cons n (cons n '()))=.
+   But this won't converge.
+
+   So, we approximate the result =(cons n '())= to be a non-empty list of positive natural numbers.
+   And use it as the result of =(make-list n')= and get =(cons n <non-empty (listof pos?)>)=, but this is subsumed by the previous approximation.
+
+   Consequently, we obtain the summary for =make-list=:
+   1. (= n 0) ↦ '()
+   2. (not (= n 0)) ↦ non-empty (listof pos?)
+
+   As a result, we only need to visit a function body if the summarization doesn't suffice.
+
+*** Example Revisited
+
+   Let's see how summarization can help us to identify the static contract violation in our previous example.
+
+   #+begin_src racket
+   (map : (any/c -> any/c) list? -> list?)
+   (define (map f xs)
+     (cond ([(null xs) '()]
+            [else (cons (f (car xs)) (map f (cdr xs)))])))
+
+   (div : nat? (>/c 0) -> nat?)
+
+   (test-map-div-any : (listof nat?) -> (listof nat?))
+   (define (test-map-div-any ms)
+     (map (λ (m) (div 42 m)) ms))
+   #+end_src racket
+
+   In this higher-order example, we plug in the lambda and =ms= into =map= and try to obtain a summary.
+
+   So we non-deterministically branch on =(null ms)=.
+   If =(null ms)=, then '()
+   otherwise, (cons (<lam> m) (map <lam> ms')).
+
+   We observe (map <lam> ms) and (map <lam> ms') are nearly identical upto renaming.
+   And we known '() is a return value of (map <lam> ms), so we use that for (map <lam> ms').
+   Then, we will check if (cons (<lam> m) '()) can be another possible return value of (map <lam> ms).
+
+   Now, let's see what happens with (div 42 m), where m is a nat?.
+
+   If m is constrained to (and/c nat? (>/c 0)), the analysis continues, and div returns a nat?.
+   otherwise, m is constrained to (and/c nat? (not/c (>/c 0))), which simplifies m to be 0 and results in a contract violation.
+
+   Back to (cons (<lam> m) '()), we have a set of two possiblities.
+   1. (cons n '()) where n is a nat?, or
+   2. <blame> / contract violation.
+
+   We then approximate them to be { non-empty (listof nat?), <blame> }.
+   Finally, we propagate this back to (map <lam> ms') and obtain
+   1. (cons n <non-empty (listof nat?)>)
+   2. <blame>
+   But these are subsumed by the previous approximation.
+
+   So we are done and have the following summary for (map <lam> ms).
+   1. (null? ms) ↦ '()
+   2. (all? pos? ms) ↦ non-empty (listof nat?)
+   3. (any? 0? ms), ↦ <blame>
