@@ -376,11 +376,27 @@ ask questions on Piazza.
 ;; interjects, saying "Don't believe Bob, he's lying!"
 ;; Is Bob a knight or a knave? Is Clara a knight or a knave?
 
+;; consulted AI for the direct encoding
+;; "Person X is a Knight if and only if their statement is true" is written as (= X S)  
 (solver-push)
-(z3-assert (...) ...)
+(z3-assert (A B C ASaid1 :bool) 
+           (and (= B ASaid1)
+                (= C (not B))
+                (=> ASaid1 (= (+ (ife A 1 0) (ife B 1 0) (ife C 1 0)) 1))))
 (check-sat)
 (solver-pop)
 
+;; manual reasoning
+(solver-push)
+(z3-assert (B C :bool) 
+           (and ;; B, C have different identities
+                (= C (not B)) 
+                ;; if A knight, 
+                ;; then B cannot be knight, otherwise, it forces count of knights to be 2
+                ;; else B cannot be knight, otherwise, it forces count of knights to be 0, 2, or 3 but C has to be knave.
+                (not B)))
+(check-sat)
+(solver-pop)
 
 ;; 1e:
 ;; (adapted from from "My best puzzles in logic and reasoning" by
@@ -399,11 +415,27 @@ Is the above set of constraints consistent? If so, who has what job?
 (hint: an enumeration sort might be helpful here)
 |#
 
+(register-enum-sort :job (F G D))
+
 (solver-push)
-(z3-assert (...) ...)
+(z3-assert (MF MG MD :job) 
+           (and ((_ at-most [1]) 
+                 (!= MD G)
+                 (!= MF D)
+                 (= MD D)
+                 (!= MF G))
+                ((_ at-least [1]) 
+                 (!= MD G)
+                 (!= MF D)
+                 (= MD D)
+                 (!= MF G))
+                (distinct MF MG MD)))
 (check-sat)
 (solver-pop)
 
+;; Mr. Fireman is the Driver.
+;; Mr. Guard is the Fireman.
+;; Mr. Driver is the Guard.
 
 ;; ===========================
 ;;    Generating Constraints
