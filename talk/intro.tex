@@ -9,17 +9,17 @@
   \hspace{1.2em}\mex{(\kw{cond} ((null ms) nil)} \\
   \hspace{4.8em}\mex{(t (cons (div n (car ms)) (map-div n (cdr ms))))))} \\[0.5em]
   \mex{(\kw{definec} main (n :nat) :nat-list} \\
-  \hspace{1.2em}\mex{(map-div n \codequote(42~\altcolor{2-3}{red}{0})))} \\
+  \hspace{1.2em}\mex{(map-div n \codequote(42~\altcolor{2-}{red}{0})))} \\
   \\
   \invisible<-1>{\color{red}{\Rightarrow \textbf{static contract violation!}}}
 \end{array}
 \]
 
   \begin{itemize}
-    \invisible<-2>{\item \textbf{Why?} The list \texttt{'(42 0)} contains \texttt{0}, which violates the \texttt{:pos} constraint in \texttt{div}.}
+    \invisible<-1>{\item \textbf{Why?} The list \texttt{'(42 0)} contains \texttt{0}, which violates the \texttt{:pos} constraint in \texttt{div}.}
   \end{itemize}
 
-  \only<3>{}
+  \only<2>{}
 
 \end{frame}
 
@@ -30,31 +30,35 @@
   \large
   \begin{itemize}
   \invisible<-1>{\item Return value violates the return contract.}
-  \invisible<-2>
+  \invisible<-1>
   {
   \begin{flalign*}
-   & \begin{array}{@{}l@{}}
-      \mex{(\kw{definec} map-div (n :nat ms :pos-list) \altcolor{2-}{red}{:nat}} \\
+    & \begin{array}{@{}l@{}}
+        \alt<3->{
+          \mex{(\kw{definec} map-div (n :nat ms :pos-list) \altcolor{3-}{green}{:nat-list}}
+        }{
+          \mex{(\kw{definec} map-div (n :nat ms :pos-list) \altcolor{2-}{red}{:nat}}
+        }\\
       \hspace{1.2em}\mex{(\kw{cond} ((null ms) nil)} \\
       \hspace{4.8em}\mex{(t (cons (div n (car ms)) (map-div n (cdr ms))))))}
     \end{array} &
   \end{flalign*}
   }
 
-  \invisible<-3>{\item Input arguments violate the input contracts.}
-  \invisible<-4>
+  \invisible<-2>{\item Input arguments violate the input contracts.}
+  \invisible<-2>
   {
   \begin{flalign*}
     & \begin{array}{@{}l@{}}
         \mex{(\kw{definec} main (n :nat) :nat-list} \\
-        \ind \mex{(map-div n \codequote(42~\altcolor{4-}{red}{0})))}
+        \ind \mex{(map-div n \codequote(42~\altcolor{2-}{red}{0})))}
       \end{array} &
   \end{flalign*}
   }
 
   \end{itemize}
 
-  \only<5>{}
+  \only<3>{}
 
 \end{frame}
 
