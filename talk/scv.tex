@@ -1,0 +1,250 @@
+\begin{frame}{Soft Contract Verification {\footnotesize (Phúc C. Nguyen, Sam Tobin-Hochstadt, and David Van Horn. 2014)}}
+  \Large
+  \begin{center}
+  \begin{columns}[T] % [T] aligns columns at the top
+
+    % Left Column: The Bullets
+    \begin{column}{0.42\textwidth}
+      \begin{itemize}
+        \item Symbolic Execution
+          \begin{itemize}
+            \normalsize
+            \item<2-> Pros: Bug-finding
+            \item<3-> Cons: Non-termination
+          \end{itemize}
+          \vspace{2em}
+        \item Abstract Interpretation
+          \begin{itemize}
+            \normalsize
+            \item<4-> Pros: \textbf{Verification}
+            \item<5-> Cons: False positives
+          \end{itemize}
+      \end{itemize}
+    \end{column}
+
+    % Right Column: The Stats
+    \begin{column}{0.5\textwidth}
+      \begin{block}<6->{}
+        \normalsize
+        SCV can statically prove either \textbf{complete or \altcolor{4-}{green}{partial}} contract correctness.
+      \end{block}
+      \vspace{0.5em}
+      \begin{block}<7->{}
+        \normalsize
+        SCV can prove and remove $99\%$ $(2329/2335)$ of runtime contracts, resulting in a speed up $5x - 5000x$!
+      \end{block}
+    \end{column}
+
+  \end{columns}
+  \end{center}
+\end{frame}
+
+%% \begin{frame}[t]{Soft Contract Verification {\footnotesize (Phúc C. Nguyen, Sam Tobin-Hochstadt, and David Van Horn. 2014)}}
+
+%%   \Large
+%%   \vspace{2em}
+
+%%   \begin{itemize}
+%%   \item<2-> Higher-order Symbolic Reasoning
+%%   \item<3-> Flow Sensitive Reasoning
+%%   \item<4-> On-demand Summarization
+%%   \item<5-> SMT Solver-aided Reasoning
+%%   \end{itemize}
+
+%% \end{frame}
+
+\begin{frame}[t]{Higher-order Symbolic Reasoning}
+
+  \large
+  \vspace{2em}
+\[
+\begin{array}{@{}l@{}}
+  \mex{(e2o : (even? -> even?) -> (odd? -> odd?))} \\
+  \mex{(\kw{define} (e2o f)} \\
+  \hspace{1.2em}\mex{($\lambda$ (n) (- (f (+ n 1)) 1)))} \\
+  \\
+  \invisible<-1>{
+    \mex{f} \mapsto \mex{\{even? -> even?\}} \\
+    \mex{n} \mapsto \mex{\{odd?\}} \\
+    }
+  \\
+  \invisible<-2>{
+    \alt<9->{
+      \mex{\altcolor{9}{green}{\{odd?\}}}
+    }{
+      \alt<7->{
+        \mex{\altcolor{8}{blue}{(- \altcolor{7}{blue}{\{even?\}} 1)}}
+      }{
+        \alt<5->{
+          \mex{(- \altcolor{6}{blue}{(\{even? -> even?\} \altcolor{5}{blue}{\{even?\}})} 1)}
+        }{
+          \mex{(- (\{even? -> even?\} \altcolor{4}{blue}{(+ \{odd?\} 1)}) 1)}
+    }}}
+  }\\
+\end{array}
+\]
+
+\only<8>{}
+
+\end{frame}
+
+\begin{frame}[t]{Flow Sensitive Reasoning}
+
+  \large
+  \vspace{1em}
+
+\[
+\begin{array}{@{}l@{}}
+  \mex{(f : (or/c int? str?) cons? -> int?)} \\
+  \mex{(\kw{define} (f x p)} \\
+  \hspace{1.2em}\mex{(\kw{cond} [(\kw{and} (int? x) (int? (car p))) (+ x (car p))]} \\
+  \hspace{4.5em}\mex{[(int? (car p)) (+ (str-len x) (car p))]} \\
+  \hspace{4.5em}\mex{[\kw{else} 0]))} \\
+  \\
+  \invisible<-1>
+  {
+    \alt<5-> {
+      \mex{x} \mapsto L_1, \altborder{1-}{blue}{$L_1 \mapsto \mex{\{(or/c int? str?)\}}$} \\
+      \\
+      \mex{(\kw{if} \altcolor{5}{blue}{(int? $L_1$)}} \\
+      \hspace{2em}\altcolor{1-}{green}{\mex{(+ $L_1$ \ldots)}} \hspace{2em}\altborder{1-}{green}{$L_1 \mapsto \mex{\{int?\}}$} \\
+      \hspace{2em}\altcolor{1-}{purple}{\ldots}\mex{)} \hspace{5.4em}\altborder{1-}{purple}{$L_1 \mapsto \mex{\{str?\}}$}
+
+    }{
+
+      \alt<3-> {
+        \mex{x} \mapsto L_1, \altborder{1-}{blue}{$L_1 \mapsto \mex{\{(or/c int? str?)\}}$} \\
+        \mex{p} \mapsto L_2, \altborder{1-}{blue}{$L_2 \mapsto \mex{\{cons?\}}$} \\
+        \\
+        \mex{(\kw{cond} [(\kw{and} \altcolor{4}{blue}{(int? $L_1$)} (int? (car $L_2$)))} \\
+          \hspace{4em}\mex{(+ $L_1$ (car $L_2$))]}\\
+        \hspace{4em}\mex{\ldots)}
+      }{
+        \mex{(\kw{cond} [(\kw{and} (int? \altcolor{1-}{blue}{\{(or/c int? str?)\}}) (int? (car \altcolor{1-}{blue}{\{cons?\}})))} \\
+          \hspace{4em}\mex{(+ \altcolor{1-}{red}{\{(or/c int? str?)\}} (car \altcolor{1-}{blue}{\{cons?\}}))]}\\
+        \hspace{4em}\mex{\ldots)}
+      }
+    }
+  }
+\end{array}
+\]
+
+\only<5>{}
+
+\end{frame}
+
+\begin{frame}[t]{On-demand Summarization}
+
+  \normalsize
+\[
+\begin{array}{@{}l@{}}
+  \mex{(map : (any/c -> any/c) list? -> list?)} \\
+  \mex{(\kw{define} (map f xs)} \\
+  \hspace{1.2em}\mex{(\kw{cond} ([\altcolor{2}{blue}{(null xs)} \altcolor{3}{blue}{\codequote()}]} \\
+  \hspace{5em}\mex{[\kw{else} \altcolor{4}{blue}{(cons (f (car xs)) (map f (cdr xs)))}])))} \\
+  \mex{(div : nat? (>/c 0) -> nat?)} \\
+  \mex{(main : (listof nat?) -> (listof nat?))} \\
+  \mex{(\kw{define} (main ms)} \\
+  \hspace{1.2em}\mex{\altcolor{1}{blue}{(map ($\lambda$ (m) (div 42 m)) ms)})} \\
+  \\
+  \alt<10->{
+    \mex{(null ms)} \implies \mex{(map <$\lambda$> ms)} \to \altcolor{10}{blue}{\{\codequote()\}} \\
+    \alt<11->{
+      \mex{(not (null ms))} \implies \mex{(map <$\lambda$> ms)} \to \altcolor{11}{blue}{\mex{\{<non-empty (listof nat?)>, <blame>\}}}
+    }{
+      \mex{(not (null ms))} \implies \mex{(map <$\lambda$> ms)} \to \altcolor{10}{blue}{\mex{\{(cons nat? \codequote()), <blame>\}}}
+    }
+  }{
+    \invisible<-2>{\mex{(null ms)} \implies \mex{(map <$\lambda$> ms)} \to \altcolor{3}{blue}{\codequote()}} \\
+    \invisible<-3>{
+      \alt<7->{
+        \mex{(not (null ms))} \implies \mex{(map <$\lambda$> ms)} \to \altcolor{4}{blue}{\mex{(cons \altcolor{7-}{blue}{(div 42 m)} \codequote())}}
+      }{
+        \alt<6->{
+          \mex{(not (null ms))} \implies \mex{(map <$\lambda$> ms)} \to \altcolor{4}{blue}{\mex{(cons (<$\lambda$> m) \altcolor{6}{blue}{\codequote()})}}
+        }{
+          \mex{(not (null ms))} \implies \mex{(map <$\lambda$> ms)} \to \altcolor{4}{blue}{\mex{(cons (<$\lambda$> m) \altcolor{5}{blue}{(map <$\lambda$> ms')})}}
+        }
+      }
+    }\\
+    \invisible<-7>{
+      \mex{((and/c nat? (>/c 0)) m)} \implies \mex{(div 42 m)} \to \altcolor{8}{blue}{\mex{nat?}}
+    }\\
+    \invisible<-8>{
+      \mex{((and/c nat? (not (>/c 0))) m)} \implies \mex{(div 42 m)} \to \altcolor{9}{blue}{\mex{<blame>}}
+    }
+  }
+
+\end{array}
+\]
+
+\only<11>{}
+
+\end{frame}
+
+\begin{frame}[t]{SMT Solver-aided Reasoning}
+
+  \large
+  \vspace{1em}
+\[
+\begin{array}{@{}l@{}}
+  \mex{(\kw{define} (f x g) (g (+ x 1)))} \\[0.5em]
+  \mex{(h : [x : int?] -> [y : (>/c x)] -> (>/c y))} \\
+  \mex{(\kw{define} (h x) \ldots)} \\[0.5em]
+  \mex{(main : int? -> (>/c 0))} \\
+  \mex{(\kw{define} (main n) (\kw{if} ($\geq$ n 0) (f n (h n)) 1))}\\
+  \\
+  \mex{n} \mapsto \mex{\{ int?, ($\geq$/c 0) \}}\\
+  \mex{$n_1$} \mapsto \mex{\{ int?, (=/c (+ n 1)) \}} \\
+  \mex{$n_2$} \mapsto \mex{\{ int?, (>/c $n_1$) \}}
+\end{array}
+\]
+
+\end{frame}
+
+\begin{frame}[t]{SMT Solver-aided Reasoning}
+
+  \large
+  \vspace{1em}
+
+  \begin{center}
+  \begin{columns}[T]
+    \begin{column}{0.35\textwidth}
+      \[
+      \begin{array}{@{}l@{}}
+        \mex{n} \mapsto \mex{\{ int?, ($\geq$/c 0) \}}\\
+        \mex{$n_1$} \mapsto \mex{\{ int?, (=/c (+ n 1)) \}} \\
+        \mex{$n_2$} \mapsto \mex{\{ int?, (>/c $n_1$) \}}
+      \end{array}
+      \]
+
+      \vspace{4em}
+      \invisible<-3>{\href{mailto:zheng.lingx@northeastern.edu}{\altborder{1-}{blue}{\texttt{zheng.lingx@northeastern.edu}}}}
+
+    \end{column}
+
+    \invisible<-1>
+    {
+    \begin{column}{0.5\textwidth}
+      \[
+      \begin{array}{@{}l@{}}
+        \mex{(\kw{declare-const} n Int)} \\
+        \mex{(\kw{declare-const} n1 Int)} \\
+        \mex{(\kw{declare-const} n2 Int)} \\
+        \mex{(\kw{assert} (>= n 0))} \\
+        \mex{(\kw{assert} (= n1 (+ n 1)))} \\
+        \mex{(\kw{assert} (> n2 n1))} \\
+        \mex{(\kw{assert} (not \altcolor{1-}{blue}{(> n2 0)}))} \\
+        \mex{(\kw{check-sat})} \\
+        \\
+        \invisible<-2>{\altcolor{2-}{green}{$\Rightarrow$ \textbf{unsat}}}
+      \end{array}
+      \]
+      }
+    \end{column}
+  \end{columns}
+  \end{center}
+
+  \only<4>{}
+
+\end{frame}

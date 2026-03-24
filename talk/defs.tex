@@ -1,0 +1,507 @@
+% Works in math mode; all special chars remain special; cheaper than \ncd.
+% Will not be correct size in super and subscripts, though.
+\newcommand{\ex}[1]{\mbox{\tt{#1}}}
+\newcommand{\mex}[1]{\text{\ex{#1}}} % use in math mode
+
+\newcommand{\C}{\mathbb{C}}
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\Q}{\mathbb{Q}}
+\newcommand{\Z}{\mathbb{Z}}
+\newcommand{\N}{\mathbb{N}}
+
+\newcommand{\sN}{\mathcal{N}}
+
+\newcommand{\Pow}{\mathcal{P}}
+
+\newcommand{\CP}{\mathbb{CP}}
+\newcommand{\RP}{\mathbb{RP}}
+
+\newcommand{\Ext}{\text{Ext}}
+\newcommand{\Hom}{\text{Hom}}
+\newcommand{\Tor}{\text{Tor}}
+
+\newcommand{\compose}{\circ}
+
+% algebra
+\newcommand{\normal}{\triangleleft}
+\newcommand{\iso}{\cong}
+\newcommand{\mono}{\hookrightarrow}
+\newcommand{\epi}{\twoheadrightarrow}
+
+% topology
+\newcommand{\interior}{\text{int}}
+
+\newcommand{\homeo}{\cong}
+\newcommand{\homot}{\simeq}
+\newcommand{\ra}{\rightarrow}
+\newcommand{\la}{\leftarrow}
+
+\newcommand{\intersect}{\cap}
+\newcommand{\union}{\cup}
+
+\newcommand{\given}{\, | \, }
+
+\newcommand{\half}{\frac{1}{2}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\VAR}{\text{VAR}}
+\newcommand{\COVAR}{\text{COVAR}}
+
+\newcommand{\longline}{\text{\textemdash}}
+
+\newcommand{\coker}{\text{coker }}
+\newcommand{\im}{\text{im }}
+\newcommand{\lra}[1]{\xrightarrow{#1}}
+\newcommand{\lla}[1]{\xleftarrow{#1}}
+\newcommand{\lda}[1]{\xdownarrow{#1}}
+
+\newcommand{\incl}[1]{\xhookrightarrow{#1}}
+
+\newcommand{\wedgesum}{\vee}
+\newcommand{\directsum}{\oplus}
+\newcommand{\tensor}{\otimes}
+
+\newcommand{\1}{\mathbbm{1}}
+
+\newcommand{\reduced}[1]{\widetilde{#1}}
+\newcommand{\til}[1]{\widetilde{#1}}
+
+\newcommand{\conv}{\text{conv}}
+\newcommand{\cl}{\text{cl}}
+
+\newcommand{\define}{:=}
+
+\newcommand{\sI}{\mathcal{I}}
+\newcommand{\bigunion}{\bigcup}
+\newcommand{\T}[1]{\texttt{#1}}
+
+\newcommand{\problemspace}{0.3cm}
+
+\newcommand{\Quot}{\text{Quot}}
+\newcommand{\spoly}{\text{spoly}}
+
+\newcommand{\lcm}{\text{lcm}}
+\newcommand{\LM}{\text{LM}}
+
+\renewcommand{\phi}{\varphi}
+
+\newcommand{\interesting}{\texttt{interesting?}}
+\newcommand{\mutate}{\texttt{mutate}}
+
+\newcommand{\env}{\Gamma}
+\newcommand{\stepsTo}{\rightsquigarrow}
+\newcommand{\hole}[2]{\ensuremath{\Box^{#1}_{#2}}}
+\newcommand{\argshole}[1]{\ensuremath{\triangleright^{#1}}}
+%{\ensuremath{\Box \hspace{-0.55em} {\hbox to 0.5em{.\hss.\hss.}}^{#1}}}
+\newcommand{\targshole}[1]{\ensuremath{\triangle^{#1}}}
+\newcommand{\varhole}[1]{\ensuremath{\triangle^{#1}}}
+\newcommand{\generate}{\texttt{generate}}
+
+\newcommand{\turns}{\vdash}
+
+\newcommand{\tNat}{\texttt{Nat}}
+\newcommand{\tFloat}{\texttt{Float}}
+\newcommand{\tList}[2]{{\texttt{List}^{#2}\;{#1}}}
+\newcommand{\tProd}[3]{{\ensuremath{#1}\times^{#3}\ensuremath{#2}}}
+\newcommand{\tArrow}[3]{\ensuremath{\ensuremath{#1}\ra^{#3}\ensuremath{#2}}}
+
+%\newcommand{\ann}[1]{{\Diamond_{#1}}}
+\newcommand{\ann}[1]{{#1}}
+
+
+\definecolor{color-keyword}{rgb}{0.0,0.30,0.7}
+\newcommand{\kw}[1]{{\text{\ttfamily\fontseries{b}\selectfont{\color{color-keyword}{#1}}}}}
+
+\newcommand{\codearr}{
+\ensuremath{
+\makebox[0pt][l]{\hspace{-0.9ex}\mex{\color{color-keyword}{\kw{=}}}}
+\makebox[0pt][l]{\mex{\color{color-keyword}{\kw{>}}}}
+\
+}
+}
+
+\newcommand{\codearri}[1]{
+\ensuremath{
+\makebox[0pt][l]{\hspace{-0.9ex}\mex{-}}
+\makebox[0pt][l]{\mex{>}}
+\
+\ensuremath{{}^{#1}}
+}
+\!\!\!\!\!
+%\code{-}
+%\begin{tikzpicture}[baseline]
+%    \node at (0,0) {\code{-}};
+%    \node at (1.0ex,0.25ex) {\code{>}}; % Move '>' a little upwards
+%\end{tikzpicture}
+%\texttt{-}\raisebox{0.5ex}{\texttt{-}} \hspace{-0.15em} \raisebox{-0.5ex}{\texttt{>}}
+}
+
+
+\newcommand{\letexp}[3]{\mex{let\;\ensuremath{#1}\;=\;\ensuremath{#2}\;in\;\ensuremath{#3}}}
+\newcommand{\lam}{\mex{$\lambda$}}
+\newcommand{\lambdaexp}[2]{\mex{$\lambda$\,\ensuremath{#1}.\ensuremath{#2}}}
+\newcommand{\ifexp}[3]{\mex{if\;\ensuremath{#1}\;then\;\ensuremath{#2}\;else\;\ensuremath{#3}}}
+%\newcommand{\returnexp}[1]{\mex{return\;\ensuremath{#1}}}
+\newcommand{\returnexp}[1]{\mex{\ensuremath{#1}}}
+%\newcommand{\callexp}[2]{\mex{call\;\ensuremath{#1}\;\ensuremath{#2}}}
+\newcommand{\callexp}[2]{\ensuremath{#1}\,\ensuremath{#2}}
+\newcommand{\chooseexp}[2]{\callexp{\mex{choose}}{\pairexp{\ensuremath{#1}}{\ensuremath{#2}}}}
+\newcommand{\chooseexpT}[3]{\callexp{\mex{choose}}{\ensuremath{#1} \; \pairexp{\ensuremath{#2}}{\ensuremath{#3}}}}
+
+\newcommand{\withType}[2]{\ensuremath{\ensuremath{#1}\;\mex{:}\;\ensuremath{#2}}}
+\newcommand{\pairexp}[2]{{\mex{(}\ensuremath{#1}\mex{,}\ensuremath{#2}\mex{)}}}
+
+\newcommand{\acallexp}[3]{\mex{(\ensuremath{#1}\;\ensuremath{#2})${}^{\ensuremath{#3}}$}}
+\newcommand{\alambdaexp}[3]{\mex{fun\;\ensuremath{#1}\;\codearri{\ensuremath{#3}}\;\ensuremath{#2}}}
+\newcommand{\e}{\ensuremath{\mathit{e}}}
+\newcommand{\es}{\overline{\e}}
+\newcommand{\x}{\ensuremath{\mathit{x}}}
+\newcommand{\xs}{\overline{\x}}
+\newcommand{\type}{\ensuremath{\tau}}
+\newcommand{\typep}{\ensuremath{\type'}}
+\newcommand{\types}{\overline{\type}}
+
+\newcommand{\Cxt}{\Gamma}
+\newcommand{\derives}[2]{{#1\;\vdash\;#2}}
+
+\DeclareMathOperator{\unifyOp}{unify}
+\newcommand{\unify}[2]{\unifyOp(#1, #2)}
+\DeclareMathOperator{\mergeOp}{merge}
+\newcommand{\merge}[2]{\mergeOp(#1, #2)}
+\DeclareMathOperator{\freeOp}{free}
+\newcommand{\notfree}[2]{#1 \text{ not} \freeOp \text{in}\, #2}
+\newcommand{\redbox}[1]{{\colorbox{red!30}{\ensuremath{#1}}}}
+\newcommand{\bluebox}[1]{{\colorbox{blue!30}{\ensuremath{#1}}}}
+
+%\newcommand{\altbox}[3]{\alt<1-#2>{\strut\ensuremath{#3}}{\colorbox{#1!30}{\strut\ensuremath{#3}}}}
+\definecolor{dkred}{rgb}{0.8,0,0}
+\definecolor{dkgreen}{rgb}{0,0.7,0}
+
+\newcommand{\Checkmark}{\textcolor{dkgreen}{\checkmark}}
+\newcommand{\Xmark}{\textcolor{dkred}{\usym{2613}}\,}
+\newcommand{\Questionmark}{{\,\bf{?}\,}}
+
+
+%\newcommand{\e}{\mex{e}}
+%\newcommand{\x}{\mex{x}}
+%\newcommand{\y}{\mex{y}}
+%\renewcommand{\a}{\mex{a}}
+%\renewcommand{\b}{\mex{b}}
+%\newcommand{\z}{\mex{z}}
+%\newcommand{\w}{\mex{w}}
+%\newcommand{\f}{\mex{f}}
+%\newcommand{\g}{\mex{g}}
+%\newcommand{\h}{\mex{h}}
+%\newcommand{\one}{\mex{1}}
+%\newcommand{\two}{\mex{2}}
+
+%\renewcommand{\leq}{\sqsubseteq}
+
+%\makeatletter
+%\let\HL\hl
+%\renewcommand\hl{%
+%  \let\set@color\beamerorig@set@color
+%  \let\reset@color\beamerorig@reset@color
+%  \HL}
+%\makeatother
+%
+
+%\newcommand\semihuge{\@setfontsize\semihuge{18.93}{23.45}}
+%\newcommand\semihuge{\@setfontsize\semihuge\@xxvpt{22}}
+
+\newcommand{\comm}[3]{\textcolor{#1}{[#2: #3]}}
+\newcommand{\TODO}[1]{\comm{dkred}{TODO}{#1}}%{\colorbox{red}{TODO:#1}}
+
+\newcommand{\rasq}{\rightsquigarrow}
+
+\newcommand{\mybullet}{{{\color{blue}{$\blacktriangleright$}}}}
+
+\newcommand{\unknown}{$\bullet$}
+\newcommand{\lunknown}[1]{$\text{#1}_\bullet$}
+
+\def\maxvalue(#1,#2){\ifnum #1>#2 #1\else #2\fi}
+%https://tex.stackexchange.com/questions/13793/beamer-alt-command-like-visible-instead-of-like-only
+
+%\makeatletter
+%% Detect mode. mathpalette is used to detect the used math style
+%\newcommand<>\Alt[3][l]{%
+%  \begingroup
+%    \providetoggle{Alt@before}%
+%    \alt#4{\toggletrue{Alt@before}}{\togglefalse{Alt@before}}%
+%    \ifbool{mmode}{%
+%      \expandafter\mathpalette
+%      \expandafter\math@Alt
+%    }{%
+%      \expandafter\make@Alt
+%    }%
+%    {{#1}{#2}{#3}}%
+%  \endgroup
+%}
+%
+%% Un-brace the second argument (required because \mathpalette reads the three arguments as one
+%\newcommand\math@Alt[2]{\math@@Alt{#1}#2}
+%
+%% Set the two arguments in boxes. The math style is given by #1. \m@th sets \mathsurround to 0.
+%\newcommand\math@@Alt[4]{%
+%  \setbox\z@ \hbox{$\m@th #1{#3}$}%
+%  \setbox\@ne\hbox{$\m@th #1{#4}$}%
+%  \@Alt{#2}%
+%}
+%
+%% Un-brace the argument
+%\newcommand\make@Alt[1]{\make@@Alt#1}
+%
+%% Set the two arguments into normal boxes
+%\newcommand\make@@Alt[3]{%
+%  \sbox\z@ {#2}%
+%  \sbox\@ne{#3}%
+%  \@Alt{#1}%
+%}
+%
+%% Place one of the two boxes using \rlap and place a \phantom box with the maximum of the two boxes
+%\newcommand\@Alt[1]{%
+%  \setbox\tw@\null
+%  \ht\tw@\ifnum\ht\z@>\ht\@ne\ht\z@\else\ht\@ne\fi
+%  \dp\tw@\ifnum\dp\z@>\dp\@ne\dp\z@\else\dp\@ne\fi
+%  \wd\tw@\ifnum\wd\z@>\wd\@ne\dimexpr\wd\z@/2\relax\else\dimexpr\wd\@ne/2\relax\fi
+%  %
+%  \ifstrequal{#1}{l}{%
+%    \rlap{\iftoggle{Alt@before}{\usebox\z@}{\usebox\@ne}}%
+%    \copy\tw@
+%    \box\tw@
+%  }{%
+%    \ifstrequal{#1}{c}{%
+%      \copy\tw@
+%      \clap{\iftoggle{Alt@before}{\usebox\z@}{\usebox\@ne}}%
+%      \box\tw@
+%    }{%
+%      \ifstrequal{#1}{r}{%
+%        \copy\tw@
+%        \box\tw@
+%        \llap{\iftoggle{Alt@before}{\usebox\z@}{\usebox\@ne}}%
+%      }{%
+%      }%
+%    }%
+%  }%
+%}
+%%\makeatother
+%\newcommand<>\Alt[2]{{%
+%    \sbox0{$\displaystyle #1$}%
+%    \sbox1{$\displaystyle #2$}%
+%    \alt#3%
+%        {\parbox[c][\maxvalue(\ht0,\ht1)][c]{\maxvalue(\wd0,\wd1)}
+%          {\centering\usebox0}}
+%        {\parbox[c][\maxvalue(\ht0,\ht1)][c]{\maxvalue(\wd0,\wd1)}
+%          {\centering\usebox1}}
+%        %{\rlap{\usebox0}\vphantom{\usebox1}\hphantom{\ifnum\wd0>\wd1 \usebox0\else\usebox1\fi}}%
+%        %{\rlap{\usebox1}\vphantom{\usebox0}\hphantom{\ifnum\wd0>\wd1 \usebox0\else\usebox1\fi}}%
+%}}
+%
+%\newcommand{\highlight}[2]{\colorbox{#1!30}{\strut\ensuremath{#2}}}
+%
+%\newcommand<>\highlightalt[2]{\alt#3{\colorbox{#1!30}{\strut\ensuremath{#2}}}
+%                                    {\vphantom{\colorbox{#1!30}{\strut\ensuremath{#2}}}
+%                                     \makebox[\widthof{\colorbox{#1!30}{\strut\ensuremath{#2}}}]{
+%                                     \strut\ensuremath{#2}
+%                                     }}
+%                                    }
+%\newcommand<>\underlinealt[1]{\Alt#2{\fbox{\ensuremath{#1}}}{#1}}
+\definecolor{dkblue}{rgb}{0,0,0.7}
+\definecolor{dkyellow}{rgb}{0.8,0.8,0}
+\definecolor{dkpurple}{rgb}{0.7,0,0.7}
+\definecolor{dkgray}{rgb}{0.8,0.8,0.8}
+\definecolor{dkorange}{rgb}{0.85,0.33,0.0}
+
+\renewcommand{\leq}{\sqsubseteq}
+\newcommand{\join}{\sqcup}
+
+\newcommand{\wrap}{\mathit{wrap}}
+\newcommand{\unwrap}{\mathit{unwrap}}
+
+%\newcommand{\altbox}[3]{\alt<1-#2>{\vphantom{\colorbox{#1!30}{\strut\ensuremath{#3}}}
+%                                   \makebox[\widthof{\colorbox{#1!30}{\strut\ensuremath{#3}}}]{
+%                                   \strut\ensuremath{#3}
+%                                   }}
+%                                  {\colorbox{#1!30}{\strut\ensuremath{#3}}}}
+%\newcommand{\altboxm}[3]{\alt<1-#2>{\makebox[0pt][l]{\strut #3}\phantom{\colorbox{#1!30}{\strut #3}}}
+%                                  {\colorbox{#1!30}{\strut #3}}}
+%
+%\newcommand{\altboxa}[3]{
+%  \alt<#2>
+%       {\colorbox{#1!30}{\strut #3}}
+%       {\makebox[0pt][l]{\strut #3}\phantom{\colorbox{#1!30}{\strut #3}}}
+%}
+
+\newcommand{\altcolor}[3]{%
+  \alt<#1>{%
+    \tikz[baseline]{%
+      \node[
+        fill={#2},
+        fill opacity=0.3,
+        text opacity=1,
+        anchor=base,
+        rounded corners=1pt,
+        inner xsep=1pt,
+        inner ysep=1pt
+      ] {\strut #3};%
+    }%
+  }{%
+    \tikz[baseline]{%
+      \node[
+        fill=none,
+        text opacity=1,
+        anchor=base,
+        inner xsep=1pt,
+        inner ysep=1pt
+      ] {\strut #3};%
+    }%
+  }%
+}
+
+\newcommand{\altborder}[3]{%
+  \alt<#1>{%
+    \tikz[baseline]{%
+      \node[
+        draw={#2},
+        draw opacity=0.5,
+        very thick,
+        fill=none,
+        text opacity=1,
+        anchor=base,
+        rounded corners=1pt,
+        inner xsep=1pt,
+        inner ysep=1pt
+      ] {\strut #3};%
+    }%
+  }{%
+    \tikz[baseline]{%
+      \node[
+        draw=none,
+        fill=none,
+        text opacity=1,
+        anchor=base,
+        inner xsep=1pt,
+        inner ysep=1pt
+      ] {\strut #3};%
+    }%
+  }%
+}
+
+\newcommand{\altunderline}[2]{%
+  \alt<#1>{%
+    \tikz[baseline]{%
+      \node[
+        draw=none,
+        very thick,
+        fill=none,
+        text opacity=1,
+        anchor=base,
+        rounded corners=1pt,
+        inner xsep=1pt,
+        inner ysep=1pt,
+        path picture={
+          \draw[black, very thick, opacity=0.5] (current bounding box.south west)
+                         -- (current bounding box.south east);  % Bottom border only
+        }
+      ] {\strut {#2}};%
+    }%
+  }{%
+    \tikz[baseline]{%
+      \node[
+        draw=none,
+        fill=none,
+        text opacity=1,
+        anchor=base,
+        inner xsep=1pt,
+        inner ysep=1pt
+      ] {\strut #2};%
+    }%
+  }%
+}
+
+\definecolor{dkyelloworange}{rgb}{0.9,0.7,0.2}
+\definecolor{dklightblue}{rgb}{0.6,0.6,1.0}
+\definecolor{dkgreen}{rgb}{0.4,0.8,0.4}
+\definecolor{dkdarkgray}{rgb}{0.1,0.1,0.1}
+\definecolor{dkdarkgreen}{rgb}{0.1,0.5,0.1}
+\newcommand{\webid}{
+  \tikz[baseline]{%
+      \node[
+        fill={dkyelloworange},
+        fill opacity=0.3,
+        text opacity=1,
+        anchor=base,
+        rounded corners=1pt,
+        inner xsep=1pt,
+        inner ysep=3pt
+      ] {\ensuremath{u}};%
+  }
+}
+%\colorbox{pink!70}{\ensuremath{u}}}
+\newcommand{\webidp}{
+  \tikz[baseline]{%
+      \node[
+        fill={dkdarkgreen},
+        fill opacity=0.3,
+        text opacity=1,
+        anchor=base,
+        rounded corners=1pt,
+        inner xsep=1pt,
+        inner ysep=3pt
+      ] {\ensuremath{v}};%
+  }
+}
+%\colorbox{blue!30}{\ensuremath{v}}}
+
+\newcommand{\gray}[1]{
+  {\color{dkgray}#1}
+}
+
+\newcommand{\tightldots}{.\hspace{-0.25em}.\hspace{-0.25em}.\hspace{-0.15em}}
+
+\newcommand{\codequote}{{\hspace{-0.1em}\textnormal{'}}}
+
+\newcommand<>\Alt[2]{{%
+    \sbox0{$\displaystyle #1$}%
+    \sbox1{$\displaystyle #2$}%
+    \alt#3%
+        {\parbox[c][\maxvalue(\ht0,\ht1)][c]{\maxvalue(\wd0,\wd1)}
+          {\centering\usebox0}}
+        {\parbox[c][\maxvalue(\ht0,\ht1)][c]{\maxvalue(\wd0,\wd1)}
+          {\centering\usebox1}}
+        %{\rlap{\usebox0}\vphantom{\usebox1}\hphantom{\ifnum\wd0>\wd1 \usebox0\else\usebox1\fi}}%
+        %{\rlap{\usebox1}\vphantom{\usebox0}\hphantom{\ifnum\wd0>\wd1 \usebox0\else\usebox1\fi}}%
+}}
+\newcommand<>\boxalt[1]{\Alt#2{\fbox{\ensuremath{#1}}}{#1}}
+
+
+% https://tex.stackexchange.com/questions/85269/easy-absolute-positioning-in-beamer
+
+\newcount\mycount
+
+\def\mytempcoord{}
+\def\mytempopa{}
+%
+\newcommand\doatpos[3]{%
+    \bgroup
+    \renewcommand*{\do}[1]{\ifnum\mycount<2
+                        \edef\mytempcoord{\mytempcoord ##1%
+                            \ifnum\mycount<1
+                            ,
+                            \fi
+                        }
+                        \else
+                        \edef\mytempopa{##1}
+                        \fi
+                        \advance\mycount by 1
+                        }
+    \docsvlist{#2}\global\advance\mycount by -3
+    \begin{tikzpicture}[remember picture, overlay]
+    \node[anchor=#1, opacity=\mytempopa] at (\mytempcoord) {#3};
+    \end{tikzpicture}%
+        %
+    %
+    \egroup
+%
+}
+
+\newcommand{\ind}{\hspace*{1.2em}}

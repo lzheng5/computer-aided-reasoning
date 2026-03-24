@@ -1,0 +1,100 @@
+\documentclass[aspectratio=169]{beamer}
+
+%\setbeamercolor{normal text}{fg=white,bg=black!90}
+%\setbeamercolor{structure}{fg=white}
+%
+%\setbeamercolor{alerted text}{fg=red!85!black}
+%
+%\setbeamercolor{item projected}{use=item,fg=black,bg=item.fg!35}
+%
+%\setbeamercolor*{palette primary}{use=structure,fg=structure.fg}
+%\setbeamercolor*{palette secondary}{use=structure,fg=structure.fg!95!black}
+%\setbeamercolor*{palette tertiary}{use=structure,fg=structure.fg!90!black}
+%\setbeamercolor*{palette quaternary}{use=structure,fg=structure.fg!95!black,bg=black!80}
+%
+%\setbeamercolor*{framesubtitle}{fg=white}
+%
+%\setbeamercolor*{block title}{parent=structure,bg=black!60}
+%\setbeamercolor*{block body}{fg=black,bg=black!10}
+%\setbeamercolor*{block title alerted}{parent=alerted text,bg=black!15}
+%\setbeamercolor*{block title example}{parent=example text,bg=black!15}
+
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{calc}
+\usepackage{mathpartir}
+\usepackage{amssymb}
+\usepackage{amsmath}
+\usepackage{amsthm}
+\usepackage{hyperref}
+\usepackage{mathtools}
+\usepackage{tikz-cd}
+\usepackage{tikz}
+\usetikzlibrary{arrows}
+\usepackage{multicol}
+\usepackage{xcolor}
+\usepackage{transparent}
+\usepackage{utfsym}
+\usepackage{soul} % for highlighting
+\usepackage[b]{esvect}
+\usepackage[bb=dsserif]{mathalpha}
+\usepackage{bm}
+\usepackage{bold-extra}
+\usepackage[absolute,overlay]{textpos}
+\usepackage{circuitikz}
+
+%\usepackage{fdsymbol}
+
+\usepackage{graphicx}
+\graphicspath{ {./} }
+
+\usepackage{comment}
+
+\usepackage[normalem]{ulem}
+
+\setbeamertemplate{navigation symbols}{}% remove navigation symbols
+
+\addtobeamertemplate{navigation symbols}{}{% add page numbers
+    \usebeamerfont{footline}%
+    \usebeamercolor[fg]{footline}%
+    \hspace{1em}%
+    \insertframenumber/\inserttotalframenumber
+}
+
+\setbeamertemplate{blocks}[rounded][shadow=true]
+\definecolor{bgcolor}{rgb}{0.15686,0.172549,0.203921}
+%\definecolor{textcolor}{rgb}{0.670588,0.698039,0.7490196}
+%\setbeamercolor{background canvas}{bg=bgcolor}
+%\setbeamercolor{normal text}{fg=textcolor}
+%\usebeamercolor*{normal text}
+
+\setbeamercolor{block body}{bg=structure!10}
+
+\usepackage{pgfplots}
+\usetikzlibrary{patterns}
+
+\newcommand{\removeskips}{\setlength{\parskip}{0pt}\setlength{\abovedisplayskip}{0pt}\setlength{\belowdisplayskip}{6pt}\setlength{\abovedisplayshortskip}{0pt}\setlength{\belowdisplayshortskip}{6pt}}
+
+\usepackage{centernot}
+
+\include{defs}
+
+\setbeamertemplate{itemize item}{\mybullet}
+
+
+\usetikzlibrary{tikzmark,shapes.symbols,decorations.markings}
+\usetikzlibrary{positioning}
+
+\usepackage{xfp}
+\usetikzlibrary{calc}
+\usepackage{etoolbox} % for conditionals
+
+\begin{document}
+
+% \frame{\titlepage}
+
+\include{title-page}
+
+\include{slides}
+
+\end{document}

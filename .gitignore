@@ -2,4 +2,10 @@
 *~
 .lia.cache
 *.log
-/.agents
+.agents
+.claude
+*.aux
+*.nav
+*.out
+*.snm
+*.toc
