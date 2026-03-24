@@ -88,7 +88,7 @@
 
        This is interesting when it comes to gradual typing, where typed and untyped functions coexist.
 
-    2. We statically proves either *complete or partial* contract correctness of program components.
+    2. We statically prove either *complete or partial* contract correctness of program components.
 
        Consequently, compilers can safely remove unnecessary contracts that are already verified to be correct.
 

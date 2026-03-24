@@ -1,0 +1,115 @@
+\begin{frame}[t]{Contract Checking in ACL2s}
+
+\[
+\large
+\begin{array}{@{}l@{}}
+  \mex{(\kw{definec} div (n :nat m :pos) :nat} \\
+  \hspace{1.2em}\mex{(floor n m))} \\[0.5em]
+  \mex{(\kw{definec} map-div (n :nat ms :pos-list) :nat-list} \\
+  \hspace{1.2em}\mex{(\kw{cond} ((null ms) nil)} \\
+  \hspace{4.8em}\mex{(t (cons (div n (car ms)) (map-div n (cdr ms))))))} \\[0.5em]
+  \mex{(\kw{definec} main (n :nat) :nat-list} \\
+  \hspace{1.2em}\mex{(map-div n \codequote(42~\altcolor{2-3}{red}{0})))} \\
+  \\
+  \invisible<-1>{\color{red}{\Rightarrow \textbf{static contract violation!}}}
+\end{array}
+\]
+
+  \begin{itemize}
+    \invisible<-2>{\item \textbf{Why?} The list \texttt{'(42 0)} contains \texttt{0}, which violates the \texttt{:pos} constraint in \texttt{div}}.
+  \end{itemize}
+
+  \only<3>{}
+
+\end{frame}
+
+\begin{frame}[t]{Contract Checking in ACL2s}
+
+  \vspace{2em}
+
+  \large
+  \begin{itemize}
+  \invisible<-1>{\item Return value violates the return contract.}
+  \invisible<-2>
+  {
+  \begin{flalign*}
+   & \begin{array}{@{}l@{}}
+      \mex{(\kw{definec} map-div (n :nat ms :pos-list) \altcolor{2-}{red}{:nat}} \\
+      \hspace{1.2em}\mex{(\kw{cond} ((null ms) nil)} \\
+      \hspace{4.8em}\mex{(t (cons (div n (car ms)) (map-div n (cdr ms))))))}
+    \end{array} &
+  \end{flalign*}
+  }
+
+  \invisible<-3>{\item Input arguments violate the input contracts.}
+  \invisible<-4>
+  {
+  \begin{flalign*}
+    & \begin{array}{@{}l@{}}
+        \mex{(\kw{definec} main (n :nat) :nat-list} \\
+        \ind \mex{(map-div n \codequote(42~\altcolor{4-}{red}{0})))}
+      \end{array} &
+  \end{flalign*}
+  }
+
+  \end{itemize}
+
+  \only<5>{}
+
+\end{frame}
+
+\begin{frame}[t]{Contract Checking in Higher-order Languages}
+
+\[
+\large
+\begin{array}{@{}l@{}}
+  \mex{(div : nat? (>/c 0) -> nat?)} \\[0.5em]
+  \mex{(map : \altcolor{2}{green}{(any/c -> any/c)} \altcolor{3}{green}{list?} -> list?)} \\
+  \mex{(\kw{define} (map f xs)} \\
+  \hspace{1.2em}\mex{(\kw{cond} ([(null xs) \codequote()]} \\
+  \hspace{5em}\mex{[\kw{else} (cons (f (car xs)) (map f (cdr xs)))])))} \\[0.5em]
+  \mex{(main : nat? -> (listof nat?))} \\
+  \mex{(\kw{define} (main n)} \\
+  \hspace{1.2em}\altcolor{4-}{red}{\mex{(map \altcolor{2}{green}{($\lambda$ (m) (div n m))} \altcolor{3}{green}{\codequote(42~\altcolor{1}{blue}{0})})}}\mex{)} \\[0.5em]
+  \\
+  \invisible<-4>{\mex{(main 42)}} \\
+  \\
+  \invisible<-5>{\color{red}{\Rightarrow \textbf{dynamic contract violation!}}}
+\end{array}
+\]
+
+\only<6>{}
+
+\end{frame}
+
+\begin{frame}{Contract Checking in Higher-order Languages}
+  \Large
+
+  \begin{itemize}
+  \item Extra runtime monitoring imposes significant overhead.
+
+  \item \invisible<-1>{We can only identify problems by executing the program.}
+
+  \end{itemize}
+
+  \vspace{2em}
+
+  \invisible<-2>{\large \textbf{We need static contract checking for higher-order languages!}}
+
+  \only<3>{}
+
+\end{frame}
+
+%% \begin{frame}{Contracts in Higher-order Languages}
+
+%%   \large
+%%   \begin{itemize}
+%%   \item Phúc C. Nguyen, Sam Tobin-Hochstadt, and David Van Horn. 2014. \textbf{Soft contract verification}. In Proceedings of the 19th ACM SIGPLAN international conference on Functional programming (ICFP '14). Association for Computing Machinery, New York, NY, USA, 139–152. https://doi.org/10.1145/2628136.2628156
+
+%%     \vspace{1em}
+
+%%   \item Niki Vazou, Eric L. Seidel, Ranjit Jhala, Dimitrios Vytiniotis, and Simon Peyton-Jones. 2014. Refinement types for Haskell. In Proceedings of the 19th ACM SIGPLAN international conference on Functional programming (ICFP '14). Association for Computing Machinery, New York, NY, USA, 269–282. https://doi.org/10.1145/2628136.2628161
+
+%%   \end{itemize}
+
+%% \end{frame}
