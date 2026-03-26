@@ -762,13 +762,13 @@ Is the above set of constraints consistent? If so, who has what job?
  1 3 6   8 7 2   4 5 9
 |#
 
-(defun sodoku-var-specs ()
+(defun sudoku-var-specs ()
   (loop for row below 9 append
         (loop for col below 9 append
               (loop for val from 1 to 9 append
                     `(,(sudoku-cell-var row col val) :bool)))))
 
-(defun sodoku-initial (input-grid)
+(defun sudoku-initial (input-grid)
   (cons 'and
         (loop for row below 9 append
              (loop for col below 9 append
@@ -777,7 +777,7 @@ Is the above set of constraints consistent? If so, who has what job?
                          `((= ,(sudoku-cell-var row col cell-val) t))
                          nil))))))
 
-(defun sodoku-each-cell-has-one-value ()
+(defun sudoku-each-cell-has-one-value ()
   (cons 'and
         (loop for row below 9 append
              (loop for col below 9 append
@@ -786,7 +786,7 @@ Is the above set of constraints consistent? If so, who has what job?
                      `(((_ at-least [1]) ,@vars)
                        ((_ at-most  [1]) ,@vars)))))))
 
-(defun sodoku-box-cell-all-different (box-row box-col)
+(defun sudoku-box-cell-all-different (box-row box-col)
   (loop for val from 1 to 9 append
         (let ((vars (loop for r from (* box-row 3) below (+ (* box-row 3) 3) append
                          (loop for c from (* box-col 3) below (+ (* box-col 3) 3)
@@ -794,13 +794,13 @@ Is the above set of constraints consistent? If so, who has what job?
           `(((_ at-least [1]) ,@vars)
             ((_ at-most  [1]) ,@vars)))))
 
-(defun sodoku-each-box-all-different ()
+(defun sudoku-each-box-all-different ()
   (cons 'and
         (loop for box-row below 3 append
              (loop for box-col below 3 append
-                   (sodoku-box-cell-all-different box-row box-col)))))
+                   (sudoku-box-cell-all-different box-row box-col)))))
 
-(defun sodoku-all-row-col-different ()
+(defun sudoku-all-row-col-different ()
   (cons 'and
         (append
          (loop for row below 9 append
@@ -819,12 +819,12 @@ Is the above set of constraints consistent? If so, who has what job?
 (solver-reset)
 
 (defun solve-sudoku (input-grid)
-  (let ((var-specs (sodoku-var-specs)))
+  (let ((var-specs (sudoku-var-specs)))
     (solver-push)
-    (z3-assert-fn var-specs (sodoku-initial input-grid))
-    (z3-assert-fn var-specs (sodoku-each-cell-has-one-value))
-    (z3-assert-fn var-specs (sodoku-each-box-all-different))
-    (z3-assert-fn var-specs (sodoku-all-row-col-different))
+    (z3-assert-fn var-specs (sudoku-initial input-grid))
+    (z3-assert-fn var-specs (sudoku-each-cell-has-one-value))
+    (z3-assert-fn var-specs (sudoku-each-box-all-different))
+    (z3-assert-fn var-specs (sudoku-all-row-col-different))
     (let ((sol (if (equal (check-sat) 'UNSAT)
                    'UNSAT
                    (get-model-as-assignment))))
@@ -868,12 +868,12 @@ Is the above set of constraints consistent? If so, who has what job?
 (defun sudoku-cell-var-alt (row col)
   (intern (concatenate 'string "X" (write-to-string (+ col (* row 9))))))
 
-(defun sodoku-var-specs-alt () 
+(defun sudoku-var-specs-alt () 
   (loop for row below 9 append
         (loop for col below 9 append
               `(,(sudoku-cell-var-alt row col) :int))))
 
-(defun sodoku-initial-alt (input-grid)
+(defun sudoku-initial-alt (input-grid)
   (cons 'and
         (loop for row below 9 append
              (loop for col below 9 append
@@ -882,25 +882,25 @@ Is the above set of constraints consistent? If so, who has what job?
                          `((= ,(sudoku-cell-var-alt row col) ,cell-val))
                          nil))))))
 
-(defun sodoku-var-range ()
+(defun sudoku-var-range ()
   (cons 'and
         (loop for row below 9 append
              (loop for col below 9 append
                    `((and (> ,(sudoku-cell-var-alt row col) 0)
                           (<= ,(sudoku-cell-var-alt row col) 9)))))))
 
-(defun sodoku-box-cell-all-different-alt (box-row box-col)
+(defun sudoku-box-cell-all-different-alt (box-row box-col)
   `(distinct ,@(loop for r from (* box-row 3) below (+ (* box-row 3) 3) append
                       (loop for c from (* box-col 3) below (+ (* box-col 3) 3)
                             collect (sudoku-cell-var-alt r c)))))
 
-(defun sodoku-each-box-all-different-alt ()
+(defun sudoku-each-box-all-different-alt ()
   (cons 'and
         (loop for box-row below 3 append
              (loop for box-col below 3 collect
-                   (sodoku-box-cell-all-different-alt box-row box-col)))))
+                   (sudoku-box-cell-all-different-alt box-row box-col)))))
 
-(defun sodoku-all-row-col-different-alt ()
+(defun sudoku-all-row-col-different-alt ()
   (cons 'and
         (append
          (loop for row below 9 collect
@@ -913,12 +913,12 @@ Is the above set of constraints consistent? If so, who has what job?
                           collect (sudoku-cell-var-alt row col)))))))
 
 (defun solve-sudoku-alternative (input-grid)
-  (let ((var-specs (sodoku-var-specs-alt)))
+  (let ((var-specs (sudoku-var-specs-alt)))
     (solver-push)
-    (z3-assert-fn var-specs (sodoku-initial-alt input-grid))
-    (z3-assert-fn var-specs (sodoku-var-range))
-    (z3-assert-fn var-specs (sodoku-each-box-all-different-alt))
-    (z3-assert-fn var-specs (sodoku-all-row-col-different-alt))
+    (z3-assert-fn var-specs (sudoku-initial-alt input-grid))
+    (z3-assert-fn var-specs (sudoku-var-range))
+    (z3-assert-fn var-specs (sudoku-each-box-all-different-alt))
+    (z3-assert-fn var-specs (sudoku-all-row-col-different-alt))
     (let ((sol (if (equal (check-sat) 'UNSAT)
                    'UNSAT
                    (get-model-as-assignment))))
@@ -1157,13 +1157,13 @@ Is the above set of constraints consistent? If so, who has what job?
 ;; be numeric (as opposed to e.g. taking in and returning symbols that
 ;; somehow encode numeric values for cell values greater than 9).
 
-(defun arb-sodoku-var-specs (n^2)
+(defun arb-sudoku-var-specs (n^2)
   (loop for row below n^2 append
         (loop for col below n^2 append
               (loop for val from 1 to n^2 append
                     `(,(sudoku-cell-var row col val) :bool)))))
 
-(defun arb-sodoku-initial (input-grid n^2)
+(defun arb-sudoku-initial (input-grid n^2)
   (cons 'and
         (loop for row below n^2 append
              (loop for col below n^2 append
@@ -1172,7 +1172,7 @@ Is the above set of constraints consistent? If so, who has what job?
                          `((= ,(sudoku-cell-var row col cell-val) t))
                          nil))))))
 
-(defun arb-sodoku-each-cell-has-one-value (n^2)
+(defun arb-sudoku-each-cell-has-one-value (n^2)
   (cons 'and
         (loop for row below n^2 append
              (loop for col below n^2 append
@@ -1181,7 +1181,7 @@ Is the above set of constraints consistent? If so, who has what job?
                      `(((_ at-least [1]) ,@vars)
                        ((_ at-most  [1]) ,@vars)))))))
 
-(defun arb-sodoku-box-cell-all-different (box-row box-col n)
+(defun arb-sudoku-box-cell-all-different (box-row box-col n)
   (loop for val from 1 to (* n n) append
         (let ((vars (loop for r from (* box-row n) below (+ (* box-row n) n) append
                          (loop for c from (* box-col n) below (+ (* box-col n) n)
@@ -1189,13 +1189,13 @@ Is the above set of constraints consistent? If so, who has what job?
           `(((_ at-least [1]) ,@vars)
             ((_ at-most  [1]) ,@vars)))))
 
-(defun arb-sodoku-each-box-all-different (n)
+(defun arb-sudoku-each-box-all-different (n)
   (cons 'and
         (loop for box-row below n append
              (loop for box-col below n append
-                   (arb-sodoku-box-cell-all-different box-row box-col n)))))
+                   (arb-sudoku-box-cell-all-different box-row box-col n)))))
 
-(defun arb-sodoku-all-row-col-different (n^2)
+(defun arb-sudoku-all-row-col-different (n^2)
   (cons 'and
         (append
          (loop for row below n^2 append
@@ -1219,19 +1219,19 @@ Is the above set of constraints consistent? If so, who has what job?
   (assert (> n 0) nil "n must be greater than 0")
 
   (let* ((n^2 (* n n))
-         (var-specs (arb-sodoku-var-specs n^2)))
+         (var-specs (arb-sudoku-var-specs n^2)))
     (solver-push)
     (z3-assert-fn var-specs
-                  (arb-sodoku-initial input-grid n^2))
+                  (arb-sudoku-initial input-grid n^2))
 
     (z3-assert-fn var-specs
-                  (arb-sodoku-each-cell-has-one-value n^2))
+                  (arb-sudoku-each-cell-has-one-value n^2))
 
     (z3-assert-fn var-specs
-                  (arb-sodoku-each-box-all-different n))
+                  (arb-sudoku-each-box-all-different n))
 
     (z3-assert-fn var-specs
-                  (arb-sodoku-all-row-col-different n^2))
+                  (arb-sudoku-all-row-col-different n^2))
 
     (let ((sol (if (equal (check-sat) 'UNSAT)
                   'UNSAT
