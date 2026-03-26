@@ -625,7 +625,34 @@ Is the above set of constraints consistent? If so, who has what job?
 ;; A non-trivial magic square is a magic square such that no two cells
 ;; have the same value.
 
-...
+(defun 3x3-magic-square-diagonal (sum-var) 
+  (let ((diag1 (loop for i below 3 collect (get-3x3-magic-square-var i i)))
+        (diag2 (loop for i below 3 collect (get-3x3-magic-square-var i (- 2 i)))))
+    `(and (= (+ . ,diag1) ,sum-var)
+          (= (+ . ,diag2) ,sum-var))))
+
+(defun 3x3-magic-square-distinct ()
+  (cons 'distinct
+        (loop for row below 3 append
+             (loop for col below 3
+                   collect (get-3x3-magic-square-var row col)))))
+
+(solver-push)
+(z3-assert-fn (3x3-magic-square-var-specs 'S)
+              (3x3-magic-square-row-col-constraints 'S))
+(z3-assert-fn (3x3-magic-square-var-specs 'S)
+              (3x3-magic-square-vars-between-1-and-9))
+(z3-assert-fn (3x3-magic-square-var-specs 'S)
+              (3x3-magic-square-diagonal 'S))
+(z3-assert-fn (3x3-magic-square-var-specs 'S)
+              (3x3-magic-square-distinct))
+(check-sat)
+;; We get our satisfying assignment, still boring (all 1s) but correct.
+(solver-pop)
+
+;; You'll expand upon this in Q2 below.
+
+(solver-reset)
 
 
 ;; ==========================
@@ -683,13 +710,17 @@ Is the above set of constraints consistent? If so, who has what job?
 ;; Given a solution that is an alist from cell vars to booleans, get
 ;; the assigned value for the cell at the given row and column, or nil
 ;; if it is unassigned.
-(defun get-square-value (soln row col)
+(defun get-square-value-bool (soln row col)
   (block outer
     (loop for i from 1 to 9
           do (when (and (cdr (assoc-equal (sudoku-cell-var row col i) soln))
                         (cadr (assoc-equal (sudoku-cell-var row col i) soln)))
                (return-from outer i)))
     nil))
+
+;; Default: uses bool encoding (Q3). Callers may setf this to get-square-value-int.
+(defun get-square-value (soln row col)
+  (get-square-value-bool soln row col))
 
 ;; This pretty-prints a Sudoku solution, using `get-square-value` to
 ;; handle the task of getting the value of a cell from the solution
@@ -731,13 +762,87 @@ Is the above set of constraints consistent? If so, who has what job?
  1 3 6   8 7 2   4 5 9
 |#
 
-...
+(defun sodoku-var-specs ()
+  (loop for row below 9 append
+        (loop for col below 9 append
+              (loop for val from 1 to 9 append
+                    `(,(sudoku-cell-var row col val) :bool)))))
+
+(defun sodoku-initial (input-grid)
+  (cons 'and
+        (loop for row below 9 append
+             (loop for col below 9 append
+                   (let ((cell-val (nth (+ col (* row 9)) input-grid)))
+                     (if (not (equal cell-val '_))
+                         `((= ,(sudoku-cell-var row col cell-val) t))
+                         nil))))))
+
+(defun sodoku-each-cell-has-one-value ()
+  (cons 'and
+        (loop for row below 9 append
+             (loop for col below 9 append
+                   (let ((vars (loop for val from 1 to 9
+                                    collect (sudoku-cell-var row col val))))
+                     `(((_ at-least [1]) ,@vars)
+                       ((_ at-most  [1]) ,@vars)))))))
+
+(defun sodoku-box-cell-all-different (box-row box-col)
+  (loop for val from 1 to 9 append
+        (let ((vars (loop for r from (* box-row 3) below (+ (* box-row 3) 3) append
+                         (loop for c from (* box-col 3) below (+ (* box-col 3) 3)
+                               collect (sudoku-cell-var r c val)))))
+          `(((_ at-least [1]) ,@vars)
+            ((_ at-most  [1]) ,@vars)))))
+
+(defun sodoku-each-box-all-different ()
+  (cons 'and
+        (loop for box-row below 3 append
+             (loop for box-col below 3 append
+                   (sodoku-box-cell-all-different box-row box-col)))))
+
+(defun sodoku-all-row-col-different ()
+  (cons 'and
+        (append
+         (loop for row below 9 append
+              (loop for val from 1 to 9 append
+                    (let ((vars (loop for col below 9
+                                     collect (sudoku-cell-var row col val))))
+                      `(((_ at-least [1]) ,@vars)
+                        ((_ at-most  [1]) ,@vars)))))
+         (loop for col below 9 append
+              (loop for val from 1 to 9 append
+                    (let ((vars (loop for row below 9
+                                     collect (sudoku-cell-var row col val))))
+                      `(((_ at-least [1]) ,@vars)
+                        ((_ at-most  [1]) ,@vars))))))))
+
+(solver-reset)
 
 (defun solve-sudoku (input-grid)
-  ...)
+  (let ((var-specs (sodoku-var-specs)))
+    (solver-push)
+    (z3-assert-fn var-specs (sodoku-initial input-grid))
+    (z3-assert-fn var-specs (sodoku-each-cell-has-one-value))
+    (z3-assert-fn var-specs (sodoku-each-box-all-different))
+    (z3-assert-fn var-specs (sodoku-all-row-col-different))
+    (let ((sol (if (equal (check-sat) 'UNSAT)
+                   'UNSAT
+                   (get-model-as-assignment))))
+      (solver-pop)
+      sol)))
+
+(defun benchmark-solve-sudoku (grid name)
+  (format t "~%=== ~A (bit-blasting) ===~%" name)
+  (setf (fdefinition 'get-square-value) #'get-square-value-bool)
+  (solver-reset)
+  (let ((soln (time (solve-sudoku grid))))
+    (if (equal soln 'UNSAT)
+        (format t "UNSAT~%")
+        (pretty-print-3x3-sudoku-solution soln))
+    (z3::get-solver-stats)))
 
 ;; This should print out the solution given above.
-(pretty-print-3x3-sudoku-solution (time (solve-sudoku *sudoku-example-board*)))
+(benchmark-solve-sudoku *sudoku-example-board* "*sudoku-example-board*")
 
 ;; ==========================
 ;;            Q4
@@ -760,10 +865,84 @@ Is the above set of constraints consistent? If so, who has what job?
 ;; function I provided if you redefine `get-square-value` to work with
 ;; your variable encoding.
 
-...
+(defun sudoku-cell-var-alt (row col)
+  (intern (concatenate 'string "X" (write-to-string (+ col (* row 9))))))
 
-(defun solve-sudoku-alternate (input-grid)
-  ...)
+(defun sodoku-var-specs-alt () 
+  (loop for row below 9 append
+        (loop for col below 9 append
+              `(,(sudoku-cell-var-alt row col) :int))))
+
+(defun sodoku-initial-alt (input-grid)
+  (cons 'and
+        (loop for row below 9 append
+             (loop for col below 9 append
+                   (let ((cell-val (nth (+ col (* row 9)) input-grid)))
+                     (if (not (equal cell-val '_))
+                         `((= ,(sudoku-cell-var-alt row col) ,cell-val))
+                         nil))))))
+
+(defun sodoku-var-range ()
+  (cons 'and
+        (loop for row below 9 append
+             (loop for col below 9 append
+                   `((and (> ,(sudoku-cell-var-alt row col) 0)
+                          (<= ,(sudoku-cell-var-alt row col) 9)))))))
+
+(defun sodoku-box-cell-all-different-alt (box-row box-col)
+  `(distinct ,@(loop for r from (* box-row 3) below (+ (* box-row 3) 3) append
+                      (loop for c from (* box-col 3) below (+ (* box-col 3) 3)
+                            collect (sudoku-cell-var-alt r c)))))
+
+(defun sodoku-each-box-all-different-alt ()
+  (cons 'and
+        (loop for box-row below 3 append
+             (loop for box-col below 3 collect
+                   (sodoku-box-cell-all-different-alt box-row box-col)))))
+
+(defun sodoku-all-row-col-different-alt ()
+  (cons 'and
+        (append
+         (loop for row below 9 collect
+              (cons 'distinct
+                    (loop for col below 9
+                          collect (sudoku-cell-var-alt row col))))
+         (loop for col below 9 collect
+              (cons 'distinct
+                    (loop for row below 9
+                          collect (sudoku-cell-var-alt row col)))))))
+
+(defun solve-sudoku-alternative (input-grid)
+  (let ((var-specs (sodoku-var-specs-alt)))
+    (solver-push)
+    (z3-assert-fn var-specs (sodoku-initial-alt input-grid))
+    (z3-assert-fn var-specs (sodoku-var-range))
+    (z3-assert-fn var-specs (sodoku-each-box-all-different-alt))
+    (z3-assert-fn var-specs (sodoku-all-row-col-different-alt))
+    (let ((sol (if (equal (check-sat) 'UNSAT)
+                   'UNSAT
+                   (get-model-as-assignment))))
+      (solver-pop)
+      sol)))
+
+(solver-reset)
+
+;; Integer encoding: the cell variable holds its value directly.
+(defun get-square-value-int (soln row col)
+  (cadr (assoc-equal (sudoku-cell-var-alt row col) soln)))
+
+(defun benchmark-solve-sudoku-alternative (grid name)
+  (format t "~%=== ~A (integer encoding) ===~%" name)
+  (setf (fdefinition 'get-square-value) #'get-square-value-int)
+  (solver-reset)
+  (let ((soln (time (solve-sudoku-alternative grid))))
+    (if (equal soln 'UNSAT)
+        (format t "UNSAT~%")
+        (pretty-print-3x3-sudoku-solution soln))
+    (z3::get-solver-stats)))
+
+;; This should print out the solution given above.
+(benchmark-solve-sudoku-alternative *sudoku-example-board* "*sudoku-example-board*")
 
 ;; 4b. (15 pts)
 ;;
@@ -788,6 +967,173 @@ Is the above set of constraints consistent? If so, who has what job?
 ;;   from the beginning, retaining learned conflict clauses (recall
 ;;   nonchronological backtracking)
 
+(defun benchmark-sudoku (grid name)
+  (benchmark-solve-sudoku grid name)
+  (benchmark-solve-sudoku-alternative grid name))
+
+;; Taken from https://github.com/mister-walter/cl-z3/blob/main/examples/sudoku.lisp
+
+;; Formatted for readability.
+(defconstant a-hard-sudoku-grid
+  '(6 _ _   3 _ 1   _ 8 4
+    _ _ _   _ 6 9   _ _ 7
+    _ _ _   _ _ 7   _ 1 3
+
+    4 _ _   6 9 _   _ _ 8
+    _ _ _   _ 1 5   _ _ _
+    _ _ 8   _ _ _   _ 6 _
+
+    _ _ _   _ _ _   _ _ _
+    _ _ _   1 _ _   7 _ _
+    2 _ 4   _ _ 3   1 _ _))
+
+(benchmark-sudoku a-hard-sudoku-grid "a-hard-sudoku-grid")
+
+(defconstant a-very-hard-sudoku-grid
+  '(_ _ _   _ _ _   _ 1 2
+    _ _ _   _ _ _   _ _ 3
+    _ _ 2   3 _ _   4 _ _
+
+    _ _ 1   8 _ _   _ _ 5
+    _ 6 _   _ 7 _   8 _ _
+    _ _ _   _ _ 9   _ _ _
+
+    _ _ 8   5 _ _   _ _ _
+    9 _ _   _ 4 _   5 _ _
+    4 7 _   _ _ 6   _ _ _))
+
+(benchmark-sudoku a-very-hard-sudoku-grid "a-very-hard-sudoku-grid")
+
+(defconstant only-first-row-defined-grid
+  '(1 2 3   4 5 6   7 8 9
+    _ _ _   _ _ _   _ _ _
+    _ _ _   _ _ _   _ _ _
+
+    _ _ _   _ _ _   _ _ _
+    _ _ _   _ _ _   _ _ _
+    _ _ _   _ _ _   _ _ _
+
+    _ _ _   _ _ _   _ _ _
+    _ _ _   _ _ _   _ _ _
+    _ _ _   _ _ _   _ _ _))
+
+;; ~2s
+(benchmark-sudoku only-first-row-defined-grid "only-first-row-defined-grid")
+
+(defconstant only-first-col-defined-grid
+  '(1 _ _   _ _ _   _ _ _
+    2 _ _   _ _ _   _ _ _
+    3 _ _   _ _ _   _ _ _
+
+    4 _ _   _ _ _   _ _ _
+    5 _ _   _ _ _   _ _ _
+    6 _ _   _ _ _   _ _ _
+
+    7 _ _   _ _ _   _ _ _
+    8 _ _   _ _ _   _ _ _
+    9 _ _   _ _ _   _ _ _))
+
+;; ~12s
+(benchmark-sudoku only-first-col-defined-grid "only-first-col-defined-grid")
+
+(defconstant only-diag-defined-grid
+  '(1 _ _   _ _ _   _ _ _
+    _ 2 _   _ _ _   _ _ _
+    _ _ 3   _ _ _   _ _ _
+
+    _ _ _   4 _ _   _ _ _
+    _ _ _   _ 5 _   _ _ _
+    _ _ _   _ _ 6   _ _ _
+
+    _ _ _   _ _ _   7 _ _
+    _ _ _   _ _ _   _ 8 _
+    _ _ _   _ _ _   _ _ 9))
+
+;; ~3s
+(benchmark-sudoku only-diag-defined-grid "only-diag-defined-grid")
+
+(defconstant only-first-row-defined-reverse-grid
+  '(9 8 7   6 5 4   3 2 1
+    _ _ _   _ _ _   _ _ _
+    _ _ _   _ _ _   _ _ _
+
+    _ _ _   _ _ _   _ _ _
+    _ _ _   _ _ _   _ _ _
+    _ _ _   _ _ _   _ _ _
+
+    _ _ _   _ _ _   _ _ _
+    _ _ _   _ _ _   _ _ _
+    _ _ _   _ _ _   _ _ _))
+
+;; ~8s
+(benchmark-sudoku only-first-row-defined-reverse-grid "only-first-row-defined-reverse-grid")
+
+(defconstant blank-sudoku-grid
+  '(_ _ _   _ _ _   _ _ _
+    _ _ _   _ _ _   _ _ _
+    _ _ _   _ _ _   _ _ _
+
+    _ _ _   _ _ _   _ _ _
+    _ _ _   _ _ _   _ _ _
+    _ _ _   _ _ _   _ _ _
+
+    _ _ _   _ _ _   _ _ _
+    _ _ _   _ _ _   _ _ _
+    _ _ _   _ _ _   _ _ _))
+
+;; Generated by Claude 
+
+;; -----------------------------------------------
+;; Example A (SAT): Arto Inkala's 2010 "AI Escargot" — one of the hardest known Sudoku puzzles.
+(defconstant *inkala-2010*
+  '(8 _ _   _ _ _   _ _ _
+    _ _ 3   6 _ _   _ _ _
+    _ 7 _   _ 9 _   2 _ _
+
+    _ 5 _   _ _ 7   _ _ _
+    _ _ _   _ 4 5   7 _ _
+    _ _ _   1 _ _   _ 3 _
+
+    _ _ 1   _ _ _   _ 6 8
+    _ _ 8   5 _ _   _ 1 _
+    _ 9 _   _ _ _   4 _ _))
+
+(benchmark-sudoku *inkala-2010* "*inkala-2010*")
+
+;; -----------------------------------------------
+;; Example B (SAT): Moderate puzzle — baseline comparison.
+(defconstant *moderate-board*
+  '(_ _ _   2 6 _   7 _ 1
+    6 8 _   _ 7 _   _ 9 _
+    1 9 _   _ _ 4   5 _ _
+
+    8 2 _   1 _ _   _ 4 _
+    _ _ 4   6 _ 2   9 _ _
+    _ 5 _   _ _ 3   _ 2 8
+
+    _ _ 9   3 _ _   _ 7 4
+    _ 4 _   _ 5 _   _ 3 6
+    7 _ 3   _ 1 8   _ _ _))
+
+(benchmark-sudoku *moderate-board* "*moderate-board*")
+
+;; -----------------------------------------------
+;; Example C (UNSAT): Value 1 appears twice in row 0 — direct contradiction.
+(defconstant *unsat-board*
+  '(1 _ _   _ _ _   _ _ 1
+    _ _ _   _ _ _   _ _ _
+    _ _ _   _ _ _   _ _ _
+
+    _ _ _   _ _ _   _ _ _
+    _ _ _   _ _ _   _ _ _
+    _ _ _   _ _ _   _ _ _
+
+    _ _ _   _ _ _   _ _ _
+    _ _ _   _ _ _   _ _ _
+    _ _ _   _ _ _   _ _ _))
+
+(benchmark-sudoku *unsat-board* "*unsat-board*")
+
 ;; The hardest Sudoku board for your `solve-sudoku` implementation.
 (defconstant *hardest-sudoku-board*
   '( ... ))
@@ -810,6 +1156,101 @@ Is the above set of constraints consistent? If so, who has what job?
 ;; puzzles. For n>3, the input and output of your solver should still
 ;; be numeric (as opposed to e.g. taking in and returning symbols that
 ;; somehow encode numeric values for cell values greater than 9).
+
+(defun arb-sodoku-var-specs (n^2)
+  (loop for row below n^2 append
+        (loop for col below n^2 append
+              (loop for val from 1 to n^2 append
+                    `(,(sudoku-cell-var row col val) :bool)))))
+
+(defun arb-sodoku-initial (input-grid n^2)
+  (cons 'and
+        (loop for row below n^2 append
+             (loop for col below n^2 append
+                   (let ((cell-val (nth (+ col (* row n^2)) input-grid)))
+                     (if (not (equal cell-val '_))
+                         `((= ,(sudoku-cell-var row col cell-val) t))
+                         nil))))))
+
+(defun arb-sodoku-each-cell-has-one-value (n^2)
+  (cons 'and
+        (loop for row below n^2 append
+             (loop for col below n^2 append
+                   (let ((vars (loop for val from 1 to n^2
+                                    collect (sudoku-cell-var row col val))))
+                     `(((_ at-least [1]) ,@vars)
+                       ((_ at-most  [1]) ,@vars)))))))
+
+(defun arb-sodoku-box-cell-all-different (box-row box-col n)
+  (loop for val from 1 to (* n n) append
+        (let ((vars (loop for r from (* box-row n) below (+ (* box-row n) n) append
+                         (loop for c from (* box-col n) below (+ (* box-col n) n)
+                               collect (sudoku-cell-var r c val)))))
+          `(((_ at-least [1]) ,@vars)
+            ((_ at-most  [1]) ,@vars)))))
+
+(defun arb-sodoku-each-box-all-different (n)
+  (cons 'and
+        (loop for box-row below n append
+             (loop for box-col below n append
+                   (arb-sodoku-box-cell-all-different box-row box-col n)))))
+
+(defun arb-sodoku-all-row-col-different (n^2)
+  (cons 'and
+        (append
+         (loop for row below n^2 append
+              (loop for val from 1 to n^2 append
+                    (let ((vars (loop for col below n^2
+                                     collect (sudoku-cell-var row col val))))
+                      `(((_ at-least [1]) ,@vars)
+                        ((_ at-most  [1]) ,@vars)))))
+         (loop for col below n^2 append
+              (loop for val from 1 to n^2 append
+                    (let ((vars (loop for row below n^2
+                                     collect (sudoku-cell-var row col val))))
+                      `(((_ at-least [1]) ,@vars)
+                        ((_ at-most  [1]) ,@vars))))))))
+
+(defun arb-solve-sudoku (n input-grid)
+  "Arbitrary-size Sudoku solver. n is the size of the boxes in the Sudoku grid, so the grid is of size n^2 x n^2 and contains values from 1 to n^2.
+  
+  Pre: n > 0"
+
+  (assert (> n 0) nil "n must be greater than 0")
+
+  (let* ((n^2 (* n n))
+         (var-specs (arb-sodoku-var-specs n^2)))
+    (solver-push)
+    (z3-assert-fn var-specs
+                  (arb-sodoku-initial input-grid n^2))
+
+    (z3-assert-fn var-specs
+                  (arb-sodoku-each-cell-has-one-value n^2))
+
+    (z3-assert-fn var-specs
+                  (arb-sodoku-each-box-all-different n))
+
+    (z3-assert-fn var-specs
+                  (arb-sodoku-all-row-col-different n^2))
+
+    (let ((sol (if (equal (check-sat) 'UNSAT)
+                  'UNSAT
+                  (get-model-as-assignment))))
+      (solver-pop)
+      sol)))
+
+(defun benchmark-arb-solve-sudoku (n grid name)
+  (format t "~%=== ~A (arb ~Ax~A bit-blasting) ===~%" name (* n n) (* n n))
+  (setf (fdefinition 'get-square-value) #'get-square-value-bool)
+  (solver-reset)
+  (let ((soln (time (arb-solve-sudoku n grid))))
+    (if (equal soln 'UNSAT)
+        (format t "UNSAT~%")
+        (pretty-print-3x3-sudoku-solution soln))
+    (z3::get-solver-stats)))
+
+;; This should print out the solution given above.
+(benchmark-arb-solve-sudoku 3 *sudoku-example-board* "*sudoku-example-board*")
 
 ;; ==========================
 ;;            E2
