@@ -831,16 +831,15 @@ Is the above set of constraints consistent? If so, who has what job?
       (solver-pop)
       sol)))
 
-;; TODO: in each of the benchmark functions, setf get-square-value right before calling pretty-print, so that the correct get-square-value function is used for each solution representation.
-
 (defun benchmark-solve-sudoku (grid name)
   (format t "~%=== ~A (bit-blasting) ===~%" name)
-  (setf (fdefinition 'get-square-value) #'get-square-value-bool)
   (solver-reset)
   (let ((soln (time (solve-sudoku grid))))
     (if (equal soln 'UNSAT)
         (format t "UNSAT~%")
-        (pretty-print-3x3-sudoku-solution soln))
+        (progn
+          (setf (fdefinition 'get-square-value) #'get-square-value-bool)
+          (pretty-print-3x3-sudoku-solution soln)))
     (z3::get-solver-stats)))
 
 ;; This should print out the solution given above.
@@ -935,12 +934,13 @@ Is the above set of constraints consistent? If so, who has what job?
 
 (defun benchmark-solve-sudoku-alternative (grid name)
   (format t "~%=== ~A (integer encoding) ===~%" name)
-  (setf (fdefinition 'get-square-value) #'get-square-value-int)
   (solver-reset)
   (let ((soln (time (solve-sudoku-alternative grid))))
     (if (equal soln 'UNSAT)
         (format t "UNSAT~%")
-        (pretty-print-3x3-sudoku-solution soln))
+        (progn
+          (setf (fdefinition 'get-square-value) #'get-square-value-int)
+          (pretty-print-3x3-sudoku-solution soln)))
     (z3::get-solver-stats)))
 
 ;; This should print out the solution given above.
@@ -1243,12 +1243,13 @@ Is the above set of constraints consistent? If so, who has what job?
 
 (defun benchmark-arb-solve-sudoku (n grid name)
   (format t "~%=== ~A (arb ~Ax~A bit-blasting) ===~%" name (* n n) (* n n))
-  (setf (fdefinition 'get-square-value) #'get-square-value-bool)
   (solver-reset)
   (let ((soln (time (arb-solve-sudoku n grid))))
     (if (equal soln 'UNSAT)
         (format t "UNSAT~%")
-        (pretty-print-3x3-sudoku-solution soln))
+        (progn
+          (setf (fdefinition 'get-square-value) #'get-square-value-bool)
+          (pretty-print-3x3-sudoku-solution soln)))
     (z3::get-solver-stats)))
 
 ;; This should print out the solution given above.
