@@ -831,6 +831,8 @@ Is the above set of constraints consistent? If so, who has what job?
       (solver-pop)
       sol)))
 
+;; TODO: in each of the benchmark functions, setf get-square-value right before calling pretty-print, so that the correct get-square-value function is used for each solution representation.
+
 (defun benchmark-solve-sudoku (grid name)
   (format t "~%=== ~A (bit-blasting) ===~%" name)
   (setf (fdefinition 'get-square-value) #'get-square-value-bool)
@@ -1265,6 +1267,178 @@ Is the above set of constraints consistent? If so, who has what job?
 ;; You should provide a short description of the selected logic puzzle
 ;; and the input encoding you use, as well as a few (2-3) example
 ;; instances of your chosen puzzle encoded using your input encoding.
+
+;; Unequal [https://www.chiark.greenend.org.uk/~sgtatham/puzzles/js/unequal.html]
+;; Fill in the grid with numbers from 1 to the grid size, so that every number appears exactly once in each row and column, and so that all the < signs represent true inequalities 
+;; (i.e. the number at the pointed end is smaller than the number at the open end).
+;; This is basically Sudoku with some additional constraints, so we can use a similar encoding to the one we used for Sudoku. 
+;; We can reuse the same variable encoding as in `solve-sudoku-alternative`, and then add additional constraints for the inequalities.
+
+(defun unequal-cell-var (n row col)
+  (intern (concatenate 'string "X" (write-to-string (+ col (* row n))))))
+
+(defun unequal-var-specs (n) 
+  (loop for row below n append
+        (loop for col below n append
+              `(,(unequal-cell-var n row col) :int))))
+
+;; Helper to get element from the (2n-1) x (2n-1) expanded grid
+(defun unequal-grid-ref (grid n expanded-row expanded-col)
+  (let ((width (- (* 2 n) 1)))
+    (nth (+ expanded-col (* expanded-row width)) grid)))
+
+;; Parse the (2n-1) x (2n-1) grid to extract:
+;; - Value assignments (numbers at positions (2*row, 2*col))
+;; - Horizontal inequalities (symbols at positions (2*row, 2*col+1))
+;; - Vertical inequalities (symbols at positions (2*row+1, 2*col))
+(defun unequal-initial (input-grid n)
+  (cons 'and
+        (append
+         ;; Value assignments from positions (2*row, 2*col)
+         (loop for row below n append
+               (loop for col below n append
+                     (let ((cell-val (unequal-grid-ref input-grid n (* 2 row) (* 2 col))))
+                       (if (and (not (equal cell-val '_)) (numberp cell-val))
+                           `((= ,(unequal-cell-var n row col) ,cell-val))
+                           nil))))
+         ;; Horizontal inequalities at positions (2*row, 2*col+1)
+         ;; Between cell (row, col) and cell (row, col+1)
+         (loop for row below n append
+               (loop for col below (- n 1) append
+                     (let ((ineq-sym (unequal-grid-ref input-grid n (* 2 row) (+ (* 2 col) 1))))
+                       (cond
+                         ((equal ineq-sym '<)
+                          `((< ,(unequal-cell-var n row col) ,(unequal-cell-var n row (+ col 1)))))
+                         ((equal ineq-sym '>)
+                          `((> ,(unequal-cell-var n row col) ,(unequal-cell-var n row (+ col 1)))))
+                         (t nil)))))
+         ;; Vertical inequalities at positions (2*row+1, 2*col)
+         ;; Between cell (row, col) and cell (row+1, col)
+         ;; ^ means top < bottom, v means top > bottom
+         (loop for row below (- n 1) append
+               (loop for col below n append
+                     (let ((ineq-sym (unequal-grid-ref input-grid n (+ (* 2 row) 1) (* 2 col))))
+                       (cond
+                         ((equal ineq-sym '^)
+                          `((< ,(unequal-cell-var n row col) ,(unequal-cell-var n (+ row 1) col))))
+                         ((equal ineq-sym 'v)
+                          `((> ,(unequal-cell-var n row col) ,(unequal-cell-var n (+ row 1) col))))
+                         (t nil))))))))
+
+(defun unequal-var-range (n)
+  (cons 'and
+        (loop for row below n append
+             (loop for col below n append
+                   `((and (> ,(unequal-cell-var n row col) 0)
+                          (<= ,(unequal-cell-var n row col) ,n)))))))
+
+(defun unequal-all-row-col-different (n)
+  (cons 'and
+        (append
+         (loop for row below n collect
+              (cons 'distinct
+                    (loop for col below n
+                          collect (unequal-cell-var n row col))))
+         (loop for col below n collect
+              (cons 'distinct
+                    (loop for row below n
+                          collect (unequal-cell-var n row col)))))))
+
+(defun solve-unequal (n input-grid)
+  (let ((var-specs (unequal-var-specs n)))
+    (solver-push)
+    (z3-assert-fn var-specs (unequal-initial input-grid n))
+    (z3-assert-fn var-specs (unequal-var-range n))
+    (z3-assert-fn var-specs (unequal-all-row-col-different n))
+    (let ((sol (if (equal (check-sat) 'UNSAT)
+                   'UNSAT
+                   (get-model-as-assignment))))
+      (solver-pop)
+      sol)))
+
+(defun benchmark-solve-unequal (n grid name)
+  (format t "~%=== ~A (~Ax~A integer encoding) ===~%" name n n)
+  (setf (fdefinition 'get-square-value) #'get-square-value-int)
+  (solver-reset)
+  (let ((soln (time (solve-unequal n grid))))
+    (if (equal soln 'UNSAT)
+        (format t "UNSAT~%")
+        (pretty-print-unequal-solution soln n))
+    (z3::get-solver-stats)))
+
+;; ========================================
+;; Example 4x4 Unequal Grid Representation
+;; ========================================
+;;
+;; For an n x n Unequal puzzle, we use a (2n-1) x (2n-1) grid:
+;; - Value cells at even row/col positions: (2i, 2j)
+;; - Horizontal inequalities at: (2i, 2j+1) — between cell (i,j) and (i,j+1)
+;; - Vertical inequalities at: (2i+1, 2j) — between cell (i,j) and (i+1,j)
+;; - Odd row/odd col positions are unused (use _ as placeholder)
+;;
+;; Inequality symbols:
+;;   Horizontal: < means left < right, > means left > right, _ means no constraint
+;;   Vertical:   ^ means top < bottom, v means top > bottom, _ means no constraint
+;;
+;; Visual layout for a 4x4 grid (represented as 7x7):
+;;
+;;   V h V h V h V      ; row 0: values at col 0,2,4,6; h-ineq at col 1,3,5
+;;   v _ v _ v _ v      ; row 1: v-ineq at col 0,2,4,6; _ at odd cols
+;;   V h V h V h V      ; row 2
+;;   v _ v _ v _ v      ; row 3
+;;   V h V h V h V      ; row 4
+;;   v _ v _ v _ v      ; row 5
+;;   V h V h V h V      ; row 6
+;;
+
+;; Example 4x4 Unequal puzzle (SAT):
+;; Solution should be a Latin square with all inequalities satisfied.
+(defconstant *unequal-4x4-example*
+  '(
+;; value h-ineq value  h-ineq  value h-ineq value
+    _      <      _      _      _      >      _
+;; v-ineq  _   v-ineq    _   v-ineq    _    v-ineq
+    ^      _      _      _      v      _      _
+    _      _      _      <      _      _      _
+    _      _      ^      _      _      _      v
+    _      >      _      _      _      <      _
+    v      _      _      _      ^      _      _
+    _      _      _      _      _      _      _))
+
+;; Example 4x4 Unequal puzzle with some givens (SAT):
+(defconstant *unequal-4x4-with-givens*
+  '(;; row 0
+    1      _      _      _      _      _      _
+    ;; row 1
+    _      _      _      _      _      _      _
+    ;; row 2
+    _      <      _      _      _      >      _
+    ;; row 3
+    ^      _      _      _      _      _      v
+    ;; row 4
+    _      _      _      _      _      _      _
+    ;; row 5
+    _      _      v      _      ^      _      _
+    ;; row 6
+    _      _      _      _      _      _      4))
+
+;; Example 4x4 Unequal puzzle (UNSAT - contradictory constraints):
+;; Cell (0,0) must be both < cell (0,1) and > cell (0,1)
+(defconstant *unequal-4x4-unsat*
+  '(;; row 0: force cell(0,0)=1 and cell(0,1)=1 via inequalities that cycle
+    1      <      1      _      _      _      _
+    ;; remaining rows are unconstrained
+    _      _      _      _      _      _      _
+    _      _      _      _      _      _      _
+    _      _      _      _      _      _      _
+    _      _      _      _      _      _      _
+    _      _      _      _      _      _      _
+    _      _      _      _      _      _      _))
+
+;; Run the benchmarks
+(benchmark-solve-unequal 4 *unequal-4x4-example* "*unequal-4x4-example*")
+(benchmark-solve-unequal 4 *unequal-4x4-with-givens* "*unequal-4x4-with-givens*")
+(benchmark-solve-unequal 4 *unequal-4x4-unsat* "*unequal-4x4-unsat*")
 
 ;; ==========================
 ;;            E3
