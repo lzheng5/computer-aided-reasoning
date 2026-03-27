@@ -148,14 +148,14 @@
   \hspace{1.2em}\mex{\altcolor{1}{blue}{(map ($\lambda$ (m) (div 42 m)) ms)})} \\
   \\
   \alt<10->{
-    \mex{(null ms)} \implies \mex{(map <$\lambda$> ms)} \to \altcolor{10}{blue}{\{\codequote()\}} \\
+    \mex{(null ms)} \implies \mex{(map <$\lambda$> ms)} \to \mex{\altcolor{10}{blue}{\{\codequote()\}}} \\
     \alt<11->{
       \mex{(not (null ms))} \implies \mex{(map <$\lambda$> ms)} \to \altcolor{11}{blue}{\mex{\{<non-empty (listof nat?)>, <blame>\}}}
     }{
       \mex{(not (null ms))} \implies \mex{(map <$\lambda$> ms)} \to \altcolor{10}{blue}{\mex{\{(cons nat? \codequote()), <blame>\}}}
     }
   }{
-    \invisible<-2>{\mex{(null ms)} \implies \mex{(map <$\lambda$> ms)} \to \altcolor{3}{blue}{\codequote()}} \\
+    \invisible<-2>{\mex{(null ms)} \implies \mex{(map <$\lambda$> ms)} \to \mex{\altcolor{3}{blue}{\codequote()}}} \\
     \invisible<-3>{
       \alt<7->{
         \mex{(not (null ms))} \implies \mex{(map <$\lambda$> ms)} \to \altcolor{4}{blue}{\mex{(cons \altcolor{7-}{blue}{(div 42 m)} \codequote())}}
@@ -218,7 +218,9 @@
       \end{array}
       \]
 
-      \vspace{4em}
+      \vspace{2em}
+      \invisible<-3>{\altcolor{3-}{blue}{\Large Any questions?}}\\
+      \vspace{1em}
       \invisible<-3>{\href{mailto:zheng.lingx@northeastern.edu}{\altborder{1-}{blue}{\texttt{zheng.lingx@northeastern.edu}}}}
 
     \end{column}
