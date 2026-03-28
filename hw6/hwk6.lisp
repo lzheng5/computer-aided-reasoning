@@ -349,7 +349,6 @@ ask questions on Piazza.
 ;; if x has at least one element and the first element of x is true,
 ;; then the length of x is even. Otherwise, the length of x is odd.
 
-(solver-reset)
 (solver-push)
 (z3-assert (x (:seq :bool) y :int)
            (and (and (<= 0 y) (<= y 32))
@@ -377,25 +376,27 @@ ask questions on Piazza.
 ;; Is Bob a knight or a knave? Is Clara a knight or a knave?
 
 ;; consulted AI for the direct encoding
-;; "Person X is a Knight if and only if their statement is true" is written as (= X S)  
+;; "Person X is a Knight if and only if their statement is true" is written as (= X S)
 (solver-push)
-(z3-assert (A B C ASaid1 :bool) 
+(z3-assert (A B C ASaid1 :bool)
            (and (= B ASaid1)
                 (= C (not B))
-                (=> ASaid1 (= (+ (ife A 1 0) (ife B 1 0) (ife C 1 0)) 1))))
+                (=> ASaid1 (= (+ (ite A 1 0) (ite B 1 0) (ite C 1 0)) 1))))
 (check-sat)
+(get-model-as-assignment)
 (solver-pop)
 
-;; manual reasoning
+;; with a little manual reasoning
 (solver-push)
-(z3-assert (B C :bool) 
+(z3-assert (B C :bool)
            (and ;; B, C have different identities
-                (= C (not B)) 
-                ;; if A knight, 
+                (= C (not B))
+                ;; if A knight,
                 ;; then B cannot be knight, otherwise, it forces count of knights to be 2
                 ;; else B cannot be knight, otherwise, it forces count of knights to be 0, 2, or 3 but C has to be knave.
                 (not B)))
 (check-sat)
+(get-model-as-assignment)
 (solver-pop)
 
 ;; 1e:
@@ -415,27 +416,32 @@ Is the above set of constraints consistent? If so, who has what job?
 (hint: an enumeration sort might be helpful here)
 |#
 
+;; TODO: this macro doesn't work?
+(defmacro exactly (n &rest cls)
+  `(and ((_ at-most ,n) ,@cls)
+        ((_ at-least ,n) ,@cls)))
+
 (register-enum-sort :job (F G D))
 
 (solver-push)
-(z3-assert (MF MG MD :job) 
-           (and ((_ at-most [1]) 
-                 (!= MD G)
-                 (!= MF D)
-                 (= MD D)
-                 (!= MF G))
-                ((_ at-least [1]) 
-                 (!= MD G)
-                 (!= MF D)
-                 (= MD D)
-                 (!= MF G))
+(z3-assert (MF MG MD :job)
+           (and ((_ at-most 1)
+                 (!= MD (enumval :job G))
+                 (!= MF (enumval :job D))
+                 (= MD (enumval :job D))
+                 (!= MF (enumval :job G)))
+                ((_ at-least 1)
+                 (!= MD (enumval :job G))
+                 (!= MF (enumval :job D))
+                 (= MD (enumval :job D))
+                 (!= MF (enumval :job G)))
                 (distinct MF MG MD)))
 (check-sat)
-(solver-pop)
-
+(get-model-as-assignment)
 ;; Mr. Fireman is the Driver.
 ;; Mr. Guard is the Fireman.
 ;; Mr. Driver is the Guard.
+(solver-pop)
 
 ;; ===========================
 ;;    Generating Constraints
@@ -625,7 +631,7 @@ Is the above set of constraints consistent? If so, who has what job?
 ;; A non-trivial magic square is a magic square such that no two cells
 ;; have the same value.
 
-(defun 3x3-magic-square-diagonal (sum-var) 
+(defun 3x3-magic-square-diagonal (sum-var)
   (let ((diag1 (loop for i below 3 collect (get-3x3-magic-square-var i i)))
         (diag2 (loop for i below 3 collect (get-3x3-magic-square-var i (- 2 i)))))
     `(and (= (+ . ,diag1) ,sum-var)
@@ -647,7 +653,8 @@ Is the above set of constraints consistent? If so, who has what job?
 (z3-assert-fn (3x3-magic-square-var-specs 'S)
               (3x3-magic-square-distinct))
 (check-sat)
-;; We get our satisfying assignment, still boring (all 1s) but correct.
+(get-model-as-assignment)
+;; ((X2 4) (X3 1) (S 15) (X5 9) (X4 5) (X0 8) (X1 3) (X8 2) (X6 6) (X7 7))
 (solver-pop)
 
 ;; You'll expand upon this in Q2 below.
@@ -762,6 +769,8 @@ Is the above set of constraints consistent? If so, who has what job?
  1 3 6   8 7 2   4 5 9
 |#
 
+;; TODO: refactoring exactly
+
 (defun sudoku-var-specs ()
   (loop for row below 9 append
         (loop for col below 9 append
@@ -769,13 +778,15 @@ Is the above set of constraints consistent? If so, who has what job?
                     `(,(sudoku-cell-var row col val) :bool)))))
 
 (defun sudoku-initial (input-grid)
-  (cons 'and
-        (loop for row below 9 append
-             (loop for col below 9 append
-                   (let ((cell-val (nth (+ col (* row 9)) input-grid)))
-                     (if (not (equal cell-val '_))
-                         `((= ,(sudoku-cell-var row col cell-val) t))
-                         nil))))))
+  (let ((specs (loop for row below 9 append
+                     (loop for col below 9 append
+                           (let ((cell-val (nth (+ col (* row 9)) input-grid)))
+                             (if (not (equal cell-val '_))
+                                 `((= ,(sudoku-cell-var row col cell-val) t))
+                                 nil))))))
+    (if (null specs)
+        'true
+        `(and ,@specs))))
 
 (defun sudoku-each-cell-has-one-value ()
   (cons 'and
@@ -783,16 +794,16 @@ Is the above set of constraints consistent? If so, who has what job?
              (loop for col below 9 append
                    (let ((vars (loop for val from 1 to 9
                                     collect (sudoku-cell-var row col val))))
-                     `(((_ at-least [1]) ,@vars)
-                       ((_ at-most  [1]) ,@vars)))))))
+                     `(((_ at-least 1) ,@vars)
+                       ((_ at-most  1) ,@vars)))))))
 
 (defun sudoku-box-cell-all-different (box-row box-col)
   (loop for val from 1 to 9 append
         (let ((vars (loop for r from (* box-row 3) below (+ (* box-row 3) 3) append
                          (loop for c from (* box-col 3) below (+ (* box-col 3) 3)
                                collect (sudoku-cell-var r c val)))))
-          `(((_ at-least [1]) ,@vars)
-            ((_ at-most  [1]) ,@vars)))))
+          `(((_ at-least 1) ,@vars)
+            ((_ at-most  1) ,@vars)))))
 
 (defun sudoku-each-box-all-different ()
   (cons 'and
@@ -807,14 +818,14 @@ Is the above set of constraints consistent? If so, who has what job?
               (loop for val from 1 to 9 append
                     (let ((vars (loop for col below 9
                                      collect (sudoku-cell-var row col val))))
-                      `(((_ at-least [1]) ,@vars)
-                        ((_ at-most  [1]) ,@vars)))))
+                      `(((_ at-least 1) ,@vars)
+                        ((_ at-most  1) ,@vars)))))
          (loop for col below 9 append
               (loop for val from 1 to 9 append
                     (let ((vars (loop for row below 9
                                      collect (sudoku-cell-var row col val))))
-                      `(((_ at-least [1]) ,@vars)
-                        ((_ at-most  [1]) ,@vars))))))))
+                      `(((_ at-least 1) ,@vars)
+                        ((_ at-most  1) ,@vars))))))))
 
 (solver-reset)
 
@@ -825,7 +836,7 @@ Is the above set of constraints consistent? If so, who has what job?
     (z3-assert-fn var-specs (sudoku-each-cell-has-one-value))
     (z3-assert-fn var-specs (sudoku-each-box-all-different))
     (z3-assert-fn var-specs (sudoku-all-row-col-different))
-    (let ((sol (if (equal (check-sat) 'UNSAT)
+    (let ((sol (if (equal (check-sat) :UNSAT)
                    'UNSAT
                    (get-model-as-assignment))))
       (solver-pop)
@@ -840,7 +851,8 @@ Is the above set of constraints consistent? If so, who has what job?
         (progn
           (setf (fdefinition 'get-square-value) #'get-square-value-bool)
           (pretty-print-3x3-sudoku-solution soln)))
-    (z3::get-solver-stats)))
+    (z3::get-solver-stats)
+    soln))
 
 ;; This should print out the solution given above.
 (benchmark-solve-sudoku *sudoku-example-board* "*sudoku-example-board*")
@@ -869,19 +881,21 @@ Is the above set of constraints consistent? If so, who has what job?
 (defun sudoku-cell-var-alt (row col)
   (intern (concatenate 'string "X" (write-to-string (+ col (* row 9))))))
 
-(defun sudoku-var-specs-alt () 
+(defun sudoku-var-specs-alt ()
   (loop for row below 9 append
         (loop for col below 9 append
               `(,(sudoku-cell-var-alt row col) :int))))
 
 (defun sudoku-initial-alt (input-grid)
-  (cons 'and
-        (loop for row below 9 append
-             (loop for col below 9 append
-                   (let ((cell-val (nth (+ col (* row 9)) input-grid)))
-                     (if (not (equal cell-val '_))
-                         `((= ,(sudoku-cell-var-alt row col) ,cell-val))
-                         nil))))))
+  (let ((specs (loop for row below 9 append
+                     (loop for col below 9 append
+                           (let ((cell-val (nth (+ col (* row 9)) input-grid)))
+                             (if (not (equal cell-val '_))
+                                 `((= ,(sudoku-cell-var-alt row col) ,cell-val))
+                                 nil))))))
+    (if (null specs)
+        'true
+        `(and ,@specs))))
 
 (defun sudoku-var-range ()
   (cons 'and
@@ -920,7 +934,7 @@ Is the above set of constraints consistent? If so, who has what job?
     (z3-assert-fn var-specs (sudoku-var-range))
     (z3-assert-fn var-specs (sudoku-each-box-all-different-alt))
     (z3-assert-fn var-specs (sudoku-all-row-col-different-alt))
-    (let ((sol (if (equal (check-sat) 'UNSAT)
+    (let ((sol (if (equal (check-sat) :UNSAT)
                    'UNSAT
                    (get-model-as-assignment))))
       (solver-pop)
@@ -932,6 +946,8 @@ Is the above set of constraints consistent? If so, who has what job?
 (defun get-square-value-int (soln row col)
   (cadr (assoc-equal (sudoku-cell-var-alt row col) soln)))
 
+;; TODO: add time out
+
 (defun benchmark-solve-sudoku-alternative (grid name)
   (format t "~%=== ~A (integer encoding) ===~%" name)
   (solver-reset)
@@ -941,7 +957,8 @@ Is the above set of constraints consistent? If so, who has what job?
         (progn
           (setf (fdefinition 'get-square-value) #'get-square-value-int)
           (pretty-print-3x3-sudoku-solution soln)))
-    (z3::get-solver-stats)))
+    (z3::get-solver-stats)
+    soln))
 
 ;; This should print out the solution given above.
 (benchmark-solve-sudoku-alternative *sudoku-example-board* "*sudoku-example-board*")
@@ -973,7 +990,7 @@ Is the above set of constraints consistent? If so, who has what job?
   (benchmark-solve-sudoku grid name)
   (benchmark-solve-sudoku-alternative grid name))
 
-;; Taken from https://github.com/mister-walter/cl-z3/blob/main/examples/sudoku.lisp
+;; Tests taken from https://github.com/mister-walter/cl-z3/blob/main/examples/sudoku.lisp
 
 ;; Formatted for readability.
 (defconstant a-hard-sudoku-grid
@@ -990,6 +1007,8 @@ Is the above set of constraints consistent? If so, who has what job?
     2 _ 4   _ _ 3   1 _ _))
 
 (benchmark-sudoku a-hard-sudoku-grid "a-hard-sudoku-grid")
+;; 0.025s
+;; 0.062s
 
 (defconstant a-very-hard-sudoku-grid
   '(_ _ _   _ _ _   _ 1 2
@@ -1005,6 +1024,8 @@ Is the above set of constraints consistent? If so, who has what job?
     4 7 _   _ _ 6   _ _ _))
 
 (benchmark-sudoku a-very-hard-sudoku-grid "a-very-hard-sudoku-grid")
+;; 0.028s
+;; 0.407s
 
 (defconstant only-first-row-defined-grid
   '(1 2 3   4 5 6   7 8 9
@@ -1019,8 +1040,9 @@ Is the above set of constraints consistent? If so, who has what job?
     _ _ _   _ _ _   _ _ _
     _ _ _   _ _ _   _ _ _))
 
-;; ~2s
 (benchmark-sudoku only-first-row-defined-grid "only-first-row-defined-grid")
+;; 0.027s
+;; 31.176s
 
 (defconstant only-first-col-defined-grid
   '(1 _ _   _ _ _   _ _ _
@@ -1035,8 +1057,9 @@ Is the above set of constraints consistent? If so, who has what job?
     8 _ _   _ _ _   _ _ _
     9 _ _   _ _ _   _ _ _))
 
-;; ~12s
 (benchmark-sudoku only-first-col-defined-grid "only-first-col-defined-grid")
+;; 0.027s
+;; 5.958s
 
 (defconstant only-diag-defined-grid
   '(1 _ _   _ _ _   _ _ _
@@ -1051,8 +1074,9 @@ Is the above set of constraints consistent? If so, who has what job?
     _ _ _   _ _ _   _ 8 _
     _ _ _   _ _ _   _ _ 9))
 
-;; ~3s
 (benchmark-sudoku only-diag-defined-grid "only-diag-defined-grid")
+;; 0.032s
+;; 5.725s
 
 (defconstant only-first-row-defined-reverse-grid
   '(9 8 7   6 5 4   3 2 1
@@ -1067,8 +1091,9 @@ Is the above set of constraints consistent? If so, who has what job?
     _ _ _   _ _ _   _ _ _
     _ _ _   _ _ _   _ _ _))
 
-;; ~8s
 (benchmark-sudoku only-first-row-defined-reverse-grid "only-first-row-defined-reverse-grid")
+;; 0.028s
+;; 12.273s
 
 (defconstant blank-sudoku-grid
   '(_ _ _   _ _ _   _ _ _
@@ -1083,7 +1108,12 @@ Is the above set of constraints consistent? If so, who has what job?
     _ _ _   _ _ _   _ _ _
     _ _ _   _ _ _   _ _ _))
 
-;; Generated by Claude 
+(benchmark-solve-sudoku blank-sudoku-grid "blank-sudoku-grid")
+;; 0.038s
+;; (benchmark-solve-sudoku-alternative blank-sudoku-grid "blank-sudoku-grid")
+;; timeout after 1 min
+
+;; Generated by Claude
 
 ;; -----------------------------------------------
 ;; Example A (SAT): Arto Inkala's 2010 "AI Escargot" — one of the hardest known Sudoku puzzles.
@@ -1101,6 +1131,9 @@ Is the above set of constraints consistent? If so, who has what job?
     _ 9 _   _ _ _   4 _ _))
 
 (benchmark-sudoku *inkala-2010* "*inkala-2010*")
+;; 0.027s
+;; 0.423s
+;; TODO: hardest?
 
 ;; -----------------------------------------------
 ;; Example B (SAT): Moderate puzzle — baseline comparison.
@@ -1118,6 +1151,8 @@ Is the above set of constraints consistent? If so, who has what job?
     7 _ 3   _ 1 8   _ _ _))
 
 (benchmark-sudoku *moderate-board* "*moderate-board*")
+;; 0.026s
+;; 0.007s
 
 ;; -----------------------------------------------
 ;; Example C (UNSAT): Value 1 appears twice in row 0 — direct contradiction.
@@ -1135,15 +1170,15 @@ Is the above set of constraints consistent? If so, who has what job?
     _ _ _   _ _ _   _ _ _))
 
 (benchmark-sudoku *unsat-board* "*unsat-board*")
+;; 0.008s
+;; 0s
 
 ;; The hardest Sudoku board for your `solve-sudoku` implementation.
-(defconstant *hardest-sudoku-board*
-  '( ... ))
+(define-symbol-macro *hardest-sudoku-board* blank-sudoku-grid)
 
 ;; The hardest Sudoku board for your `solve-sudoku-alternate`
 ;; implementation.
-(defconstant *hardest-sudoku-board-alternate*
-  '( ... ))
+(defconstant *hardest-sudoku-board-alternate* blank-sudoku-grid)
 
 ;; ==========================
 ;;       Extra Credit
@@ -1180,16 +1215,16 @@ Is the above set of constraints consistent? If so, who has what job?
              (loop for col below n^2 append
                    (let ((vars (loop for val from 1 to n^2
                                     collect (sudoku-cell-var row col val))))
-                     `(((_ at-least [1]) ,@vars)
-                       ((_ at-most  [1]) ,@vars)))))))
+                     `(((_ at-least 1) ,@vars)
+                       ((_ at-most  1) ,@vars)))))))
 
 (defun arb-sudoku-box-cell-all-different (box-row box-col n)
   (loop for val from 1 to (* n n) append
         (let ((vars (loop for r from (* box-row n) below (+ (* box-row n) n) append
                          (loop for c from (* box-col n) below (+ (* box-col n) n)
                                collect (sudoku-cell-var r c val)))))
-          `(((_ at-least [1]) ,@vars)
-            ((_ at-most  [1]) ,@vars)))))
+          `(((_ at-least 1) ,@vars)
+            ((_ at-most  1) ,@vars)))))
 
 (defun arb-sudoku-each-box-all-different (n)
   (cons 'and
@@ -1204,18 +1239,18 @@ Is the above set of constraints consistent? If so, who has what job?
               (loop for val from 1 to n^2 append
                     (let ((vars (loop for col below n^2
                                      collect (sudoku-cell-var row col val))))
-                      `(((_ at-least [1]) ,@vars)
-                        ((_ at-most  [1]) ,@vars)))))
+                      `(((_ at-least 1) ,@vars)
+                        ((_ at-most  1) ,@vars)))))
          (loop for col below n^2 append
               (loop for val from 1 to n^2 append
                     (let ((vars (loop for row below n^2
                                      collect (sudoku-cell-var row col val))))
-                      `(((_ at-least [1]) ,@vars)
-                        ((_ at-most  [1]) ,@vars))))))))
+                      `(((_ at-least 1) ,@vars)
+                        ((_ at-most  1) ,@vars))))))))
 
 (defun arb-solve-sudoku (n input-grid)
   "Arbitrary-size Sudoku solver. n is the size of the boxes in the Sudoku grid, so the grid is of size n^2 x n^2 and contains values from 1 to n^2.
-  
+
   Pre: n > 0"
 
   (assert (> n 0) nil "n must be greater than 0")
@@ -1235,11 +1270,19 @@ Is the above set of constraints consistent? If so, who has what job?
     (z3-assert-fn var-specs
                   (arb-sudoku-all-row-col-different n^2))
 
-    (let ((sol (if (equal (check-sat) 'UNSAT)
+    (let ((sol (if (equal (check-sat) :UNSAT)
                   'UNSAT
                   (get-model-as-assignment))))
       (solver-pop)
       sol)))
+
+(defun pretty-print-sudoku-solution (n soln)
+  (loop for row below n
+        do (progn (terpri)
+                  (loop for col below n
+                        do (progn (format t "~A " (get-square-value soln row col))
+                                  (when (equal (mod col n) 2) (format t "  "))))
+                  (when (equal (mod row n) 2) (terpri)))))
 
 (defun benchmark-arb-solve-sudoku (n grid name)
   (format t "~%=== ~A (arb ~Ax~A bit-blasting) ===~%" name (* n n) (* n n))
@@ -1249,11 +1292,14 @@ Is the above set of constraints consistent? If so, who has what job?
         (format t "UNSAT~%")
         (progn
           (setf (fdefinition 'get-square-value) #'get-square-value-bool)
-          (pretty-print-3x3-sudoku-solution soln)))
+          (pretty-print-sudoku-solution n soln)))
     (z3::get-solver-stats)))
 
 ;; This should print out the solution given above.
 (benchmark-arb-solve-sudoku 3 *sudoku-example-board* "*sudoku-example-board*")
+;; 0.030s
+
+;; TODO: generate 4x4 5x5 board
 
 ;; ==========================
 ;;            E2
@@ -1270,15 +1316,15 @@ Is the above set of constraints consistent? If so, who has what job?
 ;; instances of your chosen puzzle encoded using your input encoding.
 
 ;; Unequal [https://www.chiark.greenend.org.uk/~sgtatham/puzzles/js/unequal.html]
-;; Fill in the grid with numbers from 1 to the grid size, so that every number appears exactly once in each row and column, and so that all the < signs represent true inequalities 
+;; Fill in the grid with numbers from 1 to the grid size, so that every number appears exactly once in each row and column, and so that all the < signs represent true inequalities
 ;; (i.e. the number at the pointed end is smaller than the number at the open end).
-;; This is basically Sudoku with some additional constraints, so we can use a similar encoding to the one we used for Sudoku. 
+;; This is basically Sudoku with some additional constraints, so we can use a similar encoding to the one we used for Sudoku.
 ;; We can reuse the same variable encoding as in `solve-sudoku-alternative`, and then add additional constraints for the inequalities.
 
 (defun unequal-cell-var (n row col)
   (intern (concatenate 'string "X" (write-to-string (+ col (* row n))))))
 
-(defun unequal-var-specs (n) 
+(defun unequal-var-specs (n)
   (loop for row below n append
         (loop for col below n append
               `(,(unequal-cell-var n row col) :int))))
@@ -1293,38 +1339,40 @@ Is the above set of constraints consistent? If so, who has what job?
 ;; - Horizontal inequalities (symbols at positions (2*row, 2*col+1))
 ;; - Vertical inequalities (symbols at positions (2*row+1, 2*col))
 (defun unequal-initial (input-grid n)
-  (cons 'and
-        (append
-         ;; Value assignments from positions (2*row, 2*col)
-         (loop for row below n append
-               (loop for col below n append
-                     (let ((cell-val (unequal-grid-ref input-grid n (* 2 row) (* 2 col))))
-                       (if (and (not (equal cell-val '_)) (numberp cell-val))
-                           `((= ,(unequal-cell-var n row col) ,cell-val))
-                           nil))))
-         ;; Horizontal inequalities at positions (2*row, 2*col+1)
-         ;; Between cell (row, col) and cell (row, col+1)
-         (loop for row below n append
-               (loop for col below (- n 1) append
-                     (let ((ineq-sym (unequal-grid-ref input-grid n (* 2 row) (+ (* 2 col) 1))))
-                       (cond
-                         ((equal ineq-sym '<)
-                          `((< ,(unequal-cell-var n row col) ,(unequal-cell-var n row (+ col 1)))))
-                         ((equal ineq-sym '>)
-                          `((> ,(unequal-cell-var n row col) ,(unequal-cell-var n row (+ col 1)))))
-                         (t nil)))))
-         ;; Vertical inequalities at positions (2*row+1, 2*col)
-         ;; Between cell (row, col) and cell (row+1, col)
-         ;; ^ means top < bottom, v means top > bottom
-         (loop for row below (- n 1) append
-               (loop for col below n append
-                     (let ((ineq-sym (unequal-grid-ref input-grid n (+ (* 2 row) 1) (* 2 col))))
-                       (cond
-                         ((equal ineq-sym '^)
-                          `((< ,(unequal-cell-var n row col) ,(unequal-cell-var n (+ row 1) col))))
-                         ((equal ineq-sym 'v)
-                          `((> ,(unequal-cell-var n row col) ,(unequal-cell-var n (+ row 1) col))))
-                         (t nil))))))))
+  (let ((specs (append
+                ;; Value assignments from positions (2*row, 2*col)
+                (loop for row below n append
+                      (loop for col below n append
+                            (let ((cell-val (unequal-grid-ref input-grid n (* 2 row) (* 2 col))))
+                              (if (and (not (equal cell-val '_)) (numberp cell-val))
+                                  `((= ,(unequal-cell-var n row col) ,cell-val))
+                                  nil))))
+                ;; Horizontal inequalities at positions (2*row, 2*col+1)
+                ;; Between cell (row, col) and cell (row, col+1)
+                (loop for row below n append
+                      (loop for col below (- n 1) append
+                            (let ((ineq-sym (unequal-grid-ref input-grid n (* 2 row) (+ (* 2 col) 1))))
+                              (cond
+                                ((equal ineq-sym '<)
+                                 `((< ,(unequal-cell-var n row col) ,(unequal-cell-var n row (+ col 1)))))
+                                ((equal ineq-sym '>)
+                                 `((> ,(unequal-cell-var n row col) ,(unequal-cell-var n row (+ col 1)))))
+                                (t nil)))))
+                ;; Vertical inequalities at positions (2*row+1, 2*col)
+                ;; Between cell (row, col) and cell (row+1, col)
+                ;; ^ means top < bottom, v means top > bottom
+                (loop for row below (- n 1) append
+                      (loop for col below n append
+                            (let ((ineq-sym (unequal-grid-ref input-grid n (+ (* 2 row) 1) (* 2 col))))
+                              (cond
+                                ((equal ineq-sym '^)
+                                 `((< ,(unequal-cell-var n row col) ,(unequal-cell-var n (+ row 1) col))))
+                                ((equal ineq-sym 'v)
+                                 `((> ,(unequal-cell-var n row col) ,(unequal-cell-var n (+ row 1) col))))
+                                (t nil))))))))
+    (if (null specs)
+        'true
+        `(and ,@specs))))
 
 (defun unequal-var-range (n)
   (cons 'and
@@ -1351,11 +1399,13 @@ Is the above set of constraints consistent? If so, who has what job?
     (z3-assert-fn var-specs (unequal-initial input-grid n))
     (z3-assert-fn var-specs (unequal-var-range n))
     (z3-assert-fn var-specs (unequal-all-row-col-different n))
-    (let ((sol (if (equal (check-sat) 'UNSAT)
+    (let ((sol (if (equal (check-sat) :UNSAT)
                    'UNSAT
                    (get-model-as-assignment))))
       (solver-pop)
       sol)))
+
+;; TODO: generate pretty-print-unequal-solution
 
 (defun benchmark-solve-unequal (n grid name)
   (format t "~%=== ~A (~Ax~A integer encoding) ===~%" name n n)
