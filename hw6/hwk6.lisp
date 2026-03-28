@@ -720,7 +720,6 @@ Is the above set of constraints consistent? If so, who has what job?
                (return-from outer i)))
     nil))
 
-;; Default: uses bool encoding (Q3). Callers may setf this to get-square-value-int.
 (defun get-square-value (soln row col)
   (get-square-value-bool soln row col))
 
@@ -779,7 +778,7 @@ Is the above set of constraints consistent? If so, who has what job?
                      (loop for col below 9 append
                            (let ((cell-val (nth (+ col (* row 9)) input-grid)))
                              (if (not (equal cell-val '_))
-                                 `((= ,(sudoku-cell-var row col cell-val) t))
+                                 `((= ,(sudoku-cell-var row col cell-val) true))
                                  nil))))))
     (if (null specs)
         'true
@@ -1174,7 +1173,7 @@ Is the above set of constraints consistent? If so, who has what job?
 
 ;; The hardest Sudoku board for your `solve-sudoku-alternate`
 ;; implementation.
-(defconstant *hardest-sudoku-board-alternate* blank-sudoku-grid)
+(define-symbol-macro *hardest-sudoku-board-alternate* blank-sudoku-grid)
 
 ;; ==========================
 ;;       Extra Credit
@@ -1190,35 +1189,44 @@ Is the above set of constraints consistent? If so, who has what job?
 ;; be numeric (as opposed to e.g. taking in and returning symbols that
 ;; somehow encode numeric values for cell values greater than 9).
 
-(defun arb-sudoku-var-specs (n^2)
-  (loop for row below n^2 append
-        (loop for col below n^2 append
-              (loop for val from 1 to n^2 append
-                    `(,(sudoku-cell-var row col val) :bool)))))
+(defun arb-sudoku-cell-var (n^2 row col val)
+  (intern (concatenate 'string "X_" (write-to-string row) "_" (write-to-string col) "_" (write-to-string val))))
 
-(defun arb-sudoku-initial (input-grid n^2)
-  (cons 'and
-        (loop for row below n^2 append
-             (loop for col below n^2 append
-                   (let ((cell-val (nth (+ col (* row n^2)) input-grid)))
-                     (if (not (equal cell-val '_))
-                         `((= ,(sudoku-cell-var row col cell-val) t))
-                         nil))))))
+(defun arb-sudoku-var-specs (n)
+  (let ((n^2 (* n n)))
+    (loop for row below n^2 append
+          (loop for col below n^2 append
+                (loop for val from 1 to n^2 append
+                      `(,(arb-sudoku-cell-var n^2 row col val) :bool))))))
 
-(defun arb-sudoku-each-cell-has-one-value (n^2)
-  (cons 'and
-        (loop for row below n^2 append
-             (loop for col below n^2 append
-                   (let ((vars (loop for val from 1 to n^2
-                                    collect (sudoku-cell-var row col val))))
-                     (exactly-one vars))))))
+(defun arb-sudoku-initial (input-grid n)
+  (let* ((n^2 (* n n))
+         (specs (loop for row below n^2 append
+                     (loop for col below n^2 append
+                           (let ((cell-val (nth (+ col (* row n^2)) input-grid)))
+                             (if (not (equal cell-val '_))
+                                 `((= ,(arb-sudoku-cell-var n^2 row col cell-val) true))
+                                 nil))))))
+    (if (null specs)
+        'true
+        `(and ,@specs))))
+
+(defun arb-sudoku-each-cell-has-one-value (n)
+  (let ((n^2 (* n n)))
+    (cons 'and
+          (loop for row below n^2 append
+                (loop for col below n^2 append
+                      (let ((vars (loop for val from 1 to n^2
+                                        collect (arb-sudoku-cell-var n^2 row col val))))
+                        (exactly-one vars)))))))
 
 (defun arb-sudoku-box-cell-all-different (box-row box-col n)
-  (loop for val from 1 to (* n n) append
-        (let ((vars (loop for r from (* box-row n) below (+ (* box-row n) n) append
-                         (loop for c from (* box-col n) below (+ (* box-col n) n)
-                               collect (sudoku-cell-var r c val)))))
-          (exactly-one vars))))
+  (let ((n^2 (* n n)))
+    (loop for val from 1 to n^2 append
+          (let ((vars (loop for r from (* box-row n) below (+ (* box-row n) n) append
+                            (loop for c from (* box-col n) below (+ (* box-col n) n)
+                                  collect (arb-sudoku-cell-var n^2 r c val)))))
+            (exactly-one vars)))))
 
 (defun arb-sudoku-each-box-all-different (n)
   (cons 'and
@@ -1226,19 +1234,20 @@ Is the above set of constraints consistent? If so, who has what job?
              (loop for box-col below n append
                    (arb-sudoku-box-cell-all-different box-row box-col n)))))
 
-(defun arb-sudoku-all-row-col-different (n^2)
-  (cons 'and
-        (append
-         (loop for row below n^2 append
-              (loop for val from 1 to n^2 append
-                    (let ((vars (loop for col below n^2
-                                     collect (sudoku-cell-var row col val))))
-                      (exactly-one vars))))
-         (loop for col below n^2 append
-              (loop for val from 1 to n^2 append
-                    (let ((vars (loop for row below n^2
-                                     collect (sudoku-cell-var row col val))))
-                      (exactly-one vars)))))))
+(defun arb-sudoku-all-row-col-different (n)
+  (let ((n^2 (* n n)))
+    (cons 'and
+          (append
+           (loop for row below n^2 append
+                 (loop for val from 1 to n^2 append
+                       (let ((vars (loop for col below n^2
+                                         collect (arb-sudoku-cell-var n^2 row col val))))
+                         (exactly-one vars))))
+           (loop for col below n^2 append
+                 (loop for val from 1 to n^2 append
+                       (let ((vars (loop for row below n^2
+                                         collect (arb-sudoku-cell-var n^2 row col val))))
+                         (exactly-one vars))))))))
 
 (defun arb-solve-sudoku (n input-grid)
   "Arbitrary-size Sudoku solver. n is the size of the boxes in the Sudoku grid, so the grid is of size n^2 x n^2 and contains values from 1 to n^2.
@@ -1247,20 +1256,19 @@ Is the above set of constraints consistent? If so, who has what job?
 
   (assert (> n 0) nil "n must be greater than 0")
 
-  (let* ((n^2 (* n n))
-         (var-specs (arb-sudoku-var-specs n^2)))
+  (let ((var-specs (arb-sudoku-var-specs n)))
     (solver-push)
     (z3-assert-fn var-specs
-                  (arb-sudoku-initial input-grid n^2))
+                  (arb-sudoku-initial input-grid n))
 
     (z3-assert-fn var-specs
-                  (arb-sudoku-each-cell-has-one-value n^2))
+                  (arb-sudoku-each-cell-has-one-value n))
 
     (z3-assert-fn var-specs
                   (arb-sudoku-each-box-all-different n))
 
     (z3-assert-fn var-specs
-                  (arb-sudoku-all-row-col-different n^2))
+                  (arb-sudoku-all-row-col-different n))
 
     (let ((sol (if (equal (check-sat) :UNSAT)
                   'UNSAT
@@ -1268,13 +1276,23 @@ Is the above set of constraints consistent? If so, who has what job?
       (solver-pop)
       sol)))
 
-(defun pretty-print-sudoku-solution (n soln)
-  (loop for row below n
-        do (progn (terpri)
-                  (loop for col below n
-                        do (progn (format t "~A " (get-square-value soln row col))
-                                  (when (equal (mod col n) 2) (format t "  "))))
-                  (when (equal (mod row n) 2) (terpri)))))
+
+(defun get-arb-square-value (soln n^2 row col)
+  (block outer
+    (loop for i from 1 to n^2
+          do (when (and (cdr (assoc-equal (arb-sudoku-cell-var n^2 row col i) soln))
+                        (cadr (assoc-equal (arb-sudoku-cell-var n^2 row col i) soln)))
+               (return-from outer i)))
+    nil))
+
+(defun pretty-print-arb-sudoku-solution (n soln)
+  (let ((n^2 (* n n)))
+    (loop for row below n^2
+          do (progn (terpri)
+                    (loop for col below n^2
+                          do (progn (format t "~A " (get-arb-square-value soln n^2 row col))
+                                    (when (equal (mod col n) (- n 1)) (format t "  "))))
+                    (when (equal (mod row n) (- n 1)) (terpri))))))
 
 (defun benchmark-arb-solve-sudoku (n grid name)
   (format t "~%=== ~A (arb ~Ax~A bit-blasting) ===~%" name (* n n) (* n n))
@@ -1282,9 +1300,7 @@ Is the above set of constraints consistent? If so, who has what job?
   (let ((soln (time (arb-solve-sudoku n grid))))
     (if (equal soln 'UNSAT)
         (format t "UNSAT~%")
-        (progn
-          (setf (fdefinition 'get-square-value) #'get-square-value-bool)
-          (pretty-print-sudoku-solution n soln)))
+        (pretty-print-arb-sudoku-solution n soln))
     (z3::get-solver-stats)))
 
 ;; This should print out the solution given above.
@@ -1318,19 +1334,31 @@ Is the above set of constraints consistent? If so, who has what job?
      _  _  _  _    _  _  _  _    _  _  _  _   _  _  _  _))
 
 (benchmark-arb-solve-sudoku 4 *sudoku-16x16-example* "*sudoku-16x16-example*")
+;; 0.104s
 
 ;; -----------------------------------------------
 ;; 25x25 Sudoku (n=5): 5x5 boxes, values 1-25
 ;; -----------------------------------------------
 
 ;; A 25x25 Sudoku puzzle with first row defined (SAT)
-;; This is a large puzzle - may take significant time to solve
 (defconstant *sudoku-25x25-first-row*
   (append '( 1  2  3  4  5    6  7  8  9 10   11 12 13 14 15   16 17 18 19 20   21 22 23 24 25)
           (loop repeat (* 24 25) collect '_)))
 
-;; Warning: 25x25 puzzles are very large and may take minutes to solve
-;; (benchmark-arb-solve-sudoku 5 *sudoku-25x25-first-row* "*sudoku-25x25-first-row*")
+(benchmark-arb-solve-sudoku 5 *sudoku-25x25-first-row* "*sudoku-25x25-first-row*")
+;; 0.399s
+
+;; -----------------------------------------------
+;; 36x36 Sudoku (n=6): 6x6 boxes, values 1-36
+;; -----------------------------------------------
+
+;; A 36x36 Sudoku puzzle with first row defined (SAT)
+(defconstant *sudoku-36x36-first-row*
+  (append '( 1  2  3  4  5    6  7  8  9 10   11 12 13 14 15   16 17 18 19 20   21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36)
+          (loop repeat (* 35 36) collect '_)))
+
+(benchmark-arb-solve-sudoku 6 *sudoku-36x36-first-row* "*sudoku-36x36-first-row*")
+;; 1.412s
 
 ;; ==========================
 ;;            E2
@@ -1518,8 +1546,35 @@ Is the above set of constraints consistent? If so, who has what job?
     v      _      _      _      ^      _      _
     _      _      _      _      _      _      _))
 
-;; Example 4x4 Unequal puzzle with some givens (SAT):
-(defconstant *unequal-4x4-with-givens*
+(benchmark-solve-unequal 4 *unequal-4x4-example* "*unequal-4x4-example*")
+;; 0.01s
+
+(defconstant +unequal-4x4-mixed-givens+
+  '(4      _      _      _      _      _      _
+    v      _      _      _      _      _      _
+    _      _      3      _      _      _      _
+    _      _      v      _      _      _      _
+    _      _      _      _      _      _      1
+    _      _      _      _      _      _      ^
+    _      _      _      _      _      _      _))
+
+(benchmark-solve-unequal 4 +unequal-4x4-mixed-givens+ "+unequal-4x4-mixed-givens+")
+;; 0.015s
+
+(defconstant +unequal-4x4-staircase+
+  '(_      <      _      <      _      <      _
+    _      _      _      _      _      _      _
+    _      _      _      _      _      _      _
+    _      _      _      _      _      _      _
+    _      _      _      _      _      _      _
+    _      _      _      _      _      _      _
+    _      _      _      _      _      _      _))
+
+(benchmark-solve-unequal 4 +unequal-4x4-staircase+ "+unequal-4x4-staircase+")
+;; 0.013s
+
+;; Example 4x4 Unequal puzzle with some givens (UNSAT):
+(defconstant *unequal-4x4-with-givens-unsat*
   '(1      _      _      _      _      _      _
     _      _      _      _      _      _      _
     _      <      _      _      _      >      _
@@ -1527,6 +1582,9 @@ Is the above set of constraints consistent? If so, who has what job?
     _      _      _      _      _      _      _
     _      _      v      _      ^      _      _
     _      _      _      _      _      _      4))
+
+(benchmark-solve-unequal 4 *unequal-4x4-with-givens-unsat* "*unequal-4x4-with-givens-unsat*")
+;; 0.004s
 
 ;; Example 4x4 Unequal puzzle (UNSAT - contradictory constraints):
 ;; Cell (0,0) must be both < cell (0,1) and > cell (0,1)
@@ -1539,10 +1597,134 @@ Is the above set of constraints consistent? If so, who has what job?
     _      _      _      _      _      _      _
     _      _      _      _      _      _      _))
 
-;; Run the benchmarks
-(benchmark-solve-unequal 4 *unequal-4x4-example* "*unequal-4x4-example*")
-(benchmark-solve-unequal 4 *unequal-4x4-with-givens* "*unequal-4x4-with-givens*")
+
 (benchmark-solve-unequal 4 *unequal-4x4-unsat* "*unequal-4x4-unsat*")
+;; 0s
+
+(defconstant +unequal-7x7-vertical-chain+
+  '(_ _ _ _ _ _ _ _ _ _ _ _ _   ; Row 0
+    v _ _ _ _ _ _ _ _ _ _ _ _   ; Row 1: Cell(0,0) > Cell(1,0)
+    _ _ _ _ _ _ _ _ _ _ _ _ _   ; Row 2
+    ^ _ _ _ _ _ _ _ _ _ _ _ _   ; Row 3: Cell(1,0) < Cell(2,0)
+    _ _ _ _ _ _ _ _ _ _ _ _ _   ; Row 4
+    _ _ _ _ _ _ _ _ _ _ _ _ _   ; Row 5
+    _ _ _ _ _ _ 4 _ _ _ _ _ _   ; Row 6: Given 4 at (3,3)
+    _ _ _ _ _ _ _ _ _ _ _ _ _   ; Row 7
+    _ _ _ _ _ _ _ _ _ _ _ _ _   ; Row 8
+    _ _ _ _ _ _ _ _ _ _ _ _ _   ; Row 9
+    _ _ _ _ _ _ _ _ _ _ _ _ _   ; Row 10
+    _ _ _ _ _ _ _ _ _ _ _ _ _   ; Row 11
+    _ _ _ _ _ _ _ _ _ _ _ _ _)) ; Row 12
+
+(benchmark-solve-unequal 7 +unequal-7x7-vertical-chain+ "+unequal-7x7-vertical-chain+")
+;; 0.226s
+
+(defconstant +unequal-7x7-sparse+
+  '(7 _ _ _ _ _ _ _ _ _ _ _ _   ; Row 0: Given 7 at (0,0)
+    _ _ _ _ _ _ _ _ _ _ _ _ _   ; Row 1: No v-constraints
+    _ _ _ _ _ _ _ _ _ _ _ _ _   ; Row 2
+    _ _ _ _ _ _ _ _ _ _ _ _ _   ; Row 3
+    _ _ _ < _ _ _ _ _ _ _ _ _   ; Row 4: Horizontal ineq at (2,1) < (2,2)
+    _ _ _ _ _ _ _ _ _ _ _ _ _   ; Row 5
+    _ _ _ _ _ _ _ _ _ _ _ _ _   ; Row 6
+    _ _ _ _ _ _ _ _ _ _ _ _ _   ; Row 7
+    _ _ _ _ _ _ _ _ _ _ _ _ _   ; Row 8
+    _ _ _ _ _ _ _ _ _ _ _ _ _   ; Row 9
+    _ _ _ _ _ _ _ _ _ _ _ _ _   ; Row 10
+    _ _ _ _ _ _ _ _ _ _ _ _ _   ; Row 11
+    _ _ _ _ _ _ _ _ _ _ _ _ 1)) ; Row 12: Given 1 at (6,6)
+
+(benchmark-solve-unequal 7 +unequal-7x7-sparse+ "+unequal-7x7-sparse+")
+;; 0.192s
+
+(defconstant +unequal-7x7-challenge+
+  '(7      _      _      _      _      _      _      _      _      _      _      _      _
+    _      _      _      _      _      _      _      _      _      _      _      _      _
+    _      _      _      _      _      _      _      _      _      _      _      _      _
+    _      _      _      _      _      _      _      _      _      _      _      _      _
+    _      _      _      _      _      _      _      _      _      _      _      _      _
+    _      _      _      _      _      _      _      _      _      _      _      _      _
+    _      _      _      _      _      _      4      _      _      _      _      _      _
+    _      _      _      _      _      _      ^      _      _      _      _      _      _
+    _      _      _      _      _      _      _      _      _      _      _      _      _
+    _      _      _      _      _      _      ^      _      _      _      _      _      _
+    _      _      _      _      _      _      _      _      _      _      _      _      _
+    _      _      _      _      _      _      ^      _      _      _      _      _      _
+    _      _      _      _      _      _      _      _      _      _      _      _      1))
+
+(benchmark-solve-unequal 7 +unequal-7x7-challenge+ "+unequal-7x7-challenge+")
+;; 0.134s
+
+(defconstant +unequal-16x16-impossible-chain+
+  (append
+    ;; Row 0: A chain that forces 1 < 2 < 3 ... < 16, but then says 16 < 1.
+    '(_ < _ < _ < _ < _ < _ < _ < _ < _ < _ < _ < _ < _ < _ < _ < _) ; Row 0 Values/Ineqs
+
+    ;; Row 1: The "Kill Switch" - Vertical inequality at (0,0) and (0,15)
+    ;; forces a contradiction between the start and end of the chain.
+    (list 'v (loop repeat 29 collect '_) '^)
+
+    ;; The rest of the 31x31 grid filled with placeholders
+    (loop repeat (* 29 31) collect '_)))
+
+(benchmark-solve-unequal 16 +unequal-16x16-impossible-chain+ "+unequal-16x16-impossible-chain+")
+;; 0.091s
+
+(defun make-25x25-minimal ()
+  (let* ((n 25)
+         (size (1- (* 2 n)))
+         (grid (make-list (* size size) :initial-element '_)))
+    ;; ONLY anchors, NO inequalities
+    (loop for i from 0 to 24 do
+          (setf (nth (* i 2) grid) (1+ i))        ;; Row 0
+          (setf (nth (* i 2 size) grid) (1+ i))) ;; Col 0
+    grid))
+
+;; (benchmark-solve-unequal 25 (make-25x25-minimal) "+unequal-25x25-min+")
+;; time out
+
+(defun make-25x25-sat-case ()
+  (let ((size 49) ;; (2 * 25) - 1
+        (grid (make-list (* 49 49) :initial-element '_)))
+    ;; 1. Add a diagonal "spine" of givens (SAT-safe)
+    ;; Placing 1 at (0,0), 2 at (1,1), ..., 25 at (24,24)
+    (loop for i from 0 to 24 do
+          (setf (nth (+ (* i 2 size) (* i 2)) grid) (1+ i)))
+
+    ;; 2. Add horizontal inequality chains to Row 0
+    ;; Cell(0,0) < Cell(0,1) < Cell(0,2)... but we only do a few to keep it SAT
+    (setf (nth 1 grid) '<)  ;; 1 < Cell(0,1)
+    (setf (nth 3 grid) '<)  ;; Cell(0,1) < Cell(0,2)
+
+    ;; 3. Add a vertical "pinch" in the middle
+    ;; Cell(12,12) > Cell(13,12)
+    (setf (nth (+ (* 25 size) 24) grid) 'v)
+
+    grid))
+
+(defconstant +unequal-25x25-challenge+ (make-25x25-sat-case))
+
+;; (benchmark-solve-unequal 25 +unequal-25x25-challenge+ "+unequal-25x25-challenge+")
+;; time out
+
+(defun make-36x36-hard-unsat ()
+  (let ((grid (make-list (* 71 71) :initial-element '_)))
+    ;; Force a chain of 37 elements in the first row
+    ;; Since there are only 36 possible values, this is impossible.
+    (loop for i from 1 to 36 by 2 do
+          (setf (nth i grid) '<))
+
+    ;; Add one extra constraint that closes the loop or exceeds the limit
+    ;; Placing 36 at the start of a "greater than" chain
+    (setf (nth 0 grid) 36)
+    (setf (nth 1 grid) '>) ;; 36 > (next cell), but the row has 36 cells.
+
+    grid))
+
+(defconstant +unequal-36x36-black-hole+ (make-36x36-hard-unsat))
+;; (benchmark-solve-unequal 36 +unequal-36x36-black-hole+ "+unequal-36x36-black-hole+")
+
+;; time out
 
 ;; ==========================
 ;;            E3
