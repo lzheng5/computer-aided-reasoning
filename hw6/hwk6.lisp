@@ -1291,7 +1291,46 @@ Is the above set of constraints consistent? If so, who has what job?
 (benchmark-arb-solve-sudoku 3 *sudoku-example-board* "*sudoku-example-board*")
 ;; 0.030s
 
-;; TODO: generate 4x4 5x5 board
+;; -----------------------------------------------
+;; 16x16 Sudoku (n=4): 4x4 boxes, values 1-16
+;; -----------------------------------------------
+
+;; A 16x16 Sudoku puzzle with some clues (SAT)
+(defconstant *sudoku-16x16-example*
+  '( 1  2  _  _    _  _  7  8    9 10  _  _   13 14  _  _
+     _  _  5  6    _  _  _  _    _  _  _  _   _  _  _  _
+     _  _  _  _   11 12  _  _    _  _  _  _   _  _  _  _
+    13 14  _  _   15 16  _  _    _  _  _  _   _  _  _  _
+
+     _  _  _  _    _  _  _  _    _  _  _  _   _  _  _  _
+     _  _  _  _    _  _  _  _    _  _  _  _   _  _  _  _
+     _  _  _  _    _  _  _  _    _  _  _  _   _  _  _  _
+     _  _  _  _    _  _  _  _    _  _  _  _   _  _  _  _
+
+     _  _  _  _    _  _  _  _    _  _  _  _   _  _  _  _
+     _  _  _  _    _  _  _  _    _  _  _  _   _  _  _  _
+     _  _  _  _    _  _  _  _    _  _  _  _   _  _  _  _
+     _  _  _  _    _  _  _  _    _  _  _  _   _  _  _  _
+
+     _  _  _  _    _  _  _  _    _  _  _  _   _  _  _  _
+     _  _  _  _    _  _  _  _    _  _  _  _   _  _  _  _
+     _  _  _  _    _  _  _  _    _  _  _  _   _  _  _  _
+     _  _  _  _    _  _  _  _    _  _  _  _   _  _  _  _))
+
+(benchmark-arb-solve-sudoku 4 *sudoku-16x16-example* "*sudoku-16x16-example*")
+
+;; -----------------------------------------------
+;; 25x25 Sudoku (n=5): 5x5 boxes, values 1-25
+;; -----------------------------------------------
+
+;; A 25x25 Sudoku puzzle with first row defined (SAT)
+;; This is a large puzzle - may take significant time to solve
+(defconstant *sudoku-25x25-first-row*
+  (append '( 1  2  3  4  5    6  7  8  9 10   11 12 13 14 15   16 17 18 19 20   21 22 23 24 25)
+          (loop repeat (* 24 25) collect '_)))
+
+;; Warning: 25x25 puzzles are very large and may take minutes to solve
+;; (benchmark-arb-solve-sudoku 5 *sudoku-25x25-first-row* "*sudoku-25x25-first-row*")
 
 ;; ==========================
 ;;            E2
@@ -1397,16 +1436,46 @@ Is the above set of constraints consistent? If so, who has what job?
       (solver-pop)
       sol)))
 
-;; TODO: generate pretty-print-unequal-solution
+(defun get-unequal-value (soln n row col)
+  (cadr (assoc-equal (unequal-cell-var n row col) soln)))
+
+;; Pretty-print an Unequal solution of size n x n, showing inequalities from the original grid.
+;; Output format is (2n-1) x (2n-1) with values and inequality symbols.
+(defun pretty-print-unequal-solution (soln n &optional input-grid)
+  (format t "~%")
+  (let ((expanded-size (- (* 2 n) 1)))
+    (loop for exp-row below expanded-size
+          do (progn
+               (loop for exp-col below expanded-size
+                     do (cond
+                          ;; Value cell at even row/col
+                          ((and (evenp exp-row) (evenp exp-col))
+                           (let ((val (get-unequal-value soln n (/ exp-row 2) (/ exp-col 2))))
+                             (format t "~2D " val)))
+                          ;; Horizontal inequality at even row, odd col
+                          ((and (evenp exp-row) (oddp exp-col))
+                           (let ((sym (if input-grid
+                                          (unequal-grid-ref input-grid n exp-row exp-col)
+                                          '_)))
+                             (format t "~A  " (if (eq sym '_) " " sym))))
+                          ;; Vertical inequality at odd row, even col
+                          ((and (oddp exp-row) (evenp exp-col))
+                           (let ((sym (if input-grid
+                                          (unequal-grid-ref input-grid n exp-row exp-col)
+                                          '_)))
+                             (format t "~A  " (if (eq sym '_) " " sym))))
+                          ;; Unused position at odd row, odd col
+                          (t (format t "   "))))
+               (terpri)))
+    (terpri)))
 
 (defun benchmark-solve-unequal (n grid name)
   (format t "~%=== ~A (~Ax~A integer encoding) ===~%" name n n)
-  (setf (fdefinition 'get-square-value) #'get-square-value-int)
   (solver-reset)
   (let ((soln (time (solve-unequal n grid))))
     (if (equal soln 'UNSAT)
         (format t "UNSAT~%")
-        (pretty-print-unequal-solution soln n))
+        (pretty-print-unequal-solution soln n grid))
     (z3::get-solver-stats)))
 
 ;; ========================================
