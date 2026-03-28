@@ -416,11 +416,6 @@ Is the above set of constraints consistent? If so, who has what job?
 (hint: an enumeration sort might be helpful here)
 |#
 
-;; TODO: this macro doesn't work?
-(defmacro exactly (n &rest cls)
-  `(and ((_ at-most ,n) ,@cls)
-        ((_ at-least ,n) ,@cls)))
-
 (register-enum-sort :job (F G D))
 
 (solver-push)
@@ -769,7 +764,7 @@ Is the above set of constraints consistent? If so, who has what job?
  1 3 6   8 7 2   4 5 9
 |#
 
-;; TODO: refactoring exactly
+;; TODO: refactoring at-most n and at-least n into exactly n
 
 (defun sudoku-var-specs ()
   (loop for row below 9 append
@@ -945,8 +940,6 @@ Is the above set of constraints consistent? If so, who has what job?
 ;; Integer encoding: the cell variable holds its value directly.
 (defun get-square-value-int (soln row col)
   (cadr (assoc-equal (sudoku-cell-var-alt row col) soln)))
-
-;; TODO: add time out
 
 (defun benchmark-solve-sudoku-alternative (grid name)
   (format t "~%=== ~A (integer encoding) ===~%" name)
