@@ -764,7 +764,9 @@ Is the above set of constraints consistent? If so, who has what job?
  1 3 6   8 7 2   4 5 9
 |#
 
-;; TODO: refactoring at-most n and at-least n into exactly n
+(defun exactly-one (vars)
+  `(((_ at-least 1) ,@vars)
+    ((_ at-most  1) ,@vars)))
 
 (defun sudoku-var-specs ()
   (loop for row below 9 append
@@ -789,16 +791,14 @@ Is the above set of constraints consistent? If so, who has what job?
              (loop for col below 9 append
                    (let ((vars (loop for val from 1 to 9
                                     collect (sudoku-cell-var row col val))))
-                     `(((_ at-least 1) ,@vars)
-                       ((_ at-most  1) ,@vars)))))))
+                     (exactly-one vars))))))
 
 (defun sudoku-box-cell-all-different (box-row box-col)
   (loop for val from 1 to 9 append
         (let ((vars (loop for r from (* box-row 3) below (+ (* box-row 3) 3) append
                          (loop for c from (* box-col 3) below (+ (* box-col 3) 3)
                                collect (sudoku-cell-var r c val)))))
-          `(((_ at-least 1) ,@vars)
-            ((_ at-most  1) ,@vars)))))
+          (exactly-one vars))))
 
 (defun sudoku-each-box-all-different ()
   (cons 'and
@@ -813,14 +813,12 @@ Is the above set of constraints consistent? If so, who has what job?
               (loop for val from 1 to 9 append
                     (let ((vars (loop for col below 9
                                      collect (sudoku-cell-var row col val))))
-                      `(((_ at-least 1) ,@vars)
-                        ((_ at-most  1) ,@vars)))))
+                      (exactly-one vars))))
          (loop for col below 9 append
               (loop for val from 1 to 9 append
                     (let ((vars (loop for row below 9
                                      collect (sudoku-cell-var row col val))))
-                      `(((_ at-least 1) ,@vars)
-                        ((_ at-most  1) ,@vars))))))))
+                      (exactly-one vars)))))))
 
 (solver-reset)
 
@@ -1124,9 +1122,14 @@ Is the above set of constraints consistent? If so, who has what job?
     _ 9 _   _ _ _   4 _ _))
 
 (benchmark-sudoku *inkala-2010* "*inkala-2010*")
-;; 0.027s
-;; 0.423s
-;; TODO: hardest?
+;; 0.027s (bit-blasting)
+;; 0.423s (integer)
+;;
+;; Note: Inkala 2010 was designed to be hard for *humans*, not SAT solvers.
+;; It has 24 given clues — these immediately seed strong unit propagation in
+;; CDCL, quickly narrowing the search space. Human hardness comes from the
+;; clues being placed to block standard human pencil-mark strategies (naked
+;; singles, hidden pairs, etc.), which are irrelevant to CDCL.
 
 ;; -----------------------------------------------
 ;; Example B (SAT): Moderate puzzle — baseline comparison.
@@ -1208,16 +1211,14 @@ Is the above set of constraints consistent? If so, who has what job?
              (loop for col below n^2 append
                    (let ((vars (loop for val from 1 to n^2
                                     collect (sudoku-cell-var row col val))))
-                     `(((_ at-least 1) ,@vars)
-                       ((_ at-most  1) ,@vars)))))))
+                     (exactly-one vars))))))
 
 (defun arb-sudoku-box-cell-all-different (box-row box-col n)
   (loop for val from 1 to (* n n) append
         (let ((vars (loop for r from (* box-row n) below (+ (* box-row n) n) append
                          (loop for c from (* box-col n) below (+ (* box-col n) n)
                                collect (sudoku-cell-var r c val)))))
-          `(((_ at-least 1) ,@vars)
-            ((_ at-most  1) ,@vars)))))
+          (exactly-one vars))))
 
 (defun arb-sudoku-each-box-all-different (n)
   (cons 'and
@@ -1232,14 +1233,12 @@ Is the above set of constraints consistent? If so, who has what job?
               (loop for val from 1 to n^2 append
                     (let ((vars (loop for col below n^2
                                      collect (sudoku-cell-var row col val))))
-                      `(((_ at-least 1) ,@vars)
-                        ((_ at-most  1) ,@vars)))))
+                      (exactly-one vars))))
          (loop for col below n^2 append
               (loop for val from 1 to n^2 append
                     (let ((vars (loop for row below n^2
                                      collect (sudoku-cell-var row col val))))
-                      `(((_ at-least 1) ,@vars)
-                        ((_ at-most  1) ,@vars))))))))
+                      (exactly-one vars)))))))
 
 (defun arb-solve-sudoku (n input-grid)
   "Arbitrary-size Sudoku solver. n is the size of the boxes in the Sudoku grid, so the grid is of size n^2 x n^2 and contains values from 1 to n^2.
