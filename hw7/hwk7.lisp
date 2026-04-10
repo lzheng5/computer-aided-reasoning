@@ -747,9 +747,6 @@ Examples
 ;;; General Utilities
 ;;; ============================================================
 
-(defun fo-quantifierp (q)
-  (in q *fo-quantifiers*))
-
 (defun assertf (f in out)
   (== (funcall f in) out))
 
@@ -759,6 +756,33 @@ Examples
         if (funcall pred x) collect x into trues
         else collect x into falses
         finally (return (values trues falses))))
+
+(defun negate (f)
+  "Get the negation of f"
+  (match f
+    ((list 'not a) a)
+    (_ `(not ,f))))
+
+(defun has-opposite (f args)
+  (in (negate f) args))
+
+(defun fo-quantifierp (q)
+  (in q *fo-quantifiers*))
+
+(defun term-vars (term &optional (vars (make-hash-set)))
+  "Return a hash set of the variables in term"
+  (labels ((walk (tm)
+             (match tm
+               ((satisfies variable-symbolp) (hash-set-add vars tm))
+               ((list* F args) (mapc #'walk args))
+               (_ nil))))
+    (walk term)
+    vars))
+
+(defun terms-vars (terms &optional (vars (make-hash-set))) 
+  "Return a hash set of the variables in the list of terms"
+  (mapc #'(lambda (tm) (term-vars tm vars)) terms)
+  vars)
 
 ;;; ============================================================
 ;;; Hash Set API - Simple set abstraction over hash tables
@@ -798,6 +822,17 @@ Examples
                         (hash-set-add new-set e)))
                   set)
     new-set))
+
+(defun hash-set-union! (set1 set2)
+  "Add all elements of set2 to set1 (mutates set1)"
+  (hash-set-map #'(lambda (elem) (hash-set-add set1 elem)) set2))
+
+(defun hash-set-remove! (set1 set2)
+  "Remove all elements of set2 from set1 (mutates set1)"
+  (hash-set-map #'(lambda (elem)
+                    (when (hash-set-contains? set2 elem)
+                      (setf (gethash elem set1) nil)))
+                set1))
 
 ;;; ============================================================
 ;;; Variables Utilities
@@ -855,18 +890,18 @@ Examples
                                               var))
                                   vars)))
                     (values new-vars var-map)))
-              (rename-term (t var-map)
-                (match t
-                  ((satisfies constant-symbolp) t)
+              (rename-term (tm var-map)
+                (match tm
+                  ((satisfies constant-symbolp) tm)
                   ((satisfies variable-symbolp) 
-                   (let ((new-var (get-alist t var-map)))
-                     (if new-var new-var t))))
-                  ((satisfies quotep) t)
-                  ((satisfies constant-objectp) t)
+                   (let ((new-var (get-alist tm var-map)))
+                     (if new-var new-var tm)))
+                  ((satisfies quotep) tm)
+                  ((satisfies constant-objectp) tm)
                   ((list* F args)
                    (let ((new-args (mapcar #'(lambda (a) (rename-term a var-map)) args)))
                      `(,F ,@new-args)))
-                  (_ t)))
+                  (_ tm)))
               (rename (f bound var-map)
                 (match f
                   ;; < quant-fo-formulap >
@@ -880,8 +915,7 @@ Examples
 
                   ;; < fo-atomic-formulap >
                   ((list* R ts)  
-                    `(,R ,@(mapcar #'(lambda (t)(rename-term t var-map))) ts))))
-
+                    `(,R ,@(mapcar #'(lambda (tm) (rename-term tm var-map)) ts)))))
        (rename f nil nil))))
 
 (defun fo-simplify-implies (f)
@@ -902,13 +936,20 @@ Examples
     ;; < fo-atomic-formulap >
     (_ f)))
 
+;; Tests for fo-simplify-implies
+(assertf #'fo-simplify-implies '(implies p q) '(or (not p) q))
+(assertf #'fo-simplify-implies '(implies (implies a b) c) '(or (not (or (not a) b)) c))
+(assertf #'fo-simplify-implies '(forall (x) (implies (P x) (Q x))) '(forall (x) (or (not (P x)) (Q x))))
+(assertf #'fo-simplify-implies '(exists (x) (implies (R x) (S x))) '(exists (x) (or (not (R x)) (S x))))
+(assertf #'fo-simplify-implies '(and (implies a b) (implies c d)) '(and (or (not a) b) (or (not c) d)))
+
 (defun fo-preprocess (f)
   "Apply preprocessing to f.
 
    Pre: (fo-formulap f)"
   (fo-simplify-implies 
-   (fo-rename 
-    (fo-cannonicalize-quant-vars f))))
+   ;;fo-rename 
+    (fo-cannonicalize-quant-vars f)))
 
 ;;; ============================================================
 ;;; Simplification 
@@ -1001,7 +1042,7 @@ Examples
      `(,q ,vars ,(fo-simplify-flatten body)))
 
     ;; < p-fo-formulap >
-    ((list* (guard op (p-funp op)) op as)
+    ((list* (guard op (p-funp op)) as)
      (let* ((pop (key-alist->val op *p-ops*))
             (arity (key-list->val :arity pop)))
        (cond ((== arity '-)
@@ -1033,6 +1074,11 @@ Examples
 (assertf #'fo-simplify-flatten '(and (p c) (= c '1) (and (r) (s) (or (r1) (r2)))) '(and (p c) (= c '1) (r) (s) (or (r1) (r2))))
 (assertf #'fo-simplify-flatten '(and) 't)
 (assertf #'fo-simplify-flatten '(and p q (and r s)) '(and p q r s))
+;; Quantified formula tests
+(assertf #'fo-simplify-flatten '(forall (x) (and (P x) (and (Q x) (R x)))) '(forall (x) (and (P x) (Q x) (R x))))
+(assertf #'fo-simplify-flatten '(exists (x) (or (P x))) '(exists (x) (P x)))
+(assertf #'fo-simplify-flatten '(forall (x) (or)) '(forall (x) nil))
+(assertf #'fo-simplify-flatten '(forall (x) (iff (P x))) '(forall (x) (P x)))
 
 (defun fo-simplify-not (f)
   (match f
@@ -1053,13 +1099,178 @@ Examples
     (_ f)))
 
 (assertf #'fo-simplify-not '(not (not p)) 'p)
+(assertf #'fo-simplify-not '(not (not (not p))) '(not p))
+(assertf #'fo-simplify-not '(and (not (not p)) q) '(and p q))
+(assertf #'fo-simplify-not '(forall (x) (not (not (P x)))) '(forall (x) (P x)))
+(assertf #'fo-simplify-not '(exists (x) (or (not (not p)) (not (not q)))) '(exists (x) (or p q)))
 
-(defun fo-simplify-trivially-quantified (f) ...)
+(defun fo-simplify-dup (f)
+  "Simplify duplicated and opposite subformulas"
+  (match f
+    ;; < quant-fo-formulap >
+    ((list (guard q (fo-quantifierp q)) vars body)
+     `(,q ,vars ,(fo-simplify-dup body)))
+
+    ;; < p-fo-formulap >
+    ((list* (guard op (p-funp op)) as)
+     (let ((as (mapcar #'fo-simplify-dup as)))
+        (cond
+          ;; and/or: idempotent, check for p and (not p)
+          ((in op '(and or))
+           (let* ((pop (key-alist->val op *p-ops*))
+                  (sink (key-list->val :sink pop)))
+            ;; Check for opposite: p and (not p) => sink
+            (if (some #'(lambda (a) (has-opposite a as)) as)
+                sink
+                ;; Remove duplicates (idempotent)
+                `(,op ,@(remove-dups as)))))
+
+          ;; iff: p iff p = t (identity), p iff (not p) = nil
+          ((== op 'iff)
+           (let* ((pairs (make-hash-table :test #'equal))
+                  (seen (make-hash-table :test #'equal))
+                  (neg-count 0)
+                  (result nil))
+            ;; Count occurrences
+            (dolist (a as)
+              (incf (gethash a pairs 0)))
+            ;; Check for opposites and count odd occurrences
+            (maphash #'(lambda (k v)
+                          (let ((neg (negate k)))
+                            (let+ (((&values neg-val neg-present?) (gethash neg pairs)))
+                              (when (and neg-present? (not (gethash neg seen)))
+                                ;; Mark both as seen
+                                (setf (gethash k seen) t)
+                                (setf (gethash neg seen) t)
+                                ;; Reduce counts
+                                (let ((n (min v neg-val)))
+                                  (incf neg-count n)
+                                  (decf (gethash k pairs) n)
+                                  (decf (gethash neg pairs) n))))))
+                      pairs)
+            ;; Build result: keep odd occurrences
+            (maphash #'(lambda (k v)
+                          (when (oddp v)
+                            (push k result)))
+                      pairs)
+            ;; Add nil for each opposite pair (nil is not identity for iff)
+            (dotimes (i neg-count)
+              (push nil result))
+            (cond ((null result) t)
+                  ((null (cdr result)) (car result))
+                  (t `(iff ,@(reverse result))))))
+
+          ;; if: check specific cases
+          ((== op 'if)
+           (match as
+              ((list a b c)
+                  (cond ((equal b c) b)
+                        ((equal a b) `(or ,a ,c))      ; (if a a c) = (or a c)
+                        ((equal a c) `(and ,a ,b))     ; (if a b a) = (and a b)
+                        ((equal a (negate b)) `(and ,b ,c))  ; (if a (not a) c) = (and (not a) c)
+                        ((equal a (negate c)) `(or ,b ,c))   ; (if a b (not a)) = (or b (not a))
+                        (t `(if ,@as))))
+              (_ `(if ,@as))))
+
+          (t `(,op ,@as)))))
+
+    ;; < fo-atomic-formulap >
+    (_ f)))
+
+(assertf #'fo-simplify-dup '(iff nil p q) '(iff nil p q))
+(assertf #'fo-simplify-dup '(iff p q p) 'q)
+(assertf #'fo-simplify-dup '(iff p q (not p)) '(iff q nil))
+;; Quantified formula tests
+(assertf #'fo-simplify-dup '(forall (x) (and (P x) (P x))) '(forall (x) (and (P x))))
+(assertf #'fo-simplify-dup '(exists (x) (or (P x) (not (P x)))) '(exists (x) t))
+(assertf #'fo-simplify-dup '(forall (x) (and (P x) (not (P x)))) '(forall (x) nil))
+(assertf #'fo-simplify-dup '(forall (x y) (iff (R x y) (R x y))) '(forall (x y) t))
+;; Deeply nested tests
+(assertf #'fo-simplify-dup '(and p q p r q) '(and p q r))
+(assertf #'fo-simplify-dup '(or (P x) (Q y) (P x)) '(or (P x) (Q y)))
+
+(defun fo-simplify-trivially-quantified (f) 
+  (labels ((walk (f)
+             (match f
+               ;; < quant-fo-formulap >
+               ((list (guard q (fo-quantifierp q)) vars body)
+                (let+ (((&values new-body fvars) (walk body)))
+                  (let* ((used (remove-if-not (lambda (v) (hash-set-contains? fvars v)) vars))
+                         (new-fvars (let ((s (make-hash-set)))
+                                      (hash-set-map (lambda (v)
+                                                      (unless (member v vars :test #'equal)
+                                                        (hash-set-add s v)))
+                                                    fvars)
+                                      s)))
+                    (if (null used)
+                        (values new-body new-fvars)
+                        (values `(,q ,used ,new-body) new-fvars)))))
+
+               ;; < p-fo-formulap >
+               ((list* (guard op (p-funp op)) fs)
+                (let ((all-fvars (make-hash-set))
+                      (new-fs (loop for sub in fs
+                                  collect (let+ (((&values nf fv) (walk sub)))
+                                            (hash-set-union! all-fvars fv)
+                                            nf))))
+                  (values `(,op ,@new-fs) all-fvars)))
+
+               ;; < fo-atomic-formulap >
+               (_ (values f (if (consp f) (terms-vars (cdr f)) (make-hash-set)))))))
+    (let+ (((&values new-f fvars) (walk f)))
+      new-f)))
+
+;; Vacuous quantifier removal tests
+(assertf #'fo-simplify-trivially-quantified '(forall (x w) (P y z)) '(P y z))
+(assertf #'fo-simplify-trivially-quantified '(forall (x w) (P x y z)) '(forall (x) (P x y z)))
+(assertf #'fo-simplify-trivially-quantified '(exists (x) (and (P y) (Q z))) '(and (P y) (Q z)))
+(assertf #'fo-simplify-trivially-quantified '(forall (x y z) (exists (w) (R x w))) '(forall (x) (exists (w) (R x w))))
+(assertf #'fo-simplify-trivially-quantified '(exists (x) (forall (y) (P x y))) '(exists (x) (forall (y) (P x y))))
+(assertf #'fo-simplify-trivially-quantified '(forall (x) t) 't) 
+
+(defun term-partial-eval (term) 
+  "Apply partial evaluation to term if possible."
+  (match term
+    ((satisfies constant-symbolp) term)
+    ((satisfies variable-symbolp) term)
+    ((satisfies quotep) term)
+    ((satisfies constant-objectp) term)
+    ((list* F args)
+     (let ((new-args (mapcar #'term-partial-eval args)))
+       (if (every #'(lambda (a) (or (constant-objectp a) (quotep a))) new-args)
+           (let ((res (acl2s-compute (to-acl2s (cons F new-args)))))
+             (if (null (car res)) 
+                 (cdr res) ;; success
+                 `(,F ,@new-args))) ;; error 
+           `(,F ,@new-args))))))
+
+(defun fo-simplify-partial-eval (f) 
+  "Apply partial evaluation to terms in f if possible." 
+  (match f
+    ;; < quant-fo-formulap >
+    ((list (guard q (fo-quantifierp q)) vars body)
+     `(,q ,vars ,(fo-simplify-partial-eval body)))
+
+    ;; < p-fo-formulap >
+    ((list* (guard op (p-funp op)) fs)
+     `(,op ,@(mapcar #'fo-simplify-partial-eval fs)))
+
+    ;; < fo-atomic-formulap >
+    ((list* R args) 
+     `(,R ,@(mapcar #'term-partial-eval args)))))
+
+;; Partial evaluation tests
+(assertf #'fo-simplify-partial-eval '(P (binary-+ 4 2) 3) '(P 6 3))
+(assertf #'fo-simplify-partial-eval '(forall (x) (= x (binary-+ 1 2))) '(forall (x) (= x 3)))
+(assertf #'fo-simplify-partial-eval '(and (P (binary-* 2 3)) (Q y)) '(and (P 6) (Q y)))
 
 (defun fo-simplify-fixpoint (f)
-  (let ((new-f (fo-simplify-const
-                (fo-simplify-not
-                 (fo-simplify-flatten f)))))
+  (let ((new-f (fo-simplify-partial-eval
+                (fo-simplify-trivially-quantified
+                 (fo-simplify-dup
+                  (fo-simplify-const
+                   (fo-simplify-not
+                    (fo-simplify-flatten f))))))))
     (if (equal new-f f)
         f
         (fo-simplify-fixpoint new-f))))
