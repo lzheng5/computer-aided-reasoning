@@ -527,8 +527,12 @@ Examples
 
 FOL Syntax
 
-t := <term>
-a := (R t1 ... tn)
+t := <constant symbol>
+   | <quoted constant>
+   | <constant object>
+   | <variable>
+   | (<f-symbol> t1 ... tn)
+a := (<R-symbol> t1 ... tn)
    | (= t1 t2)
 p := (<p-op> f1 ... fn)
 f := a | p
@@ -739,6 +743,13 @@ Examples
 
 |#
 
+;;; ============================================================
+;;; General Utilities
+;;; ============================================================
+
+(defun fo-quantifierp (q)
+  (in q *fo-quantifiers*))
+
 (defun assertf (f in out)
   (== (funcall f in) out))
 
@@ -749,8 +760,129 @@ Examples
         else collect x into falses
         finally (return (values trues falses))))
 
-(defun fo-quantifierp (q)
-  (in q *fo-quantifiers*))
+;;; ============================================================
+;;; Hash Set API - Simple set abstraction over hash tables
+;;; ============================================================
+
+(defun make-hash-set (&optional (eq #'eql))
+  "Create an empty hash set"
+  (make-hash-table :test eq))
+
+(defun hash-set-add (set elem)
+  "Add element to hash set (mutates set)"
+  (setf (gethash elem set) t))
+
+(defun hash-set-contains? (set elem)
+  "Check if element is in hash set"
+  (gethash elem set))
+
+(defun hash-set-size (set)
+  "Return number of elements in hash set"
+  (hash-table-count set))
+
+(defun hash-set-map (fn set)
+  "Apply function fn to each element in set"
+  (maphash #'(lambda (k v) (declare (ignore v)) (funcall fn k)) set))
+
+(defun hash-set->list (set)
+  "Convert hash set to list"
+  (let ((result nil))
+    (hash-set-map #'(lambda (elem) (push elem result)) set)
+    result))
+
+(defun hash-set-copy-except (set elem)
+  "Create a new hash set with all elements except elem"
+  (let ((new-set (make-hash-set)))
+    (hash-set-map #'(lambda (e)
+                      (unless (equal e elem)
+                        (hash-set-add new-set e)))
+                  set)
+    new-set))
+
+;;; ============================================================
+;;; Variables Utilities
+;;; ============================================================
+
+(defun genvarn (prefix n)
+  "Generate a variable symbol of the form PREFIX_N"
+  (intern (format nil "~A~D" prefix n)))
+
+(defparameter *var-gen-cnt* 0)
+        
+(defun genvar (prefix)
+  "Generate a new variable symbol of the form PREFIX_N, where N is a natural number that is incremented each time genvar is called."
+  (let ((var (genvarn prefix *var-gen-cnt*)))
+    (setf *var-gen-cnt* (1+ *var-gen-cnt*))
+    var))
+
+(defun genvars (prefix n)
+  (loop for i from 0 below n
+        collect (genvar prefix)))
+
+;;; ============================================================
+;;; Preprocessing 
+;;; ============================================================
+
+(defun fo-cannonicalize-quant-vars (f)
+  "Turn the quantified variables into a standard list form."
+  (match f
+    ;; < quant-fo-formulap >
+    ((list (guard q (fo-quantifierp q)) vars body)
+     (let ((vars (if (variable-symbolp vars) (list vars) vars)))
+      `(,q ,vars ,(fo-cannonicalize-quant-vars body))))
+    
+    ;; < p-fo-formulap >    
+    ((list* (guard op (p-funp op)) args)
+     `(,op ,@(mapcar #'fo-cannonicalize-quant-vars args)))
+    
+    ;; < fo-atomic-formulap >
+    (_ f)))
+
+(defun fo-rename (f) 
+  "Rename the variables in f if there are any name clashes. 
+   The temporary variables generated have prefix #\U.
+   
+   Pre: fo-cannonicalize-quant-vars has already been applied to f.
+   Post: all bound variables in f are unique."
+   
+   (let ((*var-gen-cnt* 0))
+     (labels ((rename-vars (vars bound var-map)
+                (let ((new-vars (mapcar #'(lambda (var) 
+                                              (if (in var bound)
+                                                (let ((new-var (genvar "U")))
+                                                  (setf var-map (acons var new-var var-map))
+                                                  new-var)
+                                              var))
+                                  vars)))
+                    (values new-vars var-map)))
+              (rename-term (t var-map)
+                (match t
+                  ((satisfies constant-symbolp) t)
+                  ((satisfies variable-symbolp) 
+                   (let ((new-var (get-alist t var-map)))
+                     (if new-var new-var t))))
+                  ((satisfies quotep) t)
+                  ((satisfies constant-objectp) t)
+                  ((list* F args)
+                   (let ((new-args (mapcar #'(lambda (a) (rename-term a var-map)) args)))
+                     `(,F ,@new-args)))
+                  (_ t)))
+              (rename (f bound var-map)
+                (match f
+                  ;; < quant-fo-formulap >
+                  ((list (guard q (fo-quantifierp q)) vars body)
+                   (let+ (((&values new-vars new-var-map) (rename-vars vars bound var-map)))
+                     `(,q ,new-vars ,(rename body (append new-vars bound) new-var-map))))
+                  
+                  ;; < p-fo-formulap >
+                  ((list* (guard op (p-funp op)) fs)
+                   `(,op ,@(mapcar #'(lambda (f) (rename f bound var-map)) fs)))
+
+                  ;; < fo-atomic-formulap >
+                  ((list* R ts)  
+                    `(,R ,@(mapcar #'(lambda (t)(rename-term t var-map))) ts))))
+
+       (rename f nil nil))))
 
 (defun fo-simplify-implies (f)
   (match f
@@ -769,6 +901,18 @@ Examples
 
     ;; < fo-atomic-formulap >
     (_ f)))
+
+(defun fo-preprocess (f)
+  "Apply preprocessing to f.
+
+   Pre: (fo-formulap f)"
+  (fo-simplify-implies 
+   (fo-rename 
+    (fo-cannonicalize-quant-vars f))))
+
+;;; ============================================================
+;;; Simplification 
+;;; ============================================================
 
 (defun fo-simplify-const (f)
   (match f
@@ -890,9 +1034,6 @@ Examples
 (assertf #'fo-simplify-flatten '(and) 't)
 (assertf #'fo-simplify-flatten '(and p q (and r s)) '(and p q r s))
 
-(defun fo-simplify-sink-free (f)
-  ...)
-
 (defun fo-simplify-not (f)
   (match f
     ;; < quant-fo-formulap >
@@ -913,8 +1054,6 @@ Examples
 
 (assertf #'fo-simplify-not '(not (not p)) 'p)
 
-(defun fo-free-vars (f) ...)
-
 (defun fo-simplify-trivially-quantified (f) ...)
 
 (defun fo-simplify-fixpoint (f)
@@ -930,7 +1069,7 @@ Examples
 
    Pre: (fo-formulap f)"
   (fo-simplify-fixpoint
-   (fo-simplify-implies f)))
+   (fo-preprocess f)))
 
 #|
 
