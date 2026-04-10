@@ -1,6 +1,6 @@
 #|
 
- Copyright © 2026 by Pete Manolios 
+ Copyright © 2026 by Pete Manolios
  CS 4820 Fall 2026
 
  Homework 7.
@@ -14,12 +14,12 @@
  The group members are:
 
  Ling Zheng
- 
+
  To make sure that we are all on the same page, build the latest
  version of ACL2s, as per HWK1. You are going to be using SBCL, which
  you already have, due to the build process in
 
- Next, install quicklisp. See https://www.quicklisp.org/beta/. 
+ Next, install quicklisp. See https://www.quicklisp.org/beta/.
 
  To make sure everything is OK with quicklisp and to initialize it,
  start sbcl and issue the following commands
@@ -29,18 +29,18 @@
  (ql:quickload :cl-ppcre)
  (ql:quickload :let-plus)
  (setf ppcre:*allow-named-registers* t)
- (exit) 
+ (exit)
 
  Next, clone the ACL2s interface repository:
  (https) https://gitlab.com/acl2s/external-tool-support/interface.git
  (ssh)   git@gitlab.com:acl2s/external-tool-support/interface.git
 
  This repository includes scripts for interfacing with ACL2s from lisp.
- Put this directory in the ...books/acl2s/ of your ACL2 repository, or 
+ Put this directory in the ...books/acl2s/ of your ACL2 repository, or
  use a symbolic link.
 
  Now, certify the books, by going to ...books/acl2s/interface and
- typing 
+ typing
 
  "cert.pl -j 4 top"
 
@@ -58,11 +58,11 @@
 
  Other references that you might find useful and are available online
  include
- 
+
  - Common Lisp: A Gentle Introduction to Symbolic Computation by David
    Touretzky
  - ANSI Common Lisp by Paul Graham
- 
+
 |#
 
 (in-package "ACL2S")
@@ -78,15 +78,15 @@
 ;; This gets us to raw lisp.
 :q
 
-#| 
+#|
 
  The interface books provide us with the ability to call the theorem
- prover within lisp, which will be useful in checking your code. 
+ prover within lisp, which will be useful in checking your code.
 
- Here are some examples you can try. 
+ Here are some examples you can try.
 
  acl2s-compute is the form you use when you are using ACL2s to compute
- something, e.g., running a function on some input. 
+ something, e.g., running a function on some input.
 
  (acl2s-compute '(+ 1 2))
 
@@ -131,7 +131,7 @@
 (setf ppcre:*allow-named-registers* t)
 
 #|
- 
+
  We now define our own package.
 
 |#
@@ -146,25 +146,25 @@
 
 
 #|
- 
+
  We have a list of the propositional operators and information about
- them. 
+ them.
 
  :arity can be a positive integer or - (meaning arbitrary arity) If
  :arity is -, there must be an identity and the function must be
  associative and commutative.
 
  If :identity is non-nil, then the operator has the indicated
- identity. 
- 
+ identity.
+
  An operator is idempotent iff :idem is t.
 
  If :sink is not -, then it must be the case that (op ... sink ...) =
  sink, e.g., (and ... nil ...) = nil.
 
- FYI: it is common for global variables to be enclosed in *'s. 
+ FYI: it is common for global variables to be enclosed in *'s.
 
-|# 
+|#
 
 (defparameter *p-ops*
   '((and     :arity - :identity t   :idem t   :sink nil)
@@ -195,7 +195,7 @@
  define functions that are similar to the ACL2s functions we're
  familiar with.
 
-|# 
+|#
 
 (defun in (a x)
   (member a x :test #'equal))
@@ -254,7 +254,7 @@
 
 #|
 
- A FO term is either a 
+ A FO term is either a
 
  constant symbol: a symbol whose name starts with "C" and is
  optionally followed by a natural number with no leading 0's, e.g., c0,
@@ -276,7 +276,7 @@
  of f is n and every occurrence of (f ...)  in a term or formula has
  to have arity n. Also, if f is a defined function in ACL2s, its arity
  has to match what ACL2s expects. We allow functions of 0-arity.
- 
+
 |#
 
 (defun char-nat-symbolp (s chars)
@@ -355,7 +355,7 @@ Examples
     ((satisfies quotep) (values t fsig rsig))
     ((satisfies constant-objectp) (values t fsig rsig))
     ((list* f args)
-     (mv-and 
+     (mv-and
       (and (function-symbolp f) (not (get-alist f rsig)))
       (let* ((fsig-arity (get-alist f fsig))
              (acl2s-arity
@@ -390,14 +390,14 @@ Examples
 (fo-termp '(binary-append '1 '2))
 (fo-termp '(binary-append '1 '2 '3))
 (fo-termp '(binary-+ '1 '2))
-(fo-termp '(+ '1 '2)) 
+(fo-termp '(+ '1 '2))
 (fo-termp '(- '1 '2))
 
 |#
 
 #|
 
- A FO atomic formula is either an 
+ A FO atomic formula is either an
 
  atomic equality: (= t1 t2), where t1, t2 are FO terms.
 
@@ -428,7 +428,7 @@ Examples
     ((list '= t1 t2)
      (fo-termsp (list t1 t2) fsig rsig))
     ((list* r args)
-     (mv-and 
+     (mv-and
       (and (relation-symbolp r) (not (get-alist r fsig)))
       (let* ((rsig-arity (get-alist r rsig))
              (acl2s-arity
@@ -441,10 +441,10 @@ Examples
     (_ (values nil fsig rsig))))
 
 #|
- 
+
  Here is the definition of a propositional formula. We allow
  Booleans.
- 
+
 |#
 
 (defun pfun-fo-argsp (pop args fsig rsig)
@@ -464,10 +464,10 @@ Examples
     (_ (values nil fsig rsig))))
 
 #|
- 
- Here is the definition of a quantified formula. 
 
- The quantified variables can be a variable 
+ Here is the definition of a quantified formula.
+
+ The quantified variables can be a variable
  or a non-empty list of variables with no duplicates.
  Examples include
 
@@ -508,7 +508,7 @@ Examples
 
 (defmacro mv-seq-first (&rest rst)
   (mv-seq-first-fun rst))
-  
+
 (defun fo-formulap (f &optional (fsig nil) (rsig nil))
   (mv-seq-first
    (fo-atomic-formulap f fsig rsig)
@@ -525,9 +525,22 @@ Examples
 
 #|
 
+FOL Syntax
+
+t := <term>
+a := (R t1 ... tn)
+   | (= t1 t2)
+p := (<p-op> f1 ... fn)
+f := a | p
+   | (<fo-quant> xs f)
+
+|#
+
+#|
+
  We can use fo-formulasp to find the function and relation
  symbols in a formula as follows.
- 
+
 |#
 
 (defun fo-f-symbols (f)
@@ -544,13 +557,13 @@ Examples
 
 Examples
 
-(fo-formulap 
+(fo-formulap
  '(forall (x y z) (exists w (P w y z x))))
 
-(fo-formulap 
+(fo-formulap
  '(forall (x y z x) (exists w (P w y z x))))
 
-(quant-fo-formulap 
+(quant-fo-formulap
  '(forall (x y z) (exists y (P w y z x))) nil nil)
 
 (fo-formulap
@@ -559,10 +572,10 @@ Examples
 (fo-atomic-formulap
  '(exists w (P w y z x)) nil nil)
 
-(quant-fo-formulap 
+(quant-fo-formulap
  '(exists w (P w y z x)) nil nil)
 
-(fo-formulap 
+(fo-formulap
  '(P w y z x))
 
 (fo-formulap
@@ -604,16 +617,16 @@ Examples
 |#
 
 #|
- 
+
  Where appropriate, for the problems below, modify your solutions from
  homework 4. For example, you already implemented most of the
  simplifications in Question 1 in homework 4.
- 
+
 |#
 
 
 #|
- 
+
  Question 1. (25 pts)
 
  Define function fo-simplify that given a first-order (FO) formula
@@ -622,8 +635,8 @@ Examples
  A. The returned formula is either a constant or does not include any
  constants. For example:
 
- (and (p x) t (q t y) (q y z)) should be simplified to 
- (and (p x) (q t y) (q y z)) 
+ (and (p x) t (q t y) (q y z)) should be simplified to
+ (and (p x) (q t y) (q y z))
 
  (and (p x) t (q t b) nil) should be simplified to nil
 
@@ -647,34 +660,34 @@ Examples
 
  D. Simplify your formulas so that no subexpressions of the following
  form remain (where f is a formula)
- 
+
  (not (not f))
 
  E. Simplify formulas so that no subexpressions of the following form
- remain 
+ remain
 
  (op ... p ... q ...)
 
  where p, q are equal literals or  p = (not q) or q = (not p).
 
  For example
- 
- (or (f) (f1) (p a b) (not (p a b)) (= w z)) should be simplified to 
 
- t 
- 
+ (or (f) (f1) (p a b) (not (p a b)) (= w z)) should be simplified to
+
+ t
+
  F. Simplify formulas so there are no vacuous quantified formulas.
- For example, 
+ For example,
 
  (forall (x w) (P y z))  should be simplified to
- 
+
  (P y z)
 
- and 
+ and
 
  (forall (x w) (P x y z))  should be simplified to
- 
- (forall (x) (P x y z)) 
+
+ (forall (x) (P x y z))
 
  G. Simplify formulas by using ACL2s to evaluate, when possible, terms
  of the form (f ...) where f is an ACL2s function all of whose
@@ -696,8 +709,8 @@ Examples
 
  (P (binary-+ 'a 2) 3)
 
- does not get simplified because 
- 
+ does not get simplified because
+
  (acl2s-compute (to-acl2s '(binary-+ 'a 2)))
 
  indicates an error (contract/guard violation). See the definition of
@@ -709,7 +722,7 @@ Examples
 
  Make sure that your algorithm is as efficient as you can make
  it. The idea is to use this simplification as a preprocessing step,
- so it needs to be fast. 
+ so it needs to be fast.
 
  You are not required to perform any other simplifications beyond
  those specified above. If you do, your simplifier must be guaranteed
@@ -722,11 +735,202 @@ Examples
  connectives (such as not/and). If you do that, the formula you get
  can be exponentially larger than the input formula, as we have
  discussed in class. Notice that even negation normal form (NNF) can
- increase the size of a formula. 
+ increase the size of a formula.
 
 |#
 
-(defun fo-simplify (f) ...)
+(defun assertf (f in out)
+  (== (funcall f in) out))
+
+(defun partition (pred list)
+  "Partition list into (values trues falses) based on pred"
+  (loop for x in list
+        if (funcall pred x) collect x into trues
+        else collect x into falses
+        finally (return (values trues falses))))
+
+(defun fo-quantifierp (q)
+  (in q *fo-quantifiers*))
+
+(defun fo-simplify-implies (f)
+  (match f
+    ;; < quant-fo-formulap >
+    ((list (guard q (fo-quantifierp q)) vars body)
+     `(,q ,vars ,(fo-simplify-implies body)))
+
+    ;; < p-fo-formulap >
+    ((list 'implies p q)
+     (let ((sp (fo-simplify-implies p))
+           (sq (fo-simplify-implies q)))
+       `(or (not ,sp) ,sq)))
+
+    ((list* (guard op (p-funp op)) args)
+     `(,op ,@(mapcar #'fo-simplify-implies args)))
+
+    ;; < fo-atomic-formulap >
+    (_ f)))
+
+(defun fo-simplify-const (f)
+  (match f
+    ;; < quant-fo-formulap >
+    ((list (guard q (fo-quantifierp q)) vars body)
+     `(,q ,vars ,(fo-simplify-const body)))
+
+    ;; < p-fo-formulap >
+    ((list 'not a)
+     (let ((a (fo-simplify-const a)))
+       (match a
+         ((type boolean) (not a))
+         (_ `(not ,a)))))
+
+    ((list 'if a b c)
+     (let ((a (fo-simplify-const a))
+           (b (fo-simplify-const b))
+           (c (fo-simplify-const c)))
+        (cond ((== a t) b)
+              ((== a nil) c)
+              ((== b c) b)
+              ((and (== b t) (== c nil)) a)
+              ((and (== b nil) (== c t)) `(not ,a))
+              ((== b t) `(or ,a ,c))
+              ((== c nil) `(and ,a ,b))
+              ((== b nil) `(and (not ,a) ,c))
+              ((== c t) `(or (not ,a) ,b))
+              (t `(if ,a ,b ,c)))))
+
+    ((list* (guard op (p-funp op)) as)
+     (let ((as (mapcar #'fo-simplify-const as)))
+       (match op
+         ((or 'iff)
+          (let+ (((&values consts non-consts) (partition #'booleanp as))
+                 (id (pfun-key->val op :identity))
+                 (result (if (== op 'iff)
+                             (evenp (count nil consts))
+                             (oddp (count t consts)))))
+            (if (== result id)
+                (cond ((null non-consts) id)
+                      ((null (cdr non-consts)) (car non-consts))
+                      (t `(,op ,@non-consts)))
+                (cond ((null non-consts) result)
+                      ((null (cdr non-consts)) `(not ,(car non-consts)))
+                      (t `(,op ,result ,@non-consts))))))
+
+         ((or 'and 'or)
+          (let* ((pop (key-alist->val op *p-ops*))
+                 (id (key-list->val :identity pop))
+                 (sink (key-list->val :sink pop)))
+            (if (in sink as)
+                sink
+                `(,op
+                  ,@(reduce
+                     #'(lambda (a as)
+                         (if (booleanp a)
+                             (if (== a id) as `(,a ,@as))
+                             `(,a ,@as)))
+                     as
+                     :from-end t
+                     :initial-value nil)))))
+
+         (_ `(,op ,@as)))))
+
+    ;; < fo-atomic-formulap >
+    (_ f)))
+
+(assertf #'fo-simplify-const '(and x y t) '(and x y))
+(assertf #'fo-simplify-const '(or x y t) 't)
+(assertf #'fo-simplify-const '(and p t (foo t nil) q) '(and p (foo t nil) q))
+(assertf #'fo-simplify-const '(iff t nil p q) '(iff nil p q))
+(assertf #'fo-simplify-const '(iff nil p) '(not p))
+(assertf #'fo-simplify-const '(not (not p)) '(not (not p)))
+(assertf #'fo-simplify-const '(not (iff (iff) (or) q)) '(not (iff (or) q)))
+
+(assertf #'fo-simplify-const '(and (p x) t (q t y) (q y z)) '(and (p x) (q t y) (q y z)))
+(assertf #'fo-simplify-const '(and (p x) t (q t y) nil) 'nil)
+
+(assertf #'fo-simplify-const '(forall (x y) (and (p x) t (q t y) (q y z))) '(forall (x y) (and (p x) (q t y) (q y z))))
+(assertf #'fo-simplify-const '(exists (x y) (and (p x) t (q t y) nil)) '(exists (x y) nil))
+
+(defun fo-simplify-flatten (f)
+  (match f
+    ;; < quant-fo-formulap >
+    ((list (guard q (fo-quantifierp q)) vars body)
+     `(,q ,vars ,(fo-simplify-flatten body)))
+
+    ;; < p-fo-formulap >
+    ((list* (guard op (p-funp op)) op as)
+     (let* ((pop (key-alist->val op *p-ops*))
+            (arity (key-list->val :arity pop)))
+       (cond ((== arity '-)
+              (let ((sz (len as)))
+                (cond ((== sz 0) (key-list->val :identity pop))
+                      ((== sz 1) (car as))
+                      (t `(,op
+                           ,@(reduce
+                              #'(lambda (a as)
+                                  (match a
+                                      ((list* op0 bs)
+                                       (if (== op op0)
+                                           `(,@bs ,@as)
+                                           `(,a ,@as)))
+                                    (_ `(,a ,@as))))
+                              (mapcar #'fo-simplify-flatten as)
+                              :from-end t
+                              :initial-value nil))))))
+             (t `(,op ,@(mapcar #'fo-simplify-flatten as))))))
+
+    ;; < fo-atomic-formulap >
+    (_ f)))
+
+(assertf #'fo-simplify-flatten '(not (foo x)) '(not (foo x)))
+(assertf #'fo-simplify-flatten '(and p q (and r s) (or u v)) '(and p q r s (or u v)))
+(assertf #'fo-simplify-flatten '(not (not p)) '(not (not p)))
+(assertf #'fo-simplify-flatten '(not (iff (iff) (and) (or) q)) '(not (iff t t nil q)))
+
+(assertf #'fo-simplify-flatten '(and (p c) (= c '1) (and (r) (s) (or (r1) (r2)))) '(and (p c) (= c '1) (r) (s) (or (r1) (r2))))
+(assertf #'fo-simplify-flatten '(and) 't)
+(assertf #'fo-simplify-flatten '(and p q (and r s)) '(and p q r s))
+
+(defun fo-simplify-sink-free (f)
+  ...)
+
+(defun fo-simplify-not (f)
+  (match f
+    ;; < quant-fo-formulap >
+    ((list (guard q (fo-quantifierp q)) vars body)
+     `(,q ,vars ,(fo-simplify-not body)))
+
+    ;; < p-fo-formulap >
+    ((list 'not f)
+     (match f
+       ((list 'not b) (fo-simplify-not b))
+       (_ `(not ,(fo-simplify-not f)))))
+
+    ((list* (guard op (p-funp op)) fs)
+     `(,op ,@(mapcar #'fo-simplify-not fs)))
+
+    ;; < fo-atomic-formulap >
+    (_ f)))
+
+(assertf #'fo-simplify-not '(not (not p)) 'p)
+
+(defun fo-free-vars (f) ...)
+
+(defun fo-simplify-trivially-quantified (f) ...)
+
+(defun fo-simplify-fixpoint (f)
+  (let ((new-f (fo-simplify-const
+                (fo-simplify-not
+                 (fo-simplify-flatten f)))))
+    (if (equal new-f f)
+        f
+        (fo-simplify-fixpoint new-f))))
+
+(defun fo-simplify (f)
+  "Apply simplification to f.
+
+   Pre: (fo-formulap f)"
+  (fo-simplify-fixpoint
+   (fo-simplify-implies f)))
 
 #|
 
@@ -761,15 +965,15 @@ Examples
 
  (forall (...) matrix)
 
- where matrix is quantifier-free and in CNF. 
+ where matrix is quantifier-free and in CNF.
 
  The fewer quantified variables, the better.
  The fewer Skolem functions, the better.
  The smaller the arity of Skolem functions, the better.
  Having said that, correctness should be your primary consideration.
 
- Test your functions using at least 10 interesting formulas. 
- 
+ Test your functions using at least 10 interesting formulas.
+
 |#
 
 (defun simp-skolem-pnf-cnf (f) ...)
@@ -786,8 +990,8 @@ Examples
  An assignment is a list of conses, where car is a variable, the cdr
  is a term and the variables (in the cars) are unique.
 
- Test your functions using at least 10 interesting inputs. 
- 
+ Test your functions using at least 10 interesting inputs.
+
 |#
 
 (defun unify (l) ...)
@@ -830,4 +1034,3 @@ Examples
 |#
 
 (defun fo-val (f) ...)
-
