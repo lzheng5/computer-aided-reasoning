@@ -785,6 +785,17 @@ Examples
   (mapc #'(lambda (tm) (term-vars tm vars)) terms)
   vars)
 
+(defun subst-term (tm var-map) 
+  "Substitute variables in tm according to var-map, which is an alist mapping variables to terms"
+  (match tm
+    ((satisfies constant-symbolp) tm)
+    ((satisfies variable-symbolp) (or (get-alist tm var-map) tm))
+    ((satisfies quotep) tm)
+    ((satisfies constant-objectp) tm)
+    ((list* F args)
+     `(,F ,@(mapcar #'(lambda (a) (subst-term a var-map)) args)))
+    (_ tm)))
+
 ;;; ============================================================
 ;;; Hash Set API - Simple set abstraction over hash tables
 ;;; ============================================================
@@ -804,6 +815,10 @@ Examples
 (defun hash-set-size (set)
   "Return number of elements in hash set"
   (hash-table-count set))
+
+(defun hash-set-empty? (set)
+  "Check if hash set is empty"
+  (= (hash-set-size set) 0))
 
 (defun hash-set-map (fn set)
   "Apply function fn to each element in set"
@@ -1320,6 +1335,11 @@ Examples
   (fo-simplify-fixpoint
    (fo-preprocess f)))
 
+;; Preprocessing 
+(assertf #'fo-simplify '(implies a b) '(or (not a) b))
+(assertf #'fo-simplify '(forall x (P y z)) '(forall (x) (P y z)))
+
+;; Simplification 
 ;; 1. Implies with constants simplifies
 (assertf #'fo-simplify '(implies t nil) 'nil)
 ;; 2. Vacuous quantifier dropped
@@ -1394,15 +1414,23 @@ Examples
                     `(or (and ,(walk a nil) ,(walk b nil))
                          (and ,(walk a t) ,(walk c nil)))))
 
-               ;; iff (n-ary): (or (and all) (and (not all)))
+               ;; iff: ACL2s defines n-ary iff as right-fold, so we reduce to binary
+               ;; chains before applying the binary iff NNF rule.
+               ;; binary (iff p q):
+               ;;   positive: (or (and p q) (and (not p) (not q)))
+               ;;   negated:  (and (or (not p) (not q)) (or p q))
                ((list* 'iff args)
-                (let ((pos-args (mapcar (lambda (a) (walk a nil)) args))
-                      (neg-args (mapcar (lambda (a) (walk a t)) args)))
-                  (if neg
-                      ;; not (iff ...) = (and (or neg-args) (or pos-args))
-                      `(and (or ,@neg-args) (or ,@pos-args))
-                      ;; (iff ...) = (or (and pos-args) (and neg-args))
-                      `(or (and ,@pos-args) (and ,@neg-args)))))
+                (let ((binary (reduce (lambda (a acc) `(iff ,a ,acc))
+                                      args :from-end t)))
+                  (match binary
+                    ((list 'iff p q)
+                     (if neg
+                         `(and (or ,(walk p t) ,(walk q t))
+                               (or ,(walk p nil) ,(walk q nil)))
+                         `(or (and ,(walk p nil) ,(walk q nil))
+                              (and ,(walk p t) ,(walk q t)))))
+                    ;; single-element iff (degenerate after flatten): treat as identity
+                    (_ (walk binary neg)))))
 
                ;; and/or: de morgan
                ((list* 'and args)
@@ -1434,10 +1462,21 @@ Examples
 (assertf #'nnf '(not (and p q r)) '(or (not p) (not q) (not r)))
 ;; 7. De Morgan: not-or
 (assertf #'nnf '(not (or p q)) '(and (not p) (not q)))
-;; 8. iff elimination (n-ary, linear-size)
+;; 8. iff elimination (binary)
+;; (iff p q) -> (or (and p q) (and (not p) (not q)))
+(assertf #'nnf '(iff p q)
+         '(or (and p q) (and (not p) (not q))))
+;; 8b. n-ary iff is right-folded before NNF:
+;; (iff p q r) = (iff p (iff q r))
+;;   (iff q r) -> (or (and q r) (and (not q) (not r))) [call it B]
+;;   (iff p B) -> (or (and p B) (and (not p) (not B)))
+;;              = (or (and p (or (and q r) (and (not q) (not r))))
+;;                   (and (not p) (and (or (not q) (not r)) (or q r))))
 (assertf #'nnf '(iff p q r)
-         '(or (and p q r) (and (not p) (not q) (not r))))
-;; 9. not-iff
+         '(or (and p (or (and q r) (and (not q) (not r))))
+              (and (not p) (and (or (not q) (not r)) (or q r)))))
+;; 9. not-iff: (not (iff p q)) = (and (or (not p) q) (or p (not q)))
+;;    i.e. p XOR q
 (assertf #'nnf '(not (iff p q))
          '(and (or (not p) (not q)) (or p q)))
 ;; 10. forall: quantifier preserved
@@ -1452,9 +1491,16 @@ Examples
 ;; 13. if eliminated
 (assertf #'nnf '(if a b c)
          '(or (and a b) (and (not a) c)))
-;; 14. nested iff — exponential blowup example:
-;;     (iff (iff a b) (iff c d)) produces 4 args at depth-2,
-;;     each pos-branch and neg-branch duplicates both sub-iff expansions
+;; 14. nested iff — exponential blowup:
+;;     (iff (iff a b) (iff c d))
+;;     Right-fold: it's already binary — p=(iff a b), q=(iff c d)
+;;     positive: (or (and P Q) (and (not P) (not Q))), substituting nnf of p and q:
+;;       P_pos = (or (and a b) (and (not a) (not b)))
+;;       Q_pos = (or (and c d) (and (not c) (not d)))
+;;       P_neg = (and (or (not a) (not b)) (or a b))
+;;       Q_neg = (and (or (not c) (not d)) (or c d))
+;;     result: (or (and P_pos Q_pos) (and P_neg Q_neg))
+;; Each sub-iff is duplicated once => 2x blowup at each nesting level
 (assertf #'nnf '(iff (iff a b) (iff c d))
          '(or (and (or (and a b) (and (not a) (not b)))
                    (or (and c d) (and (not c) (not d))))
@@ -1493,25 +1539,155 @@ Examples
    New function symbols generated have prefix SK.
 
    Pre: f is in NNF."
-  ...)
+  (labels
+      ((walk (f forall-vars exists-map)
+         "forall-vars: universally quantified variables currently in scope (outermost first).
+          exists-map: alist mapping existential variable -> its full Skolem term."
+         (match f
+           ;; < quant-fo-formulap >
+           ((list (guard q (fo-quantifierp q)) vars body)
+            (cond
+              ;; universal: extend scope and recurse
+              ((eq q 'forall)
+               `(forall ,vars ,(walk body (append vars forall-vars) exists-map)))
+              ;; existential: build Skolem terms capturing current forall-vars,
+              ((eq q 'exists)              
+               (let ((new-exist-map
+                       (reduce (lambda (m v)
+                                 (acons v `(,(genvar "SK") ,@forall-vars) m))
+                               vars
+                               :initial-value exists-map)))
+                 (walk body forall-vars new-exist-map)))))
 
+           ;; < p-fo-formulap >
+           ((type boolean) f)
+           ((list* (guard op (p-funp op)) fs)
+            `(,op ,@(mapcar (lambda (x) (walk x forall-vars exists-map)) fs)))
+
+           ;; < fo-atomic-formulap >
+           ((list* R args)
+            `(,R ,@(mapcar (lambda (a) (subst-term a exists-map)) args))))))
+    (walk f nil nil)))
+
+;; TODO: perform pnf before skolemization to minimize Skolem function arity and number of Skolem functions
 (defun pnf (f)
   "Convert f to prenex normal form. 
   
-   Pre: f has been skolemized."
-  ...)
+   Pre: f has been simplified and skolemized."
+   ;; TODO: use alist instead of hash-set to preserve variable ordering in forall quantifiers, which may help with readability and downstream processing.
+  (labels ((walk (f bound-vars)
+             "Walk f, collect all forall-bound variables into bound-vars (mutated), strip quantifiers."
+             (match f
+               ;; < quant-fo-formulap >
+               ((list (guard q (fo-quantifierp q)) vars body)
+                (mapc (lambda (v) (hash-set-add bound-vars v)) vars)
+                (walk body bound-vars))
+
+               ;; < p-fo-formulap >
+               ((type boolean) f)
+               ((list* (guard op (p-funp op)) fs)
+                `(,op ,@(mapcar (lambda (x) (walk x bound-vars)) fs)))
+
+               ;; < fo-atomic-formulap >
+               (_ f))))
+    (let* ((bound-vars (make-hash-set))
+           (new-f (walk f bound-vars)))
+      (if (hash-set-empty? bound-vars)
+          new-f
+          `(forall ,(hash-set->list bound-vars) ,new-f)))))
+
+(defun tseitin-op (v op args)
+  "Generate CNF clauses: v ↔ (op args...)"
+  (case op
+    (not
+     (let ((a (car args)))
+       `((or ,v ,a)
+         (or (not ,v) (not ,a)))))
+
+    (and
+     ;; v ↔ (a1 ∧ ... ∧ an)
+     ;; (¬v ∨ a1) ∧ ... ∧ (¬v ∨ an) ∧ (v ∨ ¬a1 ∨ ... ∨ ¬an)
+     (append
+      (mapcar #'(lambda (a) `(or (not ,v) ,a)) args)
+      `((or ,v ,@(mapcar #'(lambda (a) `(not ,a)) args)))))
+
+    (or
+     ;; v ↔ (a1 ∨ ... ∨ an)
+     ;; (¬v ∨ a1 ∨ ... ∨ an) ∧ (v ∨ ¬a1) ∧ ... ∧ (v ∨ ¬an)
+     (append
+      `((or (not ,v) ,@args))
+      (mapcar #'(lambda (a) `(or ,v (not ,a))) args)))
+
+    (otherwise
+     (error "Unknown operator in Tseitin: ~A" op))))
+
+(defun tseitin-transform (f)
+  "Transform unquantified NNF formula f to CNF using Tseitin transformation.
+   Returns CNF as (and clause1 clause2 ...)"
+  (let ((clauses nil))
+    (labels ((transform-subf (subf)
+               "Transform subformula; return a 0-arity predicate (TSn) as its representative.
+                TSn starts with T so it is a function symbol, not a variable symbol (TSn) is valid FO."
+               (match subf
+                 ;; < p-fo-formulap >
+                 ((type boolean) subf)
+                 ((list* (guard op (p-funp op)) args)
+                  (let* ((arg-vars (mapcar #'transform-subf args))
+                         (v `(,(genvar "TS")))  ; 0-arity predicate application: (TS0), (TS1), ...
+                         (new-clauses (tseitin-op v op arg-vars)))
+                    (setf clauses (append new-clauses clauses))
+                    v))
+
+                  ;; < fo-atomic-formulap >
+                  (_ subf))))
+      (match f
+        ;; < p-fo-formulap >
+        ((type boolean) f)
+
+        ;; (and ...) = each conjunct must hold independently
+        ((list* 'and args)
+         (dolist (arg args)
+           (let ((top-var (transform-subf arg)))
+             ;; top-var is (TSn) � already a valid 0-arity atomic unit clause
+             (push top-var clauses)))
+         `(and ,@(reverse clauses)))
+
+        ;; any other propositional formula: introduce one top-level Tseitin var
+        ((list* (guard op (p-funp op)) args)
+         (let ((top-var (transform-subf f)))
+           ;; top-var is (TSn) � already a valid 0-arity atomic unit clause
+           (push top-var clauses)
+           `(and ,@(reverse clauses))))
+
+        ;; < fo-atomic-formulap >: already a unit clause
+        (_ f)))))
+
+(defun tseitin (f) 
+  "Convert f to CNF using Tseitin transformation. 
+   Returns CNF as (and clause1 clause2 ...)
+   
+   Pre: f has been simplified, skolemized, and is in prenex normal form."
+  
+  (match f
+    ;; < quant-fo-formulap >
+    ((list (guard q (fo-quantifierp q)) vars body)
+     (dassert (eq q 'forall) "Only universal quantifiers should remain after skolemization and prenex normal form conversion")
+     `(forall ,vars ,(tseitin-transform body)))
+
+    (_ (tseitin-transform f))))
 
 (defun simp-skolem-pnf-cnf (f) 
   "Apply simplification, skolemization, prenex normal form conversion, and CNF transformation to f.
 
    Pre: (fo-formulap f)"
   (dassert (fo-formulap f) "Input must be a FO formula")
-  (let ((simp (fo-simplify f)))
-    (let ((nnf (nnf simp)))
-      (let ((skolem (skolemize nnf)))
-        (let ((prenex (pnf skolem))
-              (cnf (cnf prenex)))
-          cnf)))))
+
+  (let* ((simp   (fo-simplify f))
+         (nnf-f  (nnf simp))
+         (skolem (skolemize nnf-f))
+         (prenex (pnf skolem))
+         (cnf    (tseitin prenex)))
+    cnf))
 
 ;; Some example problems
 (defconstant *mortal* '(and (forall x (implies (man x) (mortal x)))
@@ -1523,7 +1699,40 @@ Examples
                          (pet c0)
                          (not (forall w (not (kind w))))))
 
-;; TODO: add more tests to actually test simp-skolem-pnf-cnf output is expected
+;; TODO: remove numbering in test comments
+
+;; 9. Atomic formula: passthrough, wrapped in (and ...)
+(assertv #'simp-skolem-pnf-cnf '(P x) '(P x))
+
+;; 10. Conjunction of atomics: each conjunct pushed as unit clause, no new vars
+(assertv #'simp-skolem-pnf-cnf '(and (P x) (Q x)) '(and (P x) (Q x)))
+
+;; 11. Disjunction: Tseitin introduces (TS0), definitional clauses
+;; (TS0) <-> (P x) v (Q x):
+;;   unit: (TS0)
+;;   forward: (or (not (TS0)) (P x) (Q x))
+;;   backward: (or (TS0) (not (P x))), (or (TS0) (not (Q x)))
+(assertv #'simp-skolem-pnf-cnf '(or (P x) (Q x))
+         '(and (TS0)
+               (or (not (TS0)) (P x) (Q x))
+               (or (TS0) (not (P x)))
+               (or (TS0) (not (Q x)))))
+
+;; 12. Negated atomic: (TS0) <-> (not (P x)):
+;;   unit: (TS0)
+;;   (or (TS0) (P x)), (or (not (TS0)) (not (P x)))
+(assertv #'simp-skolem-pnf-cnf '(not (P x))
+         '(and (TS0)
+               (or (TS0) (P x))
+               (or (not (TS0)) (not (P x)))))
+
+;; 13. 0-arity Skolem: (exists (y) (R c0 y)) => y -> (SK0), no quantifier in result
+(assertv #'simp-skolem-pnf-cnf '(exists (y) (R c0 y))
+         '(and (R c0 (SK0))))
+
+;; 14. 1-arity Skolem: (forall (x) (exists (y) (R x y))) => y -> (SK0 x)
+(assertv #'simp-skolem-pnf-cnf '(forall (x) (exists (y) (R x y)))
+         '(forall (x) (and (R x (SK0 x)))))
 
 (defun literalp (l)
   (match l
@@ -1566,7 +1775,6 @@ Examples
 (assert (pnf-cnf-p (simp-skolem-pnf-cnf
                     '(forall (x) (implies (and (P x) (Q x))
                                           (exists (y) (R x y)))))))
-
 
 #|
 
