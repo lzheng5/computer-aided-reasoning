@@ -855,6 +855,29 @@ Examples
   (loop for i from 0 below n
         collect (genvar prefix)))
 
+(defun assertv (f in out)
+  (let ((*var-gen-cnt* 0))
+    (assertf f in out)))
+
+;;; ============================================================
+;;; Debug and Stats
+;;; ============================================================
+
+;; Mode: 'debug | 'stats | nil (default)
+;; Note if we changed this, we should reload the file to recompile the definitions to include debugging/stats information
+(defconstant +debug-mode+ 'debug)
+
+(defmacro dbg (fmt &rest args)
+  "Print debug message when +debug-mode+ is 'debug"
+  `(when (eq +debug-mode+ 'debug)
+     (pprint (format nil ,fmt ,@args))))
+
+(defmacro dassert (test-form &optional format-string &rest format-args)
+  "Assert that TEST-FORM is true, but only when +debug-mode+ is 'debug.
+   If TEST-FORM is false and debug mode is enabled, signals an error with the optional message."
+  `(when (eq +debug-mode+ 'debug)
+     (assert ,test-form () ,@(when format-string (list* format-string format-args)))))
+
 ;;; ============================================================
 ;;; Preprocessing 
 ;;; ============================================================
@@ -1264,8 +1287,8 @@ Examples
 
     ;; < p-fo-formulap >
     ((type boolean) f)
-    ((list* (guard op (p-funp op)) fs)
-     `(,op ,@(mapcar #'fo-simplify-partial-eval fs)))
+     ((list* (guard op (p-funp op)) fs)
+      `(,op ,@(mapcar #'fo-simplify-partial-eval fs)))
 
     ;; < fo-atomic-formulap >
     ((list* R args) 
@@ -1291,8 +1314,32 @@ Examples
   "Apply simplification to f.
 
    Pre: (fo-formulap f)"
+
+  (dassert (fo-formulap f) "Input must be a FO formula")
+
   (fo-simplify-fixpoint
    (fo-preprocess f)))
+
+;; 1. Implies with constants simplifies
+(assertf #'fo-simplify '(implies t nil) 'nil)
+;; 2. Vacuous quantifier dropped
+(assertf #'fo-simplify '(forall (x w) (P y z)) '(P y z))
+;; 3. Partially vacuous quantifier trimmed
+(assertf #'fo-simplify '(forall (x w) (P x y z)) '(forall (x) (P x y z)))
+;; 4. Double negation eliminated
+(assertf #'fo-simplify '(not (not (P x))) '(P x))
+;; 5. Sink: nil in and
+(assertf #'fo-simplify '(and (P x) nil (Q y)) 'nil)
+;; 6. Sink: t in or
+(assertf #'fo-simplify '(or (P x) t (Q y)) 't)
+;; 7. Flatten nested and
+(assertf #'fo-simplify '(and (P x) (and (Q y) (R z))) '(and (P x) (Q y) (R z)))
+;; 8. Duplicate elimination in and
+(assertf #'fo-simplify '(and (P x) (Q y) (P x)) '(and (P x) (Q y)))
+;; 9. Complementary pair in or => t
+(assertf #'fo-simplify '(or (P x) (not (P x))) 't)
+;; 10. Deep: quantifier + constants + implies
+(assertf #'fo-simplify '(forall (x y) (implies t (and (P x) nil))) 'nil)
 
 #|
 
@@ -1310,63 +1357,109 @@ Examples
 |#
 
 (defun nnf (f)
-  "Convert f to NNF. Eliminates implies, iff, if."
-  (nnf-aux f nil))  ; nil = not negated
+  "Convert f to NNF. Eliminates implies, iff, if.
+  
+   Pre: (fo-formulap f)"
 
-(defun nnf-aux (f neg)
-  "Convert f to NNF. neg = t means we're under a negation."
-  (match f    
-    ;; TODO: flip not exists => forall
-    ;; Quantifiers: (not (forall x P)) = (exists x (not P))
-    ((list (guard q (fo-quantifierp q)) vars body)
-     (let ((new-q (if neg (if (eq q 'forall) 'exists 'forall) q)))
-       `(,new-q ,vars ,(nnf-aux body neg))))
-    
-    ;; Booleans
-    ((type boolean) (if neg (not f) f))
-    
-    ;; not: flip the negation flag
-    ((list 'not a) (nnf-aux a (not neg)))
-    
-    ;; implies: p => q = (or (not p) q)
-    ((list 'implies p q)
-     (if neg
-         ;; not (p => q) = (and p (not q))
-         `(and ,(nnf-aux p nil) ,(nnf-aux q t))
-         `(or ,(nnf-aux p t) ,(nnf-aux q nil))))
-    
-    ;; (if a b c) = (or (and a b) (and (not a) c))
-    ;; (not (if a b c)) = (and (or (not a) (not b)) (or a (not c)))
-    ((list 'if a b c)
-     (if neg
-         `(and (or ,(nnf-aux a t) ,(nnf-aux b t))
-               (or ,(nnf-aux a nil) ,(nnf-aux c t)))
-         `(or (and ,(nnf-aux a nil) ,(nnf-aux b nil))
-              (and ,(nnf-aux a t) ,(nnf-aux c nil)))))
-    
-    ;; iff (n-ary): all same = (or (and all) (and (not all)))
-    ((list* 'iff args)
-     (let ((nnf-args (mapcar (lambda (a) (nnf-aux a nil)) args))
-           (nnf-neg-args (mapcar (lambda (a) (nnf-aux a t)) args)))
-       (if neg
-           ;; not (iff ...) = (and (or neg-args) (or args))
-           `(and (or ,@nnf-neg-args) (or ,@nnf-args))
-           ;; (iff ...) = (or (and args) (and neg-args))
-           `(or (and ,@nnf-args) (and ,@nnf-neg-args)))))
-    
-    ;; and/or: De Morgan
-    ((list* 'and args)
-     (if neg
-         `(or ,@(mapcar (lambda (a) (nnf-aux a t)) args))
-         `(and ,@(mapcar (lambda (a) (nnf-aux a nil)) args))))
-    
-    ((list* 'or args)
-     (if neg
-         `(and ,@(mapcar (lambda (a) (nnf-aux a t)) args))
-         `(or ,@(mapcar (lambda (a) (nnf-aux a nil)) args))))
-    
-    ;; Atomic formula
-    (_ (if neg `(not ,f) f))))
+  (dassert (fo-formulap f) "Input must be a FO formula")
+
+  (labels ((walk (f neg)
+             (match f
+               ;; < quant-fo-formulap >
+               ;; quantifiers: (not (forall x P)) = (exists x (not P))
+               ;;              (not (exists x P)) = (forall x (not P))
+               ((list (guard q (fo-quantifierp q)) vars body)
+                (let ((new-q (if neg (if (eq q 'forall) 'exists 'forall) q)))
+                  `(,new-q ,vars ,(walk body neg))))
+
+               ;; < p-fo-formulap >
+               ((type boolean) (if neg (not f) f))
+
+               ;; not: flip negation flag
+               ((list 'not a) (walk a (not neg)))
+
+               ;; implies: p => q = (or (not p) q)
+               ((list 'implies p q)
+                (if neg
+                    ;; not (p => q) = (and p (not q))
+                    `(and ,(walk p nil) ,(walk q t))
+                    `(or ,(walk p t) ,(walk q nil))))
+
+               ;; if: (if a b c) = (or (and a b) (and (not a) c))
+               ;;     (not (if a b c)) = (and (or (not a) (not b)) (or a (not c)))
+               ((list 'if a b c)
+                (if neg
+                    `(and (or ,(walk a t) ,(walk b t))
+                          (or ,(walk a nil) ,(walk c t)))
+                    `(or (and ,(walk a nil) ,(walk b nil))
+                         (and ,(walk a t) ,(walk c nil)))))
+
+               ;; iff (n-ary): (or (and all) (and (not all)))
+               ((list* 'iff args)
+                (let ((pos-args (mapcar (lambda (a) (walk a nil)) args))
+                      (neg-args (mapcar (lambda (a) (walk a t)) args)))
+                  (if neg
+                      ;; not (iff ...) = (and (or neg-args) (or pos-args))
+                      `(and (or ,@neg-args) (or ,@pos-args))
+                      ;; (iff ...) = (or (and pos-args) (and neg-args))
+                      `(or (and ,@pos-args) (and ,@neg-args)))))
+
+               ;; and/or: de morgan
+               ((list* 'and args)
+                (if neg
+                    `(or ,@(mapcar (lambda (a) (walk a t)) args))
+                    `(and ,@(mapcar (lambda (a) (walk a nil)) args))))
+
+               ((list* 'or args)
+                (if neg
+                    `(and ,@(mapcar (lambda (a) (walk a t)) args))
+                    `(or ,@(mapcar (lambda (a) (walk a nil)) args))))
+
+               ;; < fo-atomic-formulap >
+               (_ (if neg `(not ,f) f)))))
+    (walk f nil)))
+
+;; Test cases generated by Claude
+;; 1. Basic: atomic pass-through
+(assertf #'nnf '(P x y) '(P x y))
+;; 2. Simple not: pushed in
+(assertf #'nnf '(not (P x y)) '(not (P x y)))
+;; 3. Double negation eliminated
+(assertf #'nnf '(not (not (P x))) '(P x))
+;; 4. implies eliminated
+(assertf #'nnf '(implies p q) '(or (not p) q))
+;; 5. not-implies
+(assertf #'nnf '(not (implies p q)) '(and p (not q)))
+;; 6. De Morgan: not-and
+(assertf #'nnf '(not (and p q r)) '(or (not p) (not q) (not r)))
+;; 7. De Morgan: not-or
+(assertf #'nnf '(not (or p q)) '(and (not p) (not q)))
+;; 8. iff elimination (n-ary, linear-size)
+(assertf #'nnf '(iff p q r)
+         '(or (and p q r) (and (not p) (not q) (not r))))
+;; 9. not-iff
+(assertf #'nnf '(not (iff p q))
+         '(and (or (not p) (not q)) (or p q)))
+;; 10. forall: quantifier preserved
+(assertf #'nnf '(forall (x) (implies (P x) (Q x)))
+         '(forall (x) (or (not (P x)) (Q x))))
+;; 11. not-forall flips to exists
+(assertf #'nnf '(not (forall (x) (P x)))
+         '(exists (x) (not (P x))))
+;; 12. not-exists flips to forall
+(assertf #'nnf '(not (exists (x) (P x)))
+         '(forall (x) (not (P x))))
+;; 13. if eliminated
+(assertf #'nnf '(if a b c)
+         '(or (and a b) (and (not a) c)))
+;; 14. nested iff — exponential blowup example:
+;;     (iff (iff a b) (iff c d)) produces 4 args at depth-2,
+;;     each pos-branch and neg-branch duplicates both sub-iff expansions
+(assertf #'nnf '(iff (iff a b) (iff c d))
+         '(or (and (or (and a b) (and (not a) (not b)))
+                   (or (and c d) (and (not c) (not d))))
+              (and (and (or (not a) (not b)) (or a b))
+                   (and (or (not c) (not d)) (or c d)))))
 
 #|
 
@@ -1395,7 +1488,84 @@ Examples
 
 |#
 
-(defun simp-skolem-pnf-cnf (f) ...)
+(defun skolemize (f) 
+  "Skolemize f. 
+   New function symbols generated have prefix SK.
+
+   Pre: f is in NNF."
+  ...)
+
+(defun pnf (f)
+  "Convert f to prenex normal form. 
+  
+   Pre: f has been skolemized."
+  ...)
+
+(defun simp-skolem-pnf-cnf (f) 
+  "Apply simplification, skolemization, prenex normal form conversion, and CNF transformation to f.
+
+   Pre: (fo-formulap f)"
+  (dassert (fo-formulap f) "Input must be a FO formula")
+  (let ((simp (fo-simplify f)))
+    (let ((nnf (nnf simp)))
+      (let ((skolem (skolemize nnf)))
+        (let ((prenex (pnf skolem))
+              (cnf (cnf prenex)))
+          cnf)))))
+
+;; Some example problems
+(defconstant *mortal* '(and (forall x (implies (man x) (mortal x)))
+                            (man c0)
+                            (not (mortal c0))))
+
+(defconstant *pet* '(and (forall x (implies (pet x) (exists y (cares y x))))
+                         (forall (y z) (implies (and (pet z) (cares y z)) (kind y)))
+                         (pet c0)
+                         (not (forall w (not (kind w))))))
+
+;; TODO: add more tests to actually test simp-skolem-pnf-cnf output is expected
+
+(defun literalp (l)
+  (match l
+    ((list 'not a) (let+ (((&values ok) (fo-atomic-formulap a nil nil))) ok))
+    (_ (let+ (((&values ok) (fo-atomic-formulap l nil nil))) ok))))
+
+(defun cnf-clausep (c)
+  (match c
+    ((type boolean) t)
+    ((list* 'or lits) (every #'literalp lits))
+    (_ (literalp c))))
+
+(defun cnf-matrixp (f)
+  (match f
+    ((type boolean) t)
+    ((list* 'and clauses) (every #'cnf-clausep clauses))
+    (_ (cnf-clausep f))))
+
+(defun pnf-cnf-p (f)
+  "check that result is (forall (...) cnf-matrix) or cnf-matrix"
+  (match f
+    ((list 'forall vars body) (cnf-matrixp body))
+    (_ (cnf-matrixp f))))
+
+;; 1. Simple propositional implies
+(assert (pnf-cnf-p (simp-skolem-pnf-cnf '(implies p q))))
+;; 2. Already propositional CNF
+(assert (pnf-cnf-p (simp-skolem-pnf-cnf '(and (or p q) (or (not p) r)))))
+;; 3. Tautology
+(assert (pnf-cnf-p (simp-skolem-pnf-cnf '(or p (not p)))))
+;; 4. Contradiction
+(assert (pnf-cnf-p (simp-skolem-pnf-cnf '(and p (not p)))))
+;; 5. Mortal Socrates
+(assert (pnf-cnf-p (simp-skolem-pnf-cnf *mortal*)))
+;; 6. Pet example
+(assert (pnf-cnf-p (simp-skolem-pnf-cnf *pet*)))
+;; 7. iff with quantifiers
+(assert (pnf-cnf-p (simp-skolem-pnf-cnf '(forall (x) (iff (P x) (Q x))))))
+;; 8. Deeply nested: implies + quantifiers
+(assert (pnf-cnf-p (simp-skolem-pnf-cnf
+                    '(forall (x) (implies (and (P x) (Q x))
+                                          (exists (y) (R x y)))))))
 
 
 #|
