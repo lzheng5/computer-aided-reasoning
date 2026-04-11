@@ -1709,8 +1709,6 @@ Examples
                          (pet c0)
                          (not (forall w (not (kind w))))))
 
-
-
 ;; Atomic formula: passthrough, wrapped in (and ...)
 (assertv #'simp-skolem-pnf-cnf '(P x) '(P x))
 
@@ -1801,7 +1799,89 @@ Examples
 
 |#
 
-(defun unify (l) ...)
+(defun occurs-in (var term)
+  "Returns t if variable var appears anywhere in term."
+  (match term 
+     ((satisfies constant-symbolp) nil)
+     ((satisfies variable-symbolp) (eql var term))
+     ((satisfies quotep) nil)
+     ((satisfies constant-objectp) nil)
+     ((list* F args) (some (lambda (a) (occurs-in var a)) args))
+     (_ nil)))
+
+(defun unify (l)
+  "Given a non-empty list of term pairs (conses (s . t)), return an MGU
+   alist mapping variables to terms, or 'fail if no unifier exists.
+   Uses Robinson's algorithm with occurs check."
+  (let ((eqs (copy-list l))
+        (sigma nil))
+    (loop
+      (when (null eqs) (return sigma))
+      (let* ((pair (pop eqs))
+             (s (subst-term (car pair) sigma))
+             (u (subst-term (cdr pair) sigma)))
+        (cond
+          ;; Already equal: nothing to do
+          ((equal s u) nil)
+          ;; s is a variable: bind s -> u
+          ((variable-symbolp s)
+           (when (occurs-in s u) (return 'fail))
+           (let ((b (list (cons s u))))
+             (setf sigma (mapcar (lambda (e) (cons (car e) (subst-term (cdr e) b))) sigma))
+             (push (cons s u) sigma)))
+          ;; u is a variable: bind u -> s
+          ((variable-symbolp u)
+           (when (occurs-in u s) (return 'fail))
+           (let ((b (list (cons u s))))
+             (setf sigma (mapcar (lambda (e) (cons (car e) (subst-term (cdr e) b))) sigma))
+             (push (cons u s) sigma)))
+          ;; Both compound terms with same functor and arity: decompose
+          ((and (consp s) (consp u)
+                (eq (car s) (car u))
+                (= (length (cdr s)) (length (cdr u))))
+           (setf eqs (append (mapcar #'cons (cdr s) (cdr u)) eqs)))
+          ;; Otherwise: clash
+          (t (return 'fail)))))))
+
+(defun mgu-valid? (l sigma)
+  "Returns t if applying sigma to both sides of each pair in l yields equal terms."
+  (every (lambda (pair)
+           (equal (subst-term (car pair) sigma)
+                  (subst-term (cdr pair) sigma)))
+         l))
+
+;; Trivial: single variable unified with a constant
+(assertf #'unify '((x . c0)) '((x . c0)))
+;; Identical constants: empty substitution
+(assertf #'unify '((c0 . c0)) nil)
+;; Constant clash: fail
+(assertf #'unify '((c0 . c1)) 'fail)
+;; Variable unified with a function term
+(assertf #'unify '((x . (f c0))) '((x . (f c0))))
+;; Two variables unified
+(assertf #'unify '((x . y)) '((x . y)))
+;; Function term decomposed to single variable binding
+(assertf #'unify '(((f x) . (f c0))) '((x . c0)))
+;; Occurs check: x cannot unify with (f x)
+(assertf #'unify '((x . (f x))) 'fail)
+;; Different functor heads: fail
+(assertf #'unify '(((f x) . (g x))) 'fail)
+;; Two-arg decomposition
+(assertf #'unify '(((f x y) . (f c0 c1))) '((y . c1) (x . c0)))
+;; Chain: x=y, y=c0 -> both x and y bound to c0
+(assertf #'unify '((x . y) (y . c0)) '((y . c0) (x . c0)))
+;; Cross-pair: two pairs that share a variable are consistent
+(assertf #'unify '(((f x) . (f y)) (x . c0)) '((y . c0) (x . c0)))
+;; Complex: nested function term
+;; (f (g x) y) = (f (g c0) c1) -> x=c0, y=c1
+(assert (let ((sigma (unify '(((f (g x) y) . (f (g c0) c1))))))
+          (and (not (eq sigma 'fail))
+               (mgu-valid? '(((f (g x) y) . (f (g c0) c1))) sigma))))
+;; Most general: (f x y) = (f y x) -> x=y (no occurs issue)
+;; bind x->y: sigma=((x.y)), then (y.x) -> apply sigma: y=y, x->y gives y=y, equal. done
+(assertf #'unify '(((f x y) . (f y x))) '((x . y)))
+;; Arity mismatch: fail
+(assertf #'unify '(((f x) . (f c0 c1))) 'fail)
 
 #|
 
