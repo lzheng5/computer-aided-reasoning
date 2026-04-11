@@ -534,7 +534,8 @@ t := <constant symbol>
    | (<f-symbol> t1 ... tn)
 a := (<R-symbol> t1 ... tn)
    | (= t1 t2)
-p := (<p-op> f1 ... fn)
+p := <bool> 
+   | (<p-op> f1 ... fn)
 f := a | p
    | (<fo-quant> xs f)
 
@@ -867,6 +868,7 @@ Examples
       `(,q ,vars ,(fo-cannonicalize-quant-vars body))))
     
     ;; < p-fo-formulap >    
+    ((type boolean) f)
     ((list* (guard op (p-funp op)) args)
      `(,op ,@(mapcar #'fo-cannonicalize-quant-vars args)))
     
@@ -884,10 +886,10 @@ Examples
      (labels ((rename-vars (vars bound var-map)
                 (let ((new-vars (mapcar #'(lambda (var) 
                                               (if (in var bound)
-                                                (let ((new-var (genvar "U")))
-                                                  (setf var-map (acons var new-var var-map))
-                                                  new-var)
-                                              var))
+                                                  (let ((new-var (genvar "U")))
+                                                    (setf var-map (acons var new-var var-map))
+                                                    new-var)
+                                                  var))
                                   vars)))
                     (values new-vars var-map)))
               (rename-term (tm var-map)
@@ -910,13 +912,14 @@ Examples
                      `(,q ,new-vars ,(rename body (append new-vars bound) new-var-map))))
                   
                   ;; < p-fo-formulap >
+                  ((type boolean) f)
                   ((list* (guard op (p-funp op)) fs)
                    `(,op ,@(mapcar #'(lambda (f) (rename f bound var-map)) fs)))
 
                   ;; < fo-atomic-formulap >
                   ((list* R ts)  
                     `(,R ,@(mapcar #'(lambda (tm) (rename-term tm var-map)) ts)))))
-       (rename f nil nil))))
+       (rename f nil nil)))))
 
 (defun fo-simplify-implies (f)
   (match f
@@ -925,6 +928,7 @@ Examples
      `(,q ,vars ,(fo-simplify-implies body)))
 
     ;; < p-fo-formulap >
+    ((type boolean) f)
     ((list 'implies p q)
      (let ((sp (fo-simplify-implies p))
            (sq (fo-simplify-implies q)))
@@ -962,6 +966,8 @@ Examples
      `(,q ,vars ,(fo-simplify-const body)))
 
     ;; < p-fo-formulap >
+    ((type boolean) f)
+
     ((list 'not a)
      (let ((a (fo-simplify-const a)))
        (match a
@@ -1042,6 +1048,7 @@ Examples
      `(,q ,vars ,(fo-simplify-flatten body)))
 
     ;; < p-fo-formulap >
+    ((type boolean) f)
     ((list* (guard op (p-funp op)) as)
      (let* ((pop (key-alist->val op *p-ops*))
             (arity (key-list->val :arity pop)))
@@ -1087,6 +1094,8 @@ Examples
      `(,q ,vars ,(fo-simplify-not body)))
 
     ;; < p-fo-formulap >
+    ((type boolean) f)
+
     ((list 'not f)
      (match f
        ((list 'not b) (fo-simplify-not b))
@@ -1112,6 +1121,7 @@ Examples
      `(,q ,vars ,(fo-simplify-dup body)))
 
     ;; < p-fo-formulap >
+    ((type boolean) f)
     ((list* (guard op (p-funp op)) as)
      (let ((as (mapcar #'fo-simplify-dup as)))
         (cond
@@ -1207,6 +1217,7 @@ Examples
                         (values `(,q ,used ,new-body) new-fvars)))))
 
                ;; < p-fo-formulap >
+               ((type boolean) (values f (make-hash-set)))
                ((list* (guard op (p-funp op)) fs)
                 (let ((all-fvars (make-hash-set))
                       (new-fs (loop for sub in fs
@@ -1252,6 +1263,7 @@ Examples
      `(,q ,vars ,(fo-simplify-partial-eval body)))
 
     ;; < p-fo-formulap >
+    ((type boolean) f)
     ((list* (guard op (p-funp op)) fs)
      `(,op ,@(mapcar #'fo-simplify-partial-eval fs)))
 
@@ -1297,7 +1309,64 @@ Examples
 
 |#
 
-(defun nnf (f) ...)
+(defun nnf (f)
+  "Convert f to NNF. Eliminates implies, iff, if."
+  (nnf-aux f nil))  ; nil = not negated
+
+(defun nnf-aux (f neg)
+  "Convert f to NNF. neg = t means we're under a negation."
+  (match f    
+    ;; TODO: flip not exists => forall
+    ;; Quantifiers: (not (forall x P)) = (exists x (not P))
+    ((list (guard q (fo-quantifierp q)) vars body)
+     (let ((new-q (if neg (if (eq q 'forall) 'exists 'forall) q)))
+       `(,new-q ,vars ,(nnf-aux body neg))))
+    
+    ;; Booleans
+    ((type boolean) (if neg (not f) f))
+    
+    ;; not: flip the negation flag
+    ((list 'not a) (nnf-aux a (not neg)))
+    
+    ;; implies: p => q = (or (not p) q)
+    ((list 'implies p q)
+     (if neg
+         ;; not (p => q) = (and p (not q))
+         `(and ,(nnf-aux p nil) ,(nnf-aux q t))
+         `(or ,(nnf-aux p t) ,(nnf-aux q nil))))
+    
+    ;; (if a b c) = (or (and a b) (and (not a) c))
+    ;; (not (if a b c)) = (and (or (not a) (not b)) (or a (not c)))
+    ((list 'if a b c)
+     (if neg
+         `(and (or ,(nnf-aux a t) ,(nnf-aux b t))
+               (or ,(nnf-aux a nil) ,(nnf-aux c t)))
+         `(or (and ,(nnf-aux a nil) ,(nnf-aux b nil))
+              (and ,(nnf-aux a t) ,(nnf-aux c nil)))))
+    
+    ;; iff (n-ary): all same = (or (and all) (and (not all)))
+    ((list* 'iff args)
+     (let ((nnf-args (mapcar (lambda (a) (nnf-aux a nil)) args))
+           (nnf-neg-args (mapcar (lambda (a) (nnf-aux a t)) args)))
+       (if neg
+           ;; not (iff ...) = (and (or neg-args) (or args))
+           `(and (or ,@nnf-neg-args) (or ,@nnf-args))
+           ;; (iff ...) = (or (and args) (and neg-args))
+           `(or (and ,@nnf-args) (and ,@nnf-neg-args)))))
+    
+    ;; and/or: De Morgan
+    ((list* 'and args)
+     (if neg
+         `(or ,@(mapcar (lambda (a) (nnf-aux a t)) args))
+         `(and ,@(mapcar (lambda (a) (nnf-aux a nil)) args))))
+    
+    ((list* 'or args)
+     (if neg
+         `(and ,@(mapcar (lambda (a) (nnf-aux a t)) args))
+         `(or ,@(mapcar (lambda (a) (nnf-aux a nil)) args))))
+    
+    ;; Atomic formula
+    (_ (if neg `(not ,f) f))))
 
 #|
 
