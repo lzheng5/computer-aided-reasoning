@@ -920,6 +920,7 @@ Examples
    Pre: fo-cannonicalize-quant-vars has already been applied to f.
    Post: all bound variables in f are unique."
    
+   ;; TODO: remove var-gen-cnt binding here 
    (let ((*var-gen-cnt* 0))
      (labels ((rename-vars (vars bound var-map)
                 (let ((new-vars (mapcar #'(lambda (var) 
@@ -1607,7 +1608,8 @@ Examples
           `(forall ,(hash-set->list bound-vars) ,new-f)))))
 
 (defun tseitin-op (v op args)
-  "Generate CNF clauses: v ↔ (op args...)"
+  "Generate CNF clauses: v ↔ (op args...)
+   Pre: v is a 0-arity predicate application (TSe), op is a propositional operator, args are 0-arity predicate applications or boolean constants."
   (case op
     (not
      (let ((a (car args)))
@@ -1632,8 +1634,7 @@ Examples
      (error "Unknown operator in Tseitin: ~A" op))))
 
 (defun tseitin-transform (f)
-  "Transform unquantified NNF formula f to CNF using Tseitin transformation.
-   Returns CNF as (and clause1 clause2 ...)"
+  "Transform unquantified NNF formula f to CNF using Tseitin transformation"
   (let ((clauses nil))
     (labels ((transform-subf (subf)
                "Transform subformula; return a 0-arity predicate (TSn) as its representative.
@@ -1675,7 +1676,8 @@ Examples
 (defun tseitin (f) 
   "Convert f to CNF using Tseitin transformation. 
    Returns CNF as (and clause1 clause2 ...)
-   
+   New Tseitin variables generated have prefix TS. 
+
    Pre: f has been simplified, skolemized, and is in prenex normal form."
   
   (match f
@@ -1799,14 +1801,14 @@ Examples
 
 |#
 
-(defun occurs-in (var term)
+(defun occurs (var term)
   "Returns t if variable var appears anywhere in term."
   (match term 
      ((satisfies constant-symbolp) nil)
      ((satisfies variable-symbolp) (eql var term))
      ((satisfies quotep) nil)
      ((satisfies constant-objectp) nil)
-     ((list* F args) (some (lambda (a) (occurs-in var a)) args))
+     ((list* F args) (some (lambda (a) (occurs var a)) args))
      (_ nil)))
 
 (defun unify (l)
@@ -1825,13 +1827,13 @@ Examples
           ((equal s u) nil)
           ;; s is a variable: bind s -> u
           ((variable-symbolp s)
-           (when (occurs-in s u) (return 'fail))
+           (when (occurs s u) (return 'fail))
            (let ((b (list (cons s u))))
              (setf sigma (mapcar (lambda (e) (cons (car e) (subst-term (cdr e) b))) sigma))
              (push (cons s u) sigma)))
           ;; u is a variable: bind u -> s
           ((variable-symbolp u)
-           (when (occurs-in u s) (return 'fail))
+           (when (occurs u s) (return 'fail))
            (let ((b (list (cons u s))))
              (setf sigma (mapcar (lambda (e) (cons (car e) (subst-term (cdr e) b))) sigma))
              (push (cons u s) sigma)))
