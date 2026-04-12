@@ -1534,6 +1534,13 @@ Examples
 
  Test your functions using at least 10 interesting formulas.
 
+ CNF Matrix Form Syntax 
+
+ f := m | (forall (v1 ... vn) m)
+ m := <bool> | l 
+    | (and c1 ... cn)
+ c := l | (or l1 ... ln)
+
 |#
 
 (defun fo-rename (f)
@@ -1669,6 +1676,9 @@ Examples
                (match subf
                  ;; < p-fo-formulap >
                  ((type boolean) subf)
+                 ;; TODO: revisit 
+                 ;; already a literal: return as-is, no TS var needed
+                 ((satisfies literalp) subf)
                  ((list* (guard op (p-funp op)) args)
                   (let* ((arg-vars (mapcar #'transform-subf args))
                          (v `(,(genvar 'TS)))  ; 0-arity predicate application: (TS0), (TS1), ...
@@ -1681,6 +1691,9 @@ Examples
       (match f
         ;; < p-fo-formulap >
         ((type boolean) f)
+
+        ;; already a literal 
+        ((satisfies literalp) f)
 
         ;; (and ...) = each conjunct must hold independently
         ((list* 'and args)
@@ -1756,13 +1769,8 @@ Examples
                (or (TS0) (not (P x)))
                (or (TS0) (not (Q x)))))
 
-;; Negated atomic: (TS0) <-> (not (P x)):
-;;   unit: (TS0)
-;;   (or (TS0) (P x)), (or (not (TS0)) (not (P x)))
-(assertf #'simp-skolem-pnf-cnf '(not (P x))
-         '(and (TS0)
-               (or (TS0) (P x))
-               (or (not (TS0)) (not (P x)))))
+;; Negated atomic: already a literal, returned as-is
+(assertf #'simp-skolem-pnf-cnf '(not (P x)) '(not (P x)))
 
 ;; 0-arity Skolem: (exists (y) (R c0 y)) => y -> (SK0), no quantifier in result
 (assertf #'simp-skolem-pnf-cnf '(exists (y) (R c0 y))
@@ -1929,12 +1937,57 @@ Examples
  including the formulas from the following pages of the book: 178
  (p38, p34), 179 (ewd1062), 180 (barb), and 198 (the Los formula).
 
+ Clausal Form Syntax: 
+ cl := () | (())
+     | ((l1 ... ln) ...)
 
 |#
 
-;; TODO: to-clauses
+(defun to-clauses-m (m)
+  "Convert a CNF matrix m to a list of clauses satisfying the Clausal Form Syntax.
 
-(defun fo-no=-val (f) ...)
+   Pre: m satisfies the CNF Matrix Form Syntax:
+        m := <bool> | l | (and c1 ... cn)  
+        c := l | (or l1 ... ln)"
+  (flet ((clause-of (c)
+           (match c
+             ((satisfies literalp) (list c))
+             ((list* 'or lits)     lits))))
+    (match m
+      ((type boolean) (if m nil (list nil)))
+      ((satisfies literalp) (list (list m)))
+      ((list* 'and conjuncts) (mapcar #'clause-of conjuncts)))))
+
+(defun to-clauses (f)
+  "Convert f (output of simp-skolem-pnf-cnf) to a list of clauses satisfying the Clausal Form Syntax for resolution.
+   Each clause is a list of literals.
+
+   Pre: f satisfies the CNF Matrix Form Syntax:
+        f := m | (forall (v1 ... vn) m)"
+  (match f
+    ;; strip the universal quantifier
+    ((list 'forall vars m) (to-clauses-m m))
+    ;; otherwise it is a matrix
+    (_ (to-clauses-m f))))
+
+;; TODO: 
+;; - Selecting pairs of clauses with complementary literals
+;; - Unifying the literals and applying the unifier to derive a new clause
+;; - Implementing subsumption to remove redundant clauses
+;; - Implementing replacement to simplify clauses
+
+(defun solve (cls)
+  "Apply positive resolution to cls until either the empty clause is derived (return 'valid) or no new clauses can be derived (return 'invalid)."
+  ...)
+
+(defun fo-no=-val (f) 
+  "Check if f is valid using U-Resolution without equality.
+   Returns 'valid if f is valid
+
+   Pre: f is a FO formula without equality."
+
+  (dassert (fo-formulap f) "Input must be a FO formula")
+  (solve (to-clauses (simp-skolem-pnf-cnf f))))
 
 #|
 
