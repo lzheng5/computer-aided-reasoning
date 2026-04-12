@@ -538,6 +538,7 @@ p := <bool>
    | (<p-op> f1 ... fn)
 f := a | p
    | (<fo-quant> xs f)
+l := a | (not a)
 
 |#
 
@@ -745,56 +746,23 @@ Examples
 |#
 
 ;;; ============================================================
-;;; General Utilities
+;;; Debug and Stats
 ;;; ============================================================
 
-(defun assertf (f in out)
-  (== (funcall f in) out))
+;; Mode: 'debug | 'stats | nil (default)
+;; Note if we changed this, we should reload the file to recompile the definitions to include debugging/stats information
+(defconstant +debug-mode+ 'debug)
 
-(defun partition (pred list)
-  "Partition list into (values trues falses) based on pred"
-  (loop for x in list
-        if (funcall pred x) collect x into trues
-        else collect x into falses
-        finally (return (values trues falses))))
+(defmacro dbg (fmt &rest args)
+  "Print debug message when +debug-mode+ is 'debug"
+  `(when (eq +debug-mode+ 'debug)
+     (pprint (format nil ,fmt ,@args))))
 
-(defun negate (f)
-  "Get the negation of f"
-  (match f
-    ((list 'not a) a)
-    (_ `(not ,f))))
-
-(defun has-opposite (f args)
-  (in (negate f) args))
-
-(defun fo-quantifierp (q)
-  (in q *fo-quantifiers*))
-
-(defun term-vars (term &optional (vars (make-hash-set)))
-  "Return a hash set of the variables in term"
-  (labels ((walk (tm)
-             (match tm
-               ((satisfies variable-symbolp) (hash-set-add vars tm))
-               ((list* F args) (mapc #'walk args))
-               (_ nil))))
-    (walk term)
-    vars))
-
-(defun terms-vars (terms &optional (vars (make-hash-set)))
-  "Return a hash set of the variables in the list of terms"
-  (mapc #'(lambda (tm) (term-vars tm vars)) terms)
-  vars)
-
-(defun subst-term (tm var-map)
-  "Substitute variables in tm according to var-map, which is an alist mapping variables to terms"
-  (match tm
-    ((satisfies constant-symbolp) tm)
-    ((satisfies variable-symbolp) (or (get-alist tm var-map) tm))
-    ((satisfies quotep) tm)
-    ((satisfies constant-objectp) tm)
-    ((list* F args)
-     `(,F ,@(mapcar #'(lambda (a) (subst-term a var-map)) args)))
-    (_ tm)))
+(defmacro dassert (test-form &optional format-string &rest format-args)
+  "Assert that TEST-FORM is true, but only when +debug-mode+ is 'debug.
+   If TEST-FORM is false and debug mode is enabled, signals an error with the optional message."
+  `(when (eq +debug-mode+ 'debug)
+     (assert ,test-form () ,@(when format-string (list* format-string format-args)))))
 
 ;;; ============================================================
 ;;; Hash Set API - Simple set abstraction over hash tables
@@ -830,6 +798,12 @@ Examples
     (hash-set-map #'(lambda (elem) (push elem result)) set)
     result))
 
+(defun list->hash-set (lst)
+  "Build a fresh hash set containing every element of LST."
+  (let ((s (make-hash-set)))
+    (dolist (v lst s)
+      (hash-set-add s v))))
+
 (defun hash-set-copy-except (set elem)
   "Create a new hash set with all elements except elem"
   (let ((new-set (make-hash-set)))
@@ -851,6 +825,76 @@ Examples
                 set1))
 
 ;;; ============================================================
+;;; General Utilities
+;;; ============================================================
+
+(defun assertf (f in out)
+  (== (funcall f in) out))
+
+(defun partition (pred list)
+  "Partition list into (values trues falses) based on pred"
+  (loop for x in list
+        if (funcall pred x) collect x into trues
+        else collect x into falses
+        finally (return (values trues falses))))
+
+(defun negate (f)
+  "Get the negation of f"
+  (match f
+    ((list 'not a) a)
+    (_ `(not ,f))))
+
+(defun has-opposite (f args)
+  (in (negate f) args))
+
+(defun fo-quantifierp (q)
+  (in q *fo-quantifiers*))
+
+(defun subst-term (tm var-map)
+  "Substitute variables in tm according to var-map, which is an alist mapping variables to terms"
+  (match tm
+    ((satisfies constant-symbolp) tm)
+    ((satisfies variable-symbolp) (or (get-alist tm var-map) tm))
+    ((satisfies quotep) tm)
+    ((satisfies constant-objectp) tm)
+    ((list* F args)
+     `(,F ,@(mapcar #'(lambda (a) (subst-term a var-map)) args)))
+    (_ tm)))
+
+(defun term-vars (term &optional (vars (make-hash-set)))
+  "Return a hash set of the variables in term"
+  (labels ((walk (tm)
+             (match tm
+               ((satisfies variable-symbolp) (hash-set-add vars tm))
+               ((list* F args) (mapc #'walk args))
+               (_ nil))))
+    (walk term)
+    vars))
+
+(defun terms-vars (terms &optional (vars (make-hash-set)))
+  "Return a hash set of the variables in the list of terms"
+  (mapc #'(lambda (tm) (term-vars tm vars)) terms)
+  vars)
+
+(defun free-vars (f)
+  "Return a set (list) of the free variables in f"
+  (dassert (fo-formulap f) "Input formula is not well-formed")
+  (match f  
+    ;; < quant-fo-formulap >
+    ((list (guard q (fo-quantifierp q)) vars body)
+     (let ((vars (if (variable-symbolp vars) (list vars) vars)))
+       (set-difference (free-vars body) vars)))
+       
+    ;; < p-fo-formulap >
+    ((type boolean) nil)
+    ((list* (guard op (p-funp op)) args)
+     (apply #'union (mapcar #'free-vars args)))
+
+    ;; < fo-atomic-formulap >
+    ((list* R ts)
+     (hash-set->list (terms-vars ts)))))
+
+;;; ============================================================
 ;;; Variables Utilities
 ;;; ============================================================
 
@@ -858,40 +902,34 @@ Examples
   "Generate a variable symbol of the form PREFIX_N"
   (intern (format nil "~A~D" prefix n)))
 
-(defparameter *var-gen-cnt* 0)
+;; Prefix counter map: a hash map of prefix symbol -> next counter value.
+(defparameter *var-gen-cnt-map* (make-hash-table :test #'eq))
+;; Exclusion set: a hash set of variable symbols that genvar should skip to avoid capturing existing variables.
+(defparameter *var-gen-exclusion-set* (make-hash-set))
 
 (defun genvar (prefix)
-  "Generate a new variable symbol of the form PREFIX_N, where N is a natural number that is incremented each time genvar is called."
-  (let ((var (genvarn prefix *var-gen-cnt*)))
-    (setf *var-gen-cnt* (1+ *var-gen-cnt*))
-    var))
+  "Generate a new variable symbol of the form PREFIX_N,
+   where PREFIX is a symbol and N is a per-prefix natural number counter.
+   Skips any name that appears in *var-gen-exclusion-set* to avoid
+   capturing existing variables."
+  (loop
+    (let* ((n   (gethash prefix *var-gen-cnt-map* 0))
+           (var (genvarn prefix n)))
+      (setf (gethash prefix *var-gen-cnt-map*) (1+ n))
+      (unless (hash-set-contains? *var-gen-exclusion-set* var)
+        (return var)))))
 
 (defun genvars (prefix n)
   (loop for i from 0 below n
         collect (genvar prefix)))
 
-(defun assertv (f in out)
-  (let ((*var-gen-cnt* 0))
-    (assertf f in out)))
-
-;;; ============================================================
-;;; Debug and Stats
-;;; ============================================================
-
-;; Mode: 'debug | 'stats | nil (default)
-;; Note if we changed this, we should reload the file to recompile the definitions to include debugging/stats information
-(defconstant +debug-mode+ 'debug)
-
-(defmacro dbg (fmt &rest args)
-  "Print debug message when +debug-mode+ is 'debug"
-  `(when (eq +debug-mode+ 'debug)
-     (pprint (format nil ,fmt ,@args))))
-
-(defmacro dassert (test-form &optional format-string &rest format-args)
-  "Assert that TEST-FORM is true, but only when +debug-mode+ is 'debug.
-   If TEST-FORM is false and debug mode is enabled, signals an error with the optional message."
-  `(when (eq +debug-mode+ 'debug)
-     (assert ,test-form () ,@(when format-string (list* format-string format-args)))))
+(defmacro with-free-vars (fvars &body body)
+  "Execute BODY with a fresh per-prefix counter map and *var-gen-exclusion-set*
+   pre-populated from fvars (a list of variable symbols, e.g. from free-vars).
+   Prevents genvar from generating names that clash with the given variables."
+  `(let ((*var-gen-cnt-map*       (make-hash-table :test #'eq))
+         (*var-gen-exclusion-set* (list->hash-set ,fvars)))
+     ,@body))
 
 ;;; ============================================================
 ;;; Preprocessing
@@ -912,52 +950,6 @@ Examples
 
     ;; < fo-atomic-formulap >
     (_ f)))
-
-;; TODO: take a set of excluded variable names
-(defun fo-rename (f)
-  "Rename the variables in f if there are any name clashes.
-   The temporary variables generated have prefix #\U.
-
-   Pre: fo-cannonicalize-quant-vars has already been applied to f.
-   Post: all bound variables in f are unique."
-
-  (labels ((rename-vars (vars bound var-map)
-             (let ((new-vars (mapcar #'(lambda (var)
-                                         (if (in var bound)
-                                             (let ((new-var (genvar "U")))
-                                               (setf var-map (acons var new-var var-map))
-                                               new-var)
-                                             var))
-                                     vars)))
-               (values new-vars var-map)))
-           (rename-term (tm var-map)
-             (match tm
-               ((satisfies constant-symbolp) tm)
-               ((satisfies variable-symbolp)
-                (let ((new-var (get-alist tm var-map)))
-                  (if new-var new-var tm)))
-               ((satisfies quotep) tm)
-               ((satisfies constant-objectp) tm)
-               ((list* F args)
-                (let ((new-args (mapcar #'(lambda (a) (rename-term a var-map)) args)))
-                  `(,F ,@new-args)))
-               (_ tm)))
-           (rename (f bound var-map)
-             (match f
-               ;; < quant-fo-formulap >
-               ((list (guard q (fo-quantifierp q)) vars body)
-                (let+ (((&values new-vars new-var-map) (rename-vars vars bound var-map)))
-                  `(,q ,new-vars ,(rename body (append new-vars bound) new-var-map))))
-
-               ;; < p-fo-formulap >
-               ((type boolean) f)
-               ((list* (guard op (p-funp op)) fs)
-                `(,op ,@(mapcar #'(lambda (f) (rename f bound var-map)) fs)))
-
-               ;; < fo-atomic-formulap >
-               ((list* R ts)
-                `(,R ,@(mapcar #'(lambda (tm) (rename-term tm var-map)) ts)))))
-           (rename f nil nil))))
 
 (defun fo-simplify-implies (f)
   (match f
@@ -990,7 +982,6 @@ Examples
 
    Pre: (fo-formulap f)"
   (fo-simplify-implies
-   ;;fo-rename
     (fo-cannonicalize-quant-vars f)))
 
 ;;; ============================================================
@@ -1545,6 +1536,38 @@ Examples
 
 |#
 
+(defun fo-rename (f)
+  "Rename all the bound variables in f.
+   The temporary variables generated have prefix 'X.
+
+   Pre: fo-cannonicalize-quant-vars has already been applied to f.
+   Post: all bound variables in f are unique and free variables are kept intact."
+
+  (labels ((rename-vars (vars var-map)
+             (let ((new-vars (mapcar #'(lambda (var)
+                                         (let ((new-var (genvar 'X)))
+
+                                               (setf var-map (acons var new-var var-map))
+                                               new-var))
+                                     vars)))
+               (values new-vars var-map)))
+           (rename (f var-map)
+             (match f
+               ;; < quant-fo-formulap >
+               ((list (guard q (fo-quantifierp q)) vars body)
+                (let+ (((&values new-vars new-var-map) (rename-vars vars var-map)))
+                  `(,q ,new-vars ,(rename body new-var-map))))
+
+               ;; < p-fo-formulap >
+               ((type boolean) f)
+               ((list* (guard op (p-funp op)) fs)
+                `(,op ,@(mapcar #'(lambda (f) (rename f var-map)) fs)))
+
+               ;; < fo-atomic-formulap >
+               ((list* R ts)
+                `(,R ,@(mapcar #'(lambda (tm) (subst-term tm var-map)) ts)))))
+           (rename f nil))))
+
 (defun skolemize (f)
   "Skolemize f.
    New function symbols generated have prefix SK.
@@ -1565,7 +1588,7 @@ Examples
               ((eq q 'exists)
                (let ((new-exist-map
                        (reduce (lambda (m v)
-                                 (acons v `(,(genvar "SK") ,@forall-vars) m))
+                                 (acons v `(,(genvar 'SK) ,@forall-vars) m))
                                vars
                                :initial-value exists-map)))
                  (walk body forall-vars new-exist-map)))))
@@ -1582,28 +1605,33 @@ Examples
 
 (defun pnf (f)
   "Convert f to prenex normal form.
+   The variable ordering of the resulting prenex quantifier is the traversal order.
 
-   Pre: f has been simplified and skolemized."
-  (labels ((walk (f bound-vars)
-             "Walk f, collect all forall-bound variables into bound-vars (mutated), strip quantifiers."
+   Pre: f has been simplified and skolemized (so all bound variables are unique)."
+  (labels ((walk (f)
+             "Return the unquantified formula and all forall-bound variables."
              (match f
                ;; < quant-fo-formulap >
                ((list (guard q (fo-quantifierp q)) vars body)
-                (mapc (lambda (v) (hash-set-add bound-vars v)) vars)
-                (walk body bound-vars))
+                (let+ (((&values new-body bound-vars) (walk body)))
+                  (values new-body (append vars bound-vars))))
 
                ;; < p-fo-formulap >
-               ((type boolean) f)
+               ((type boolean) (values f nil))
                ((list* (guard op (p-funp op)) fs)
-                `(,op ,@(mapcar (lambda (x) (walk x bound-vars)) fs)))
+                (let (all-new-fs all-bound-vars)
+                  (dolist (sub-f fs)
+                    (let+ (((&values new-body bound-vars) (walk sub-f)))
+                      (push new-body all-new-fs)
+                      (setf all-bound-vars (append all-bound-vars bound-vars))))
+                  (values `(,op ,@(nreverse all-new-fs)) all-bound-vars)))
 
                ;; < fo-atomic-formulap >
-               (_ f))))
-    (let* ((bound-vars (make-hash-set))
-           (new-f (walk f bound-vars)))
-      (if (hash-set-empty? bound-vars)
-          new-f
-          `(forall ,(hash-set->list bound-vars) ,new-f)))))
+               (_ (values f nil)))))
+    (let+ (((&values new-f bound-vars) (walk f)))
+       (if (null bound-vars)
+           new-f
+           `(forall ,bound-vars ,new-f)))))
 
 (defun tseitin-op (v op args)
   "Generate CNF clauses: v ↔ (op args...)
@@ -1643,7 +1671,7 @@ Examples
                  ((type boolean) subf)
                  ((list* (guard op (p-funp op)) args)
                   (let* ((arg-vars (mapcar #'transform-subf args))
-                         (v `(,(genvar "TS")))  ; 0-arity predicate application: (TS0), (TS1), ...
+                         (v `(,(genvar 'TS)))  ; 0-arity predicate application: (TS0), (TS1), ...
                          (new-clauses (tseitin-op v op arg-vars)))
                     (setf clauses (append new-clauses clauses))
                     v))
@@ -1658,14 +1686,14 @@ Examples
         ((list* 'and args)
          (dolist (arg args)
            (let ((top-var (transform-subf arg)))
-             ;; top-var is (TSn) � already a valid 0-arity atomic unit clause
+             ;; top-var is (TSn) already a valid 0-arity atomic unit clause
              (push top-var clauses)))
          `(and ,@(reverse clauses)))
 
         ;; any other propositional formula: introduce one top-level Tseitin var
         ((list* (guard op (p-funp op)) args)
          (let ((top-var (transform-subf f)))
-           ;; top-var is (TSn) � already a valid 0-arity atomic unit clause
+           ;; top-var is (TSn) already a valid 0-arity atomic unit clause
            (push top-var clauses)
            `(and ,@(reverse clauses))))
 
@@ -1688,16 +1716,18 @@ Examples
     (_ (tseitin-transform f))))
 
 (defun simp-skolem-pnf-cnf (f)
-  "Apply simplification, skolemization, prenex normal form conversion, and CNF transformation to f.
+  "Apply simplification, renaming, skolemization, prenex normal form conversion, and CNF transformation to f.
 
    Pre: (fo-formulap f)"
   (dassert (fo-formulap f) "Input must be a FO formula")
 
-  (tseitin
-   (pnf
-    (skolemize
-     (nnf
-      (fo-simplify f))))))
+  (with-free-vars (free-vars f)
+   (tseitin
+    (pnf
+     (skolemize
+      (fo-rename
+       (nnf
+        (fo-simplify f))))))))
 
 ;; Some example problems
 (defconstant *mortal* '(and (forall x (implies (man x) (mortal x)))
@@ -1710,17 +1740,17 @@ Examples
                          (not (forall w (not (kind w))))))
 
 ;; Atomic formula: passthrough, wrapped in (and ...)
-(assertv #'simp-skolem-pnf-cnf '(P x) '(P x))
+(assertf #'simp-skolem-pnf-cnf '(P x) '(P x))
 
 ;; Conjunction of atomics: each conjunct pushed as unit clause, no new vars
-(assertv #'simp-skolem-pnf-cnf '(and (P x) (Q x)) '(and (P x) (Q x)))
+(assertf #'simp-skolem-pnf-cnf '(and (P x) (Q x)) '(and (P x) (Q x)))
 
 ;; Disjunction: Tseitin introduces (TS0), definitional clauses
 ;; (TS0) <-> (P x) v (Q x):
 ;;   unit: (TS0)
 ;;   forward: (or (not (TS0)) (P x) (Q x))
 ;;   backward: (or (TS0) (not (P x))), (or (TS0) (not (Q x)))
-(assertv #'simp-skolem-pnf-cnf '(or (P x) (Q x))
+(assertf #'simp-skolem-pnf-cnf '(or (P x) (Q x))
          '(and (TS0)
                (or (not (TS0)) (P x) (Q x))
                (or (TS0) (not (P x)))
@@ -1729,18 +1759,18 @@ Examples
 ;; Negated atomic: (TS0) <-> (not (P x)):
 ;;   unit: (TS0)
 ;;   (or (TS0) (P x)), (or (not (TS0)) (not (P x)))
-(assertv #'simp-skolem-pnf-cnf '(not (P x))
+(assertf #'simp-skolem-pnf-cnf '(not (P x))
          '(and (TS0)
                (or (TS0) (P x))
                (or (not (TS0)) (not (P x)))))
 
 ;; 0-arity Skolem: (exists (y) (R c0 y)) => y -> (SK0), no quantifier in result
-(assertv #'simp-skolem-pnf-cnf '(exists (y) (R c0 y))
-         '(and (R c0 (SK0))))
+(assertf #'simp-skolem-pnf-cnf '(exists (y) (R c0 y))
+         '(R c0 (SK0)))
 
 ;; 1-arity Skolem: (forall (x) (exists (y) (R x y))) => y -> (SK0 x)
-(assertv #'simp-skolem-pnf-cnf '(forall (x) (exists (y) (R x y)))
-         '(forall (x) (and (R x (SK0 x)))))
+(assertf #'simp-skolem-pnf-cnf '(forall (x) (exists (y) (R x y)))
+         '(forall (x) (R x (SK0 x))))
 
 (defun literalp (l)
   (match l
@@ -1902,8 +1932,7 @@ Examples
 
 |#
 
-;; TODO: rename
-;;       to-clauses
+;; TODO: to-clauses
 
 (defun fo-no=-val (f) ...)
 
