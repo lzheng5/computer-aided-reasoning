@@ -931,6 +931,11 @@ Examples
          (*var-gen-exclusion-set* (list->hash-set ,fvars)))
      ,@body))
 
+(defun assertv (f in out)
+  (dassert (fo-formulap in) "Input formula is not well-formed")
+  (with-free-vars (free-vars in)
+    (== (funcall f in) out)))
+
 ;;; ============================================================
 ;;; Preprocessing
 ;;; ============================================================
@@ -1543,6 +1548,7 @@ Examples
 
 |#
 
+;; TODO: dead so remove 
 (defun fo-rename (f)
   "Rename all the bound variables in f.
    The temporary variables generated have prefix 'X.
@@ -1672,12 +1678,12 @@ Examples
   (let ((clauses nil))
     (labels ((transform-subf (subf)
                "Transform subformula; return a 0-arity predicate (TSn) as its representative.
-                TSn starts with T so it is a function symbol, not a variable symbol (TSn) is valid FO."
+                TSn starts with T so it is a relational symbol, not a variable symbol. Note (TSn) is valid FO.
+                
+                Since after simplification and nnf, the subformula can either be a literal, and, or. "
+               
+               (dassert (not (booleanp subf)) "Subformula should not be a boolean constant due to simplification")
                (match subf
-                 ;; < p-fo-formulap >
-                 ((type boolean) subf)
-                 ;; TODO: revisit 
-                 ;; already a literal: return as-is, no TS var needed
                  ((satisfies literalp) subf)
                  ((list* (guard op (p-funp op)) args)
                   (let* ((arg-vars (mapcar #'transform-subf args))
@@ -1685,9 +1691,7 @@ Examples
                          (new-clauses (tseitin-op v op arg-vars)))
                     (setf clauses (append new-clauses clauses))
                     v))
-
-                  ;; < fo-atomic-formulap >
-                  (_ subf))))
+                  (_ (dassert nil "Unexpected subformula type in Tseitin transform: ~A" subf)))))
       (match f
         ;; < p-fo-formulap >
         ((type boolean) f)
@@ -1729,18 +1733,17 @@ Examples
     (_ (tseitin-transform f))))
 
 (defun simp-skolem-pnf-cnf (f)
-  "Apply simplification, renaming, skolemization, prenex normal form conversion, and CNF transformation to f.
+  "Apply simplification, skolemization, prenex normal form conversion, and CNF transformation to f.
+   Variables are NOT renamed here; clauses are renamed apart lazily during resolution.
 
    Pre: (fo-formulap f)"
   (dassert (fo-formulap f) "Input must be a FO formula")
 
-  (with-free-vars (free-vars f)
-   (tseitin
-    (pnf
-     (skolemize
-      (fo-rename
-       (nnf
-        (fo-simplify f))))))))
+  (tseitin
+   (pnf
+    (skolemize
+     (nnf
+      (fo-simplify f))))))
 
 ;; Some example problems
 (defconstant *mortal* '(and (forall x (implies (man x) (mortal x)))
@@ -1753,31 +1756,31 @@ Examples
                          (not (forall w (not (kind w))))))
 
 ;; Atomic formula: passthrough, wrapped in (and ...)
-(assertf #'simp-skolem-pnf-cnf '(P x) '(P x))
+(assertv #'simp-skolem-pnf-cnf '(P x) '(P x))
 
 ;; Conjunction of atomics: each conjunct pushed as unit clause, no new vars
-(assertf #'simp-skolem-pnf-cnf '(and (P x) (Q x)) '(and (P x) (Q x)))
+(assertv #'simp-skolem-pnf-cnf '(and (P x) (Q x)) '(and (P x) (Q x)))
 
 ;; Disjunction: Tseitin introduces (TS0), definitional clauses
 ;; (TS0) <-> (P x) v (Q x):
 ;;   unit: (TS0)
 ;;   forward: (or (not (TS0)) (P x) (Q x))
 ;;   backward: (or (TS0) (not (P x))), (or (TS0) (not (Q x)))
-(assertf #'simp-skolem-pnf-cnf '(or (P x) (Q x))
+(assertv #'simp-skolem-pnf-cnf '(or (P x) (Q x))
          '(and (TS0)
                (or (not (TS0)) (P x) (Q x))
                (or (TS0) (not (P x)))
                (or (TS0) (not (Q x)))))
 
 ;; Negated atomic: already a literal, returned as-is
-(assertf #'simp-skolem-pnf-cnf '(not (P x)) '(not (P x)))
+(assertv #'simp-skolem-pnf-cnf '(not (P x)) '(not (P x)))
 
 ;; 0-arity Skolem: (exists (y) (R c0 y)) => y -> (SK0), no quantifier in result
-(assertf #'simp-skolem-pnf-cnf '(exists (y) (R c0 y))
+(assertv #'simp-skolem-pnf-cnf '(exists (y) (R c0 y))
          '(R c0 (SK0)))
 
 ;; 1-arity Skolem: (forall (x) (exists (y) (R x y))) => y -> (SK0 x)
-(assertf #'simp-skolem-pnf-cnf '(forall (x) (exists (y) (R x y)))
+(assertv #'simp-skolem-pnf-cnf '(forall (x) (exists (y) (R x y)))
          '(forall (x) (R x (SK0 x))))
 
 (defun literalp (l)
@@ -1938,9 +1941,10 @@ Examples
  (p38, p34), 179 (ewd1062), 180 (barb), and 198 (the Los formula).
 
  Clausal Form Syntax: 
- cl := () | (())
-     | ((l1 ... ln) ...)
+ cls := (cl ...)
+ cl := (l ...)
 
+ Note cls includes () and (())
 |#
 
 (defun to-clauses-m (m)
@@ -1952,7 +1956,7 @@ Examples
   (flet ((clause-of (c)
            (match c
              ((satisfies literalp) (list c))
-             ((list* 'or lits)     lits))))
+             ((list* 'or lits) lits))))
     (match m
       ((type boolean) (if m nil (list nil)))
       ((satisfies literalp) (list (list m)))
@@ -1976,6 +1980,18 @@ Examples
 ;; - Implementing subsumption to remove redundant clauses
 ;; - Implementing replacement to simplify clauses
 
+(defun rename-clause (clause)
+  "Return a copy of CLAUSE with all variables renamed to fresh ones.
+   Called before each resolution step to ensure two clauses being resolved
+   have disjoint variable sets."
+  (let* ((vars (hash-set->list (terms-vars (mapcar (lambda (l)
+                                                      (match l
+                                                        ((list 'not a) a)
+                                                        (_ l)))
+                                                    clause))))
+         (renaming (mapcar (lambda (v) (cons v (genvar v))) vars)))
+    (mapcar (lambda (l) (subst-term l renaming)) clause)))
+
 (defun solve (cls)
   "Apply positive resolution to cls until either the empty clause is derived (return 'valid) or no new clauses can be derived (return 'invalid)."
   ...)
@@ -1987,7 +2003,8 @@ Examples
    Pre: f is a FO formula without equality."
 
   (dassert (fo-formulap f) "Input must be a FO formula")
-  (solve (to-clauses (simp-skolem-pnf-cnf f))))
+  (with-free-vars (free-vars f)
+   (solve (to-clauses (simp-skolem-pnf-cnf f)))))
 
 #|
 
