@@ -831,6 +831,10 @@ Examples
 (defun assertf (f in out)
   (== (funcall f in) out))
 
+(defun filter (pred lst)
+  "Return a new list containing only elements of LST satisfying PRED."
+  (loop for x in lst when (funcall pred x) collect x))
+
 (defun partition (pred list)
   "Partition list into (values trues falses) based on pred"
   (loop for x in list
@@ -860,6 +864,10 @@ Examples
     ((list* F args)
      `(,F ,@(mapcar #'(lambda (a) (subst-term a var-map)) args)))
     (_ tm)))
+
+(defun subst-terms (tms var-map)
+  "Substitute variables in each term in tms according to var-map, which is an alist mapping variables to terms"
+  (mapcar #'(lambda (tm) (subst-term tm var-map)) tms))
 
 (defun term-vars (term &optional (vars (make-hash-set)))
   "Return a hash set of the variables in term"
@@ -1548,7 +1556,6 @@ Examples
 
 |#
 
-;; TODO: dead so remove 
 (defun fo-rename (f)
   "Rename all the bound variables in f.
    The temporary variables generated have prefix 'X.
@@ -1644,7 +1651,8 @@ Examples
     (let+ (((&values new-f bound-vars) (walk f)))
        (if (null bound-vars)
            new-f
-           `(forall ,bound-vars ,new-f)))))
+           ;; TODO: remove remove-dups after fo-rename
+           `(forall ,(remove-dups bound-vars) ,new-f)))))
 
 (defun tseitin-op (v op args)
   "Generate CNF clauses: v ↔ (op args...)
@@ -1732,6 +1740,8 @@ Examples
 
     (_ (tseitin-transform f))))
 
+;; TODO: after nnf, fo-rename, lift-existentials, merge-existentials, skolemize, merge-universals, pnf, tseitin 
+
 (defun simp-skolem-pnf-cnf (f)
   "Apply simplification, skolemization, prenex normal form conversion, and CNF transformation to f.
    Variables are NOT renamed here; clauses are renamed apart lazily during resolution.
@@ -1754,6 +1764,9 @@ Examples
                          (forall (y z) (implies (and (pet z) (cares y z)) (kind y)))
                          (pet c0)
                          (not (forall w (not (kind w))))))
+
+(defconstant *barb*
+  '(not (exists x (forall y (iff (shaves x y) (not (shaves y y)))))))
 
 ;; Atomic formula: passthrough, wrapped in (and ...)
 (assertv #'simp-skolem-pnf-cnf '(P x) '(P x))
@@ -1852,8 +1865,7 @@ Examples
 
 (defun unify (l)
   "Given a non-empty list of term pairs (conses (s . t)), return an MGU
-   alist mapping variables to terms, or 'fail if no unifier exists.
-   Uses Robinson's algorithm with occurs check."
+   alist mapping variables to terms in solved forms, or 'fail if no unifier exists."
   (let ((eqs (copy-list l))
         (sigma nil))
     (loop
@@ -1884,7 +1896,7 @@ Examples
           ;; Otherwise: clash
           (t (return 'fail)))))))
 
-(defun mgu-valid? (l sigma)
+(defun subst-valid? (l sigma)
   "Returns t if applying sigma to both sides of each pair in l yields equal terms."
   (every (lambda (pair)
            (equal (subst-term (car pair) sigma)
@@ -1917,7 +1929,7 @@ Examples
 ;; (f (g x) y) = (f (g c0) c1) -> x=c0, y=c1
 (assert (let ((sigma (unify '(((f (g x) y) . (f (g c0) c1))))))
           (and (not (eq sigma 'fail))
-               (mgu-valid? '(((f (g x) y) . (f (g c0) c1))) sigma))))
+               (subst-valid? '(((f (g x) y) . (f (g c0) c1))) sigma))))
 ;; Most general: (f x y) = (f y x) -> x=y (no occurs issue)
 ;; bind x->y: sigma=((x.y)), then (y.x) -> apply sigma: y=y, x->y gives y=y, equal. done
 (assertf #'unify '(((f x y) . (f y x))) '((x . y)))
@@ -1947,6 +1959,47 @@ Examples
  Note cls includes () and (())
 |#
 
+;; ==============================================================
+;; Simple Queue APIs
+;; ==============================================================
+
+(defun make-queue (&optional (items nil))
+  "Create a queue, optionally pre-filled with ITEMS in list order."
+  (let ((q (cons nil nil)))
+    (dolist (item items q)
+      (enqueue item q))))
+
+(defun queue-empty? (queue)
+  (null (car queue)))
+
+(defun enqueue (item queue)
+  (let ((new-cons (list item)))
+    (if (car queue)
+        (setf (cdr (cdr queue)) new-cons)
+        (setf (car queue) new-cons))
+    (setf (cdr queue) new-cons)))
+
+(defun dequeue (queue)
+  (pop (car queue)))
+
+(defun clear-queue (queue)
+  (setf (car queue) nil
+        (cdr queue) nil))
+
+(defun queue->list (queue)
+  "Return the contents of QUEUE as a list (non-destructive)."
+  (car queue))
+
+(defun queue-remove-if! (pred queue)
+  "Remove all elements satisfying PRED from QUEUE (mutates queue in-place)."
+  (let ((new-list (remove-if pred (car queue))))
+    (setf (car queue) new-list
+          (cdr queue) (last new-list))))
+
+;; ==============================================================
+;; Resolution
+;; ==============================================================
+
 (defun to-clauses-m (m)
   "Convert a CNF matrix m to a list of clauses satisfying the Clausal Form Syntax.
 
@@ -1975,36 +2028,116 @@ Examples
     (_ (to-clauses-m f))))
 
 ;; TODO: 
-;; - Selecting pairs of clauses with complementary literals
-;; - Unifying the literals and applying the unifier to derive a new clause
 ;; - Implementing subsumption to remove redundant clauses
 ;; - Implementing replacement to simplify clauses
 
-(defun rename-clause (clause)
-  "Return a copy of CLAUSE with all variables renamed to fresh ones.
+(defun rename-clause (cl)
+  "Return a copy of CL with all variables renamed to fresh ones.
    Called before each resolution step to ensure two clauses being resolved
    have disjoint variable sets."
   (let* ((vars (hash-set->list (terms-vars (mapcar (lambda (l)
                                                       (match l
                                                         ((list 'not a) a)
                                                         (_ l)))
-                                                    clause))))
-         (renaming (mapcar (lambda (v) (cons v (genvar v))) vars)))
-    (mapcar (lambda (l) (subst-term l renaming)) clause)))
+                                                    cl))))
+         (renaming (mapcar (lambda (v) (cons v (genvar 'X))) vars)))
+    (mapcar (lambda (l) (subst-term l renaming)) cl)))
 
-(defun solve (cls)
-  "Apply positive resolution to cls until either the empty clause is derived (return 'valid) or no new clauses can be derived (return 'invalid)."
-  ...)
+(defun subsets (lst)
+  "Return a list of all subsets of LST."
+  (if (null lst)
+      (list nil)
+      (let ((rest (subsets (cdr lst))))
+        (append rest
+                (mapcar (lambda (s) (cons (car lst) s)) rest)))))
+
+(defun unifiable? (l1 l2)
+  "Return t if literals l1 and l2 are unifiable, nil otherwise."
+  (not (eq (unify `((,l1 . ,l2))) 'fail)))
+
+(defun unify-seq (lits)
+  "Given a list of literals, return an MGU that unifies all of them, or 'fail if no such unifier exists."
+  (if (null lits)
+      nil
+      (let ((eqs nil))
+        (dolist (l (cdr lits))
+          (push (cons l (car lits)) eqs))
+        (unify eqs))))
+
+(defun resolve-clauses (cl1 cl2 unusedQ)
+  "Compute resolvants by considering all pairs of literals (l1, l2) where l1 in cl1, l2 in cl2, and l1 is the negation of l2 
+   Push the resolvants derived from resolving cl1 and cl2 into unusedQ.
+   Return nil if empty clause is derived, otherwise return the updated unusedQ"
+   (let ((new-cl1 (rename-clause cl1))
+         (new-cl2 (rename-clause cl2)))
+      (dolist (l1 new-cl1)
+        (let ((ps2 (filter #'(lambda (l) (unifiable? l1 (negate l))) new-cl2)))
+          (if (null ps2) 
+              nil 
+              (let ((ps1 (filter #'(lambda (l) (and (not (equal l1 l)) (unifiable? l1 l))) new-cl1)))
+                ;; try all possible subsets of ps1 and ps2 to resolve with l1 and enqueue the valid resolvants 
+                (dolist (pl1 (subsets ps1))
+                  (let ((s1 `(,l1 . ,pl1)))
+                    (dolist (s2 (subsets ps2))
+                      (if (null s2)
+                          nil
+                          (let ((U (unify-seq (append s1 (mapcar #'negate s2)))))
+                            (if (eq U 'fail)
+                                nil
+                                (let* ((R (union (set-difference new-cl1 s1 :test #'equal)
+                                                 (set-difference new-cl2 s2 :test #'equal)
+                                                 :test #'equal))
+                                       (resolvant (subst-terms R U)))
+                                  (if (null resolvant)
+                                      (return-from resolve-clauses nil) ;; empty clause derived
+                                      (enqueue resolvant unusedQ))))))))))))))
+   unusedQ)
+
+(defun positive-clause? (cl)
+  "Returns t if CL is a positive clause (contains no negated literals)."
+  (every (lambda (l) (not (and (listp l) (eq (car l) 'not)))) cl))
+
+(defun presolve-clauses (cl1 cl2 unusedQ)
+  "Apply positive resolution to CL1 and CL2 if they contain complementary literals.
+   Push the resolvants derived from resolving cl1 and cl2 into unusedQ.
+   Return nil if empty clause is derived, otherwise return the updated unusedQ"
+  (if (or (positive-clause? cl1) (positive-clause? cl2))
+      (resolve-clauses cl1 cl2 unusedQ)
+      unusedQ))
+
+(defun solve (used unusedQ)
+  "Apply positive resolution until the empty clause is derived (return 'valid) or no new clauses can be derived (return nil).
+
+   used: a set of clauses that have already been used for resolution
+   unusedQ: a queue of clauses that have not yet been used for resolution"
+  (if (queue-empty? unusedQ)
+      nil 
+      (progn 
+        (dbg "used: ~A, unused: ~A" (hash-set-size used) (length (queue->list unusedQ)))
+        (let* ((cl (dequeue unusedQ)))
+          (hash-set-add used cl)
+          (hash-set-map #'(lambda (used-cl)
+                            (let ((new-unusedQ (presolve-clauses cl used-cl unusedQ))) ;; mutates unusedQ
+                              (if (null new-unusedQ)
+                                  (return-from solve 'valid)
+                                  nil)))
+                        used)
+          (solve used unusedQ)))))
 
 (defun fo-no=-val (f) 
-  "Check if f is valid using U-Resolution without equality.
-   Returns 'valid if f is valid
+  "Check if f is valid using U-Resolution without equality, 
+   where for a FO sequent (Γ ⊢ φ), f = Γ ∧ ¬φ. 
+
+   Returns 'valid if f is valid (always true) or nil if f is unsatisfiable (always false). 
+   Loops if f is satisfiable but not valid (sometimes true but sometimes false).
 
    Pre: f is a FO formula without equality."
 
   (dassert (fo-formulap f) "Input must be a FO formula")
   (with-free-vars (free-vars f)
-   (solve (to-clauses (simp-skolem-pnf-cnf f)))))
+   (solve 
+    (make-hash-set #'equal)  
+    (make-queue (to-clauses (simp-skolem-pnf-cnf f)))))) 
 
 #|
 
