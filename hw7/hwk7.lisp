@@ -842,6 +842,14 @@ Examples
         else collect x into falses
         finally (return (values trues falses))))
 
+(defun subsets (lst)
+  "Return a list of all subsets of LST."
+  (if (null lst)
+      (list nil)
+      (let ((rest (subsets (cdr lst))))
+        (append rest
+                (mapcar (lambda (s) (cons (car lst) s)) rest)))))
+
 (defun negate (f)
   "Get the negation of f"
   (match f
@@ -1997,7 +2005,7 @@ Examples
           (cdr queue) (last new-list))))
 
 ;; ==============================================================
-;; Resolution
+;; To Clausal Form 
 ;; ==============================================================
 
 (defun to-clauses-m (m)
@@ -2022,14 +2030,12 @@ Examples
    Pre: f satisfies the CNF Matrix Form Syntax:
         f := m | (forall (v1 ... vn) m)"
   (match f
-    ;; strip the universal quantifier
     ((list 'forall vars m) (to-clauses-m m))
-    ;; otherwise it is a matrix
     (_ (to-clauses-m f))))
 
-;; TODO: 
-;; - Implementing subsumption to remove redundant clauses
-;; - Implementing replacement to simplify clauses
+;; ==============================================================
+;; Resolution, Subsumption, and Replacement
+;; ==============================================================
 
 (defun rename-clause (cl)
   "Return a copy of CL with all variables renamed to fresh ones.
@@ -2043,14 +2049,6 @@ Examples
          (renaming (mapcar (lambda (v) (cons v (genvar 'X))) vars)))
     (mapcar (lambda (l) (subst-term l renaming)) cl)))
 
-(defun subsets (lst)
-  "Return a list of all subsets of LST."
-  (if (null lst)
-      (list nil)
-      (let ((rest (subsets (cdr lst))))
-        (append rest
-                (mapcar (lambda (s) (cons (car lst) s)) rest)))))
-
 (defun unifiable? (l1 l2)
   "Return t if literals l1 and l2 are unifiable, nil otherwise."
   (not (eq (unify `((,l1 . ,l2))) 'fail)))
@@ -2063,6 +2061,45 @@ Examples
         (dolist (l (cdr lits))
           (push (cons l (car lits)) eqs))
         (unify eqs))))
+
+;; TODO: subsumption check 
+(defun clause-subsumes? (cl1 cl2) 
+  "cl1 => cl2"
+  ...)
+
+(defun trivial (cl)
+  "Return t if CL is a trivial clause (contains complementary literals or is a tautology), nil otherwise."
+  (or (null cl)
+      (let ((lits (mapcar (lambda (l)
+                            (match l
+                              ((list 'not a) a)
+                              (_ l)))
+                          cl)))
+        (some (lambda (l) (member (negate l) lits :test #'equal)) lits))))
+
+(defun replace (cl unusedQ)
+  "Replace any unused claused, unused-cl, in unusedQ that is subsumed by cl (cl => unused-cl) with cl, and return the updated unusedQ.
+   
+   1. If multiple such unused-cl exist, just keep one copy of cl in unusedQ. 
+      Note this is better than replacing only the first unused-cl in the book. 
+
+   2. If no such unused-cl exists, enqueue cl into unusedQ."
+  (let ((replaced nil))
+    (queue-remove-if! (lambda (unused-cl)
+                        (when (clause-subsumes? cl unused-cl)
+                          (setf replaced t)))
+                      unusedQ)
+    (when replaced
+      (enqueue cl unusedQ)))
+  unusedQ)
+
+(defun incorporate (gcl cl unusedQ) 
+  "If cl is non-trivial and not subsumed by gcl (gcl => cl) or any clause in unusedQ (unused-cl => cl), enqueue cl into unusedQ."
+  (if (or (trivial cl)
+          (clause-subsumes? gcl cl)
+          (some (lambda (used-cl) (clause-subsumes? used-cl cl)) (queue->list unusedQ)))
+      nil
+      (replace cl unusedQ)))
 
 (defun resolve-clauses (cl1 cl2 unusedQ)
   "Compute resolvants by considering all pairs of literals (l1, l2) where l1 in cl1, l2 in cl2, and l1 is the negation of l2 
@@ -2090,7 +2127,7 @@ Examples
                                        (resolvant (subst-terms R U)))
                                   (if (null resolvant)
                                       (return-from resolve-clauses nil) ;; empty clause derived
-                                      (enqueue resolvant unusedQ))))))))))))))
+                                      (incorporate cl1 resolvant unusedQ))))))))))))))
    unusedQ)
 
 (defun positive-clause? (cl)
