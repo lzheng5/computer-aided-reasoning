@@ -2031,19 +2031,95 @@ Examples
           (fo-simplify f))))))))))
 
 ;; Some example problems
-(defconstant *mortal* '(and (forall x (implies (man x) (mortal x)))
-                            (man c0)
-                            (not (mortal c0))))
+(defconstant *mortal*
+  '(not (and (forall x (implies (man x) (mortal x)))
+             (man c0)
+             (not (mortal c0)))))
 
-(defconstant *pet* '(and (forall x (implies (pet x) (exists y (cares y x))))
-                         (forall (y z) (implies (and (pet z) (cares y z)) (kind y)))
-                         (pet c0)
-                         (not (forall w (not (kind w))))))
+(defconstant *pet*
+  '(not (and (forall x (implies (pet x) (exists y (cares y x))))
+              (forall (y z) (implies (and (pet z) (cares y z)) (kind y)))
+              (pet c0)
+              (not (forall w (not (kind w)))))))
 
 (defconstant *barb*
   '(not (exists x (forall y (iff (shaves x y) (not (shaves y y)))))))
 
-;; Atomic formula: passthrough, wrapped in (and ...)
+;; p38: Pelletier problem 38
+(defconstant *p38*
+  '(iff
+    (forall (x)
+      (implies (and (P a) (implies (P x) (exists (y) (and (P y) (R x y)))))
+               (exists (z w) (and (P z) (R x w) (R w z)))))
+    (forall (x)
+      (and (or (not (P a)) (P x) (exists (z w) (and (P z) (R x w) (R w z))))
+           (or (not (P a))
+               (not (exists (y) (and (P y) (R x y))))
+               (exists (z w) (and (P z) (R x w) (R w z))))))))
+
+;; p34: Pelletier problem 34
+(defconstant *p34*
+  '(iff
+    (iff (exists (x) (forall (y) (iff (P x) (P y))))
+         (iff (exists (x) (Q x)) (forall (y) (Q y))))
+    (iff (exists (x) (forall (y) (iff (Q x) (Q y))))
+         (iff (exists (x) (P x)) (forall (y) (P y))))))
+
+;; ewd1062: Dijkstra EWD1062 — Galois connection implies monotonicity
+(defconstant *ewd1062*
+  '(implies
+    (and (forall (x) (<= x x))
+         (forall (x y z) (implies (and (<= x y) (<= y z)) (<= x z)))
+         (forall (x y) (iff (<= (f x) y) (<= x (g y)))))
+    (and (forall (x y) (implies (<= x y) (<= (f x) (f y))))
+         (forall (x y) (implies (<= x y) (<= (g x) (g y)))))))
+
+;; los: Los formula
+(defconstant *los*
+  '(implies
+    (and (forall (x y z) (implies (and (P x y) (P y z)) (P x z)))
+         (forall (x y z) (implies (and (Q x y) (Q y z)) (Q x z)))
+         (forall (x y) (implies (Q x y) (Q y x)))
+         (forall (x y) (or (P x y) (Q x y))))
+    (or (forall (x y) (P x y))
+        (forall (x y) (Q x y)))))
+
+;; p24: Pelletier problem 24
+(defconstant *p24*
+  '(implies
+    (and (not (exists (x) (and (U x) (Q x))))
+         (forall (x) (implies (P x) (or (Q x) (R x))))
+         (not (exists (x) (implies (P x) (exists (x) (Q x)))))
+         (forall (x) (implies (and (Q x) (R x)) (U x))))
+    (exists (x) (and (P x) (R x)))))
+
+;; p45: Pelletier problem 45
+(defconstant *p45*
+  '(implies
+    (and (forall (x)
+           (implies (and (P x) (forall (y) (implies (and (G y) (H x y)) (J x y))))
+                    (forall (y) (implies (and (G y) (H x y)) (R y)))))
+         (not (exists (y) (and (L y) (R y))))
+         (exists (x)
+           (and (P x)
+                (forall (y) (implies (H x y) (L y)))
+                (forall (y) (implies (and (G y) (H x y)) (J x y))))))
+    (exists (x) (and (P x) (not (exists (y) (and (G y) (H x y))))))))
+
+;; p20: Pelletier problem 20
+(defconstant *p20*
+  '(implies
+    (forall (x y) (exists (z) (forall (w) (implies (and (P x) (Q y)) (and (R z) (U w))))))
+    (implies (exists (x y) (and (P x) (Q y)))
+             (exists (z) (R z)))))
+
+;; davis-putnam example
+(defconstant *davis-putnam*
+  '(exists (x) (exists (y) (forall (z)
+    (and (implies (F x y) (and (F y z) (F z z)))
+         (implies (and (F x y) (G x y)) (and (G x z) (G z z))))))))
+
+
 (assertv #'simp-skolem-pnf-cnf '(P x) '(P x))
 
 ;; Conjunction of atomics: each conjunct pushed as unit clause, no new vars
@@ -2516,19 +2592,19 @@ Examples
                         used)
           (solve used unusedQ)))))
 
-(defun fo-no=-val (f) 
-  "Check if f is valid using U-Resolution without equality, 
-   where for a FO sequent (Γ ⊢ φ), f = Γ ∧ ¬φ. 
+(defun fo-no=-val (f)
+  "Check if f is valid using positive resolution without equality.
+   Negates f and tests for unsatisfiability: f is valid iff (not f) is unsatisfiable.
 
-   Returns 'valid if f is valid (always true) or nil if f is unsatisfiable (always false). 
-   Loops if f is satisfiable but not valid (sometimes true but sometimes false).
+   Returns 'valid if f is valid, nil if (not f) is unsatisfiable (contradiction/always-false),
+   or loops if f is satisfiable but not valid.
 
    Pre: f is a FO formula without equality."
-
-  (with-fo-formula f
-    (solve 
-      (make-hash-set #'equal)  
-      (make-queue (to-clauses (simp-skolem-pnf-cnf f)))))) 
+  (let ((neg-f `(not ,f)))
+    (with-fo-formula neg-f
+      (solve
+        (make-hash-set #'equal)
+        (make-queue (to-clauses (simp-skolem-pnf-cnf neg-f))))))) 
 
 #|
 
@@ -2615,19 +2691,20 @@ Examples
             f-congruence
             r-congruence)))))
 
-(defun fo-val (f) 
-  "Check if f is valid using U-Resolution, 
-   where for a FO sequent (Γ ⊢ φ), f = Γ ∧ ¬φ. 
+(defun fo-val (f)
+  "Check if f is valid using positive resolution with equality.
+   Negates f and tests for unsatisfiability: f is valid iff (not f) is unsatisfiable.
 
-   Returns 'valid if f is valid (always true) or nil if f is unsatisfiable (always false). 
-   Loops if f is satisfiable but not valid (sometimes true but sometimes false).
+   Returns 'valid if f is valid, nil if (not f) is unsatisfiable (contradiction/always-false),
+   or loops if f is satisfiable but not valid.
 
    Pre: f is a FO formula."
-  (with-fo-formula f
-    (solve 
-      (make-hash-set #'equal)  
-      (make-queue 
-        (let+ ((cnf (simp-skolem-pnf-cnf f))
-               ((&values res fsig rsig) (fo-formulap cnf)))
-          (reduce-equality fsig rsig
-            (to-clauses cnf)))))))
+  (let ((neg-f `(not ,f)))
+    (with-fo-formula neg-f
+      (solve
+        (make-hash-set #'equal)
+        (make-queue
+          (let+ ((cnf (simp-skolem-pnf-cnf neg-f))
+                 ((&values res fsig rsig) (fo-formulap cnf)))
+            (reduce-equality fsig rsig
+              (to-clauses cnf))))))))
