@@ -2309,63 +2309,21 @@ Examples
   (mapcar (lambda (l) (replace-=-in-literal eq-sym l)) cl))
 
 (defun replace-=-in-clauses (eq-sym cls)
-  "Replace = with eq-sym in every clause."
-  (mapcar (lambda (cl) (replace-=-in-clause eq-sym cl)) cls))
+  "Replace = with eq-sym in every clause.
+   Returns (values new-cls has-eq?) where has-eq? is t if any = literal was found."
+  (let ((found nil))
+    (values
+     (mapcar (lambda (cl)
+               (mapcar (lambda (l)
+                         (let ((new-l (replace-=-in-literal eq-sym l)))
+                           (unless (eq l new-l) (setf found t))
+                           new-l))
+                       cl))
+             cls)
+     found)))
 
-(defun =-context-symbols (cls)
-  "Collect the function and relation symbols that appear inside = literals in cls.
-   Returns (values f-syms r-syms) where each is an alist of (symbol . arity)."
-  (let ((fsyms nil)
-        (rsyms nil))
-    (labels ((collect-from-term (tm)
-               (match tm
-                 ((list* (guard f (function-symbolp f)) args)
-                  (let ((arity (length args)))
-                    (unless (assoc f fsyms :test #'eq)
-                      (push (cons f arity) fsyms))
-                    (mapc #'collect-from-term args)))
-                 (_ nil)))
-             (collect-from-literal (l)
-               (match l
-                 ((list 'not a) (collect-from-literal a))
-                 ((list '= t1 t2)
-                  (collect-from-term t1)
-                  (collect-from-term t2))
-                 ;; For relation congruence: if a relation appears with args
-                 ;; that contain function symbols also in = context, we need it.
-                 ;; But more precisely, any relation that shares variables with
-                 ;; = literals may need congruence. Conservatively, collect all
-                 ;; relation symbols that appear in clauses containing =.
-                 (_ nil)))
-             (clause-has-eq? (cl)
-               (some (lambda (l)
-                       (match l
-                         ((list '= _ _) t)
-                         ((list 'not (list '= _ _)) t)
-                         (_ nil)))
-                     cl))
-             (collect-relations-from-clause (cl)
-               (dolist (l cl)
-                 (match l
-                   ((list 'not (list* (guard r (relation-symbolp r)) args))
-                    (unless (or (eq r '=) (assoc r rsyms :test #'eq))
-                      (push (cons r (length args)) rsyms)))
-                   ((list* (guard r (relation-symbolp r)) args)
-                    (unless (or (eq r '=) (assoc r rsyms :test #'eq))
-                      (push (cons r (length args)) rsyms)))
-                   (_ nil)))))
-      ;; Collect f-symbols from = arguments and r-symbols from clauses containing =
-      (dolist (cl cls)
-        (dolist (l cl) (collect-from-literal l))
-        (when (clause-has-eq? cl)
-          (collect-relations-from-clause cl))))
-    (values fsyms rsyms)))
-
-(defun reduce-equality (cls)
+(defun reduce-equality (fsig rsig cls)
   "Replace = with a fresh relational symbol and add equality axioms.
-
-   Collects the function and relation symbols that appear in the context of =,
-   and only generates congruence axioms for those symbols.
 
    Equivalence axioms:
    ((eq-sym x x))
@@ -2379,15 +2337,17 @@ Examples
    ((not (eq-sym x1 y1)) ... (not (eq-sym xn yn)) (not (r x1...xn)) (r y1...yn))"
 
   (let+ ((eq-sym (genvar 'EQ))
-         ((&values eq-fsig eq-rsig) (=-context-symbols cls))
-         (x (genvar 'X)) (y (genvar 'X)) (z (genvar 'X))
+         ((&values new-cls has-eq?) (replace-=-in-clauses eq-sym cls)))
+    (if (not has-eq?)
+        cls ;; no = in clauses, skip axiomatization
+        (let* ((x (genvar 'X)) (y (genvar 'X)) (z (genvar 'X))
          ;; Equivalence axioms
          (reflexivity  `((,eq-sym ,x ,x)))
          (symmetry     `((not (,eq-sym ,x ,y)) (,eq-sym ,y ,x)))
          (transitivity `((not (,eq-sym ,x ,y)) (not (,eq-sym ,y ,z)) (,eq-sym ,x ,z)))
          ;; Function congruence axioms
          (f-congruence
-          (loop for (f . arity) in eq-fsig
+          (loop for (f . arity) in fsig
                 when (> arity 0)
                 collect (let ((xs (genvars 'X arity))
                               (ys (genvars 'Y arity)))
@@ -2395,16 +2355,16 @@ Examples
                                   `((,eq-sym (,f ,@xs) (,f ,@ys)))))))
          ;; Relation congruence axioms
          (r-congruence
-          (loop for (r . arity) in eq-rsig
+          (loop for (r . arity) in rsig
                 when (> arity 0)
                 collect (let ((xs (genvars 'X arity))
                               (ys (genvars 'Y arity)))
                           (append (mapcar (lambda (xi yi) `(not (,eq-sym ,xi ,yi))) xs ys)
                                   `((not (,r ,@xs)) (,r ,@ys)))))))
-    (append (replace-=-in-clauses eq-sym cls)
+    (append new-cls
             (list reflexivity symmetry transitivity)
             f-congruence
-            r-congruence)))
+            r-congruence)))))
 
 (defun fo-val (f) 
   "Check if f is valid using U-Resolution, 
@@ -2418,5 +2378,7 @@ Examples
     (solve 
       (make-hash-set #'equal)  
       (make-queue 
-        (reduce-equality
-          (to-clauses (simp-skolem-pnf-cnf f)))))))
+        (let+ ((cnf (simp-skolem-pnf-cnf f))
+               ((&values res fsig rsig) (fo-formulap cnf)))
+          (reduce-equality fsig rsig
+            (to-clauses cnf)))))))
