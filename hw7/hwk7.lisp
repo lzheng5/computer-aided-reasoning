@@ -1748,7 +1748,7 @@ Examples
 
     (_ (tseitin-transform f))))
 
-;; TODO: after nnf, fo-rename, lift-existentials, merge-existentials, skolemize, merge-universals, pnf, tseitin 
+;; TODO: after nnf, fo-rename, minimize-scope, merge-existentials, skolemize, merge-universals, pnf, tseitin 
 
 (defun simp-skolem-pnf-cnf (f)
   "Apply simplification, skolemization, prenex normal form conversion, and CNF transformation to f.
@@ -1871,38 +1871,48 @@ Examples
      ((list* F args) (some (lambda (a) (occurs var a)) args))
      (_ nil)))
 
+(defun term-unify (sigma l)
+  "Given initial substitution sigma and a list of term pairs (conses (s . t)),
+   return an MGU extending sigma, or 'fail if no unifier exists."
+  (match l
+    (nil sigma)
+    ((cons pair rest)
+     (let ((s (subst-term (car pair) sigma))
+           (u (subst-term (cdr pair) sigma)))
+       (match (cons s u)
+         ;; Already equal after substitution: skip
+         ((guard _ (equal s u))
+          (term-unify sigma rest))
+         ;; s is a variable: bind s -> u
+         ((cons (satisfies variable-symbolp) _)
+          (if (occurs s u)
+              'fail
+              (let ((b `((,s . ,u))))
+                (term-unify (cons (cons s u)
+                                  (mapcar (lambda (e) (cons (car e) (subst-term (cdr e) b)))
+                                          sigma))
+                            rest))))
+         ;; u is a variable: bind u -> s
+         ((cons _ (satisfies variable-symbolp))
+          (if (occurs u s)
+              'fail
+              (let ((b `((,u . ,s))))
+                (term-unify (cons (cons u s)
+                                  (mapcar (lambda (e) (cons (car e) (subst-term (cdr e) b)))
+                                          sigma))
+                            rest))))
+         ;; Both compound with same functor and arity: decompose
+         ((cons (list* f1 a1) (list* f2 a2))
+          (if (and (eq f1 f2) (= (length a1) (length a2)))
+              (term-unify sigma (append (mapcar #'cons a1 a2) rest))
+              'fail))
+         ;; Clash
+         (_ 'fail))))))
+
 (defun unify (l)
-  "Given a non-empty list of term pairs (conses (s . t)), return an MGU
+  "Given a non-empty list of terms, return an MGU
    alist mapping variables to terms in solved forms, or 'fail if no unifier exists."
-  (let ((eqs (copy-list l))
-        (sigma nil))
-    (loop
-      (when (null eqs) (return sigma))
-      (let* ((pair (pop eqs))
-             (s (subst-term (car pair) sigma))
-             (u (subst-term (cdr pair) sigma)))
-        (cond
-          ;; Already equal: nothing to do
-          ((equal s u) nil)
-          ;; s is a variable: bind s -> u
-          ((variable-symbolp s)
-           (when (occurs s u) (return 'fail))
-           (let ((b (list (cons s u))))
-             (setf sigma (mapcar (lambda (e) (cons (car e) (subst-term (cdr e) b))) sigma))
-             (push (cons s u) sigma)))
-          ;; u is a variable: bind u -> s
-          ((variable-symbolp u)
-           (when (occurs u s) (return 'fail))
-           (let ((b (list (cons u s))))
-             (setf sigma (mapcar (lambda (e) (cons (car e) (subst-term (cdr e) b))) sigma))
-             (push (cons u s) sigma)))
-          ;; Both compound terms with same functor and arity: decompose
-          ((and (consp s) (consp u)
-                (eq (car s) (car u))
-                (= (length (cdr s)) (length (cdr u))))
-           (setf eqs (append (mapcar #'cons (cdr s) (cdr u)) eqs)))
-          ;; Otherwise: clash
-          (t (return 'fail)))))))
+  (term-unify nil l))
 
 (defun subst-valid? (l sigma)
   "Returns t if applying sigma to both sides of each pair in l yields equal terms."
@@ -2004,6 +2014,25 @@ Examples
     (setf (car queue) new-list
           (cdr queue) (last new-list))))
 
+(defun queue-update-and-remove-if! (pred new-val queue)
+  "Replace the first element in QUEUE satisfying PRED with NEW-VAL,
+   and remove all subsequent elements satisfying PRED.
+   Returns t if any element was found satisfying PRED, nil otherwise."
+  (let ((found nil)
+        (new-list nil))
+    (dolist (x (car queue))
+      (cond ((funcall pred x)
+             (unless found
+               (push new-val new-list)
+               (setf found t)))
+            (t
+             (push x new-list))))
+    (when found
+      (let ((reversed (nreverse new-list)))
+        (setf (car queue) reversed
+              (cdr queue) (last reversed))))
+    found))
+
 ;; ==============================================================
 ;; To Clausal Form 
 ;; ==============================================================
@@ -2062,49 +2091,101 @@ Examples
           (push (cons l (car lits)) eqs))
         (unify eqs))))
 
-;; TODO: subsumption check 
-(defun clause-subsumes? (cl1 cl2) 
-  "cl1 => cl2"
-  ...)
+(defun term-match (theta t1 t2)
+  "Match a single pair: return extended theta if t1 matches t2, or 'fail."
+  (match t1
+    ;; t1 is a variable: look up in theta
+    ((satisfies variable-symbolp)
+     (let ((binding (assoc t1 theta :test #'equal)))
+       (cond
+         ;; already bound: check consistency with t2
+         (binding (if (equal (cdr binding) t2) theta 'fail))
+         ;; not yet bound: extend theta
+         (t (acons t1 t2 theta)))))
+    ;; t1 is a compound term: decompose if t2 has same functor and arity
+    ((list* f1 args1)
+     (match t2
+       ((list* (guard f2 (eq f1 f2)) args2)
+        (if (/= (length args1) (length args2))
+            'fail
+            (terms-match theta args1 args2)))
+       (_ 'fail)))
+    ;; t1 is a constant/quoted/constant-object: must literally equal t2
+    (_ (if (equal t1 t2) theta 'fail))))
 
-(defun trivial (cl)
-  "Return t if CL is a trivial clause (contains complementary literals or is a tautology), nil otherwise."
-  (or (null cl)
-      (let ((lits (mapcar (lambda (l)
-                            (match l
-                              ((list 'not a) a)
-                              (_ l)))
-                          cl)))
-        (some (lambda (l) (member (negate l) lits :test #'equal)) lits))))
+(defun terms-match (theta ts1 ts2)
+  "Given substitution theta and two lists of terms ts1 and ts2,
+   return an extended theta matching ts1 against ts2 pairwise, or 'fail on failure.
+   Matching is one-directional: only variables on the ts1 side may be bound.
+
+   Pre: ts1 and ts2 have the same length."
+  (dassert (= (length ts1) (length ts2)) "ts1 and ts2 must have the same length")
+  (if (null ts1)
+      theta
+      (let ((new-theta (term-match theta (car ts1) (car ts2))))
+        (if (eq new-theta 'fail) 'fail (terms-match new-theta (cdr ts1) (cdr ts2))))))
+
+(defun clause-subsumes? (cl1 cl2)
+  "cl1 subsumes cl2 if there exists some substitution θ such that θ(cl1) ⊆ cl2.
+   If this is the case, then cl1 => cl2.
+   Return t if cl1 subsumes cl2, nil otherwise.
+
+   Pre: cl1 and cl2 are non-empty clauses (lists of literals)."
+  (dassert (not (null cl1)) "cl1 should be non-empty for subsumption check")
+  (dassert (not (null cl2)) "cl2 should be non-empty for subsumption check")
+  (labels ((try-match (remaining-cl1 theta)
+             ;; For each literal in cl1, try to match it to some literal in cl2.
+             ;; Backtrack if a choice leads to a dead end.
+             (if (null remaining-cl1)
+                 t ;; all literals matched — return t (not theta, which may be nil)
+                 (let ((l1 (car remaining-cl1)))
+                   (dolist (l2 cl2)
+                     (let ((new-theta (term-match theta l1 l2)))
+                       (unless (eq new-theta 'fail)
+                         (let ((result (try-match (cdr remaining-cl1) new-theta)))
+                           (when result (return-from try-match result))))))
+                   nil))))
+    (try-match cl1 nil)))
+
+(defun trivial? (cl)
+  "Return t if CL is a tautological clause (contains a complementary pair of literals), nil otherwise."
+  (some (lambda (l) (member (negate l) cl :test #'equal)) cl))
 
 (defun replace (cl unusedQ)
-  "Replace any unused claused, unused-cl, in unusedQ that is subsumed by cl (cl => unused-cl) with cl, and return the updated unusedQ.
+  "Replace the first unused clause in unusedQ subsumed by cl (cl ⇒ unused-cl) with cl.
+   Remove all other unused clauses in unusedQ subsumed by cl.
+   If no such unused-cl exists, enqueue cl into unusedQ.
+   This way preserves the relative ordering of clauses in unusedQ.
    
-   1. If multiple such unused-cl exist, just keep one copy of cl in unusedQ. 
-      Note this is better than replacing only the first unused-cl in the book. 
+   Pre: cl and all clauses in unusedQ are non-empty (since trivial clauses should never be enqueued)."
 
-   2. If no such unused-cl exists, enqueue cl into unusedQ."
-  (let ((replaced nil))
-    (queue-remove-if! (lambda (unused-cl)
-                        (when (clause-subsumes? cl unused-cl)
-                          (setf replaced t)))
-                      unusedQ)
-    (when replaced
-      (enqueue cl unusedQ)))
-  unusedQ)
+  (dassert (not (null cl)) "cl should be non-empty for replacement")
+  (unless (queue-update-and-remove-if! ;; better than the book
+             (lambda (unused-cl) (clause-subsumes? cl unused-cl))
+             cl unusedQ)
+    (enqueue cl unusedQ)))
 
-(defun incorporate (gcl cl unusedQ) 
-  "If cl is non-trivial and not subsumed by gcl (gcl => cl) or any clause in unusedQ (unused-cl => cl), enqueue cl into unusedQ."
-  (if (or (trivial cl)
-          (clause-subsumes? gcl cl)
-          (some (lambda (used-cl) (clause-subsumes? used-cl cl)) (queue->list unusedQ)))
-      nil
-      (replace cl unusedQ)))
+(defun incorporate (used cl unusedQ)
+  "If cl is non-trivial and not subsumed by any clause in used or unusedQ, enqueue cl into unusedQ."
+  (unless (or (trivial? cl)
+              (let ((found nil)) ;; better than the book
+                (hash-set-map (lambda (used-cl)
+                                (when (clause-subsumes? used-cl cl)
+                                  (setf found t)))
+                              used)
+                found)
+              (some (lambda (unused-cl) (clause-subsumes? unused-cl cl)) (queue->list unusedQ)))
+    (replace cl unusedQ)))
 
-(defun resolve-clauses (cl1 cl2 unusedQ)
+(defun resolve-clauses (cl1 cl2 used unusedQ)
   "Compute resolvants by considering all pairs of literals (l1, l2) where l1 in cl1, l2 in cl2, and l1 is the negation of l2 
    Push the resolvants derived from resolving cl1 and cl2 into unusedQ.
-   Return nil if empty clause is derived, otherwise return the updated unusedQ"
+   Return nil if empty clause is derived, otherwise return the updated unusedQ.
+   
+   Pre: both cl1 and cl2 are already in used."
+   (dassert (hash-set-contains? used cl1) "cl1 should already be in used for presolve")
+   (dassert (hash-set-contains? used cl2) "cl2 should already be in used for presolve")
+
    (let ((new-cl1 (rename-clause cl1))
          (new-cl2 (rename-clause cl2)))
       (dolist (l1 new-cl1)
@@ -2127,19 +2208,24 @@ Examples
                                        (resolvant (subst-terms R U)))
                                   (if (null resolvant)
                                       (return-from resolve-clauses nil) ;; empty clause derived
-                                      (incorporate cl1 resolvant unusedQ))))))))))))))
+                                      (incorporate used resolvant unusedQ))))))))))))))
    unusedQ)
 
 (defun positive-clause? (cl)
   "Returns t if CL is a positive clause (contains no negated literals)."
   (every (lambda (l) (not (and (listp l) (eq (car l) 'not)))) cl))
 
-(defun presolve-clauses (cl1 cl2 unusedQ)
+(defun presolve-clauses (cl1 cl2 used unusedQ)
   "Apply positive resolution to CL1 and CL2 if they contain complementary literals.
    Push the resolvants derived from resolving cl1 and cl2 into unusedQ.
-   Return nil if empty clause is derived, otherwise return the updated unusedQ"
+   Return nil if empty clause is derived, otherwise return the updated unusedQ. 
+   
+   Pre: both cl1 and cl2 are already in used."
+  (dassert (hash-set-contains? used cl1) "cl1 should already be in used for presolve")
+  (dassert (hash-set-contains? used cl2) "cl2 should already be in used for presolve")
+
   (if (or (positive-clause? cl1) (positive-clause? cl2))
-      (resolve-clauses cl1 cl2 unusedQ)
+      (resolve-clauses cl1 cl2 used unusedQ)
       unusedQ))
 
 (defun solve (used unusedQ)
@@ -2152,9 +2238,9 @@ Examples
       (progn 
         (dbg "used: ~A, unused: ~A" (hash-set-size used) (length (queue->list unusedQ)))
         (let* ((cl (dequeue unusedQ)))
-          (hash-set-add used cl)
+          (hash-set-add used cl) ;; necessary to handle factoring
           (hash-set-map #'(lambda (used-cl)
-                            (let ((new-unusedQ (presolve-clauses cl used-cl unusedQ))) ;; mutates unusedQ
+                            (let ((new-unusedQ (presolve-clauses cl used-cl used unusedQ))) ;; mutates unusedQ
                               (if (null new-unusedQ)
                                   (return-from solve 'valid)
                                   nil)))
