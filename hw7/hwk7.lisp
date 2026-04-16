@@ -1886,7 +1886,7 @@ Examples
      ((list* F args) (some (lambda (a) (occurs var a)) args))
      (_ nil)))
 
-(defun term-unify (sigma t1 t2)
+(defun term-unify (t1 t2 &optional (sigma nil))
   "Unify a single pair (t1, t2) under sigma: return extended sigma, or 'fail."
   (let ((t1 (subst-term t1 sigma))
         (t2 (subst-term t2 sigma)))
@@ -1913,26 +1913,26 @@ Examples
       ;; Both compound with same functor and arity: decompose
       ((cons (list* f1 a1) (list* f2 a2))
        (if (and (eq f1 f2) (= (length a1) (length a2)))
-           (terms-unify sigma a1 a2)
+           (terms-unify a1 a2 sigma)
            'fail))
       ;; Clash
       (_ 'fail))))
 
-(defun terms-unify (sigma ts1 ts2)
-  "Given substitution sigma and two lists of terms ts1 and ts2,
+(defun terms-unify (ts1 ts2 &optional (sigma nil))
+  "Given two lists of terms ts1 and ts2 and optional substitution sigma,
    return an MGU extending sigma by unifying them pairwise, or 'fail.
 
    Pre: ts1 and ts2 have the same length."
   (dassert (= (length ts1) (length ts2)) "ts1 and ts2 must have the same length")
   (if (null ts1)
       sigma
-      (let ((new-sigma (term-unify sigma (car ts1) (car ts2))))
-        (if (eq new-sigma 'fail) 'fail (terms-unify new-sigma (cdr ts1) (cdr ts2))))))
+      (let ((new-sigma (term-unify (car ts1) (car ts2) sigma)))
+        (if (eq new-sigma 'fail) 'fail (terms-unify (cdr ts1) (cdr ts2) new-sigma))))))
 
 (defun unify (tps)
   "Given a non-empty list of term pairs (conses (s . t)), return an MGU
    alist mapping variables to terms in solved forms, or 'fail if no unifier exists."
-  (terms-unify nil (mapcar #'car tps) (mapcar #'cdr tps)))
+  (terms-unify (mapcar #'car tps) (mapcar #'cdr tps)))
 
 (defun subst-valid? (tps sigma)
   "Returns t if applying sigma to both sides of each pair in tps yields equal terms."
@@ -2100,18 +2100,15 @@ Examples
 
 (defun unifiable? (l1 l2)
   "Return t if literals l1 and l2 are unifiable, nil otherwise."
-  (not (eq (unify `((,l1 . ,l2))) 'fail)))
+  (not (eq (term-unify l1 l2) 'fail)))
 
 (defun unify-seq (lits)
   "Given a list of literals, return an MGU that unifies all of them, or 'fail if no such unifier exists."
   (if (null lits)
       nil
-      (let ((eqs nil))
-        (dolist (l (cdr lits))
-          (push (cons l (car lits)) eqs))
-        (unify eqs))))
+      (terms-unify (cdr lits) (mapcar #'(lambda (_) (car lits)) (cdr lits)))))
 
-(defun term-match (theta t1 t2)
+(defun term-match (t1 t2 &optional (theta nil))
   "Match a single pair: return extended theta if t1 matches t2, or 'fail."
   (match t1
     ;; t1 is a variable: look up in theta
@@ -2128,13 +2125,13 @@ Examples
        ((list* (guard f2 (eq f1 f2)) args2)
         (if (/= (length args1) (length args2))
             'fail
-            (terms-match theta args1 args2)))
+            (terms-match args1 args2 theta)))
        (_ 'fail)))
     ;; t1 is a constant/quoted/constant-object: must literally equal t2
     (_ (if (equal t1 t2) theta 'fail))))
 
-(defun terms-match (theta ts1 ts2)
-  "Given substitution theta and two lists of terms ts1 and ts2,
+(defun terms-match (ts1 ts2 &optional (theta nil))
+  "Given two lists of terms ts1 and ts2 and optional substitution theta,
    return an extended theta matching ts1 against ts2 pairwise, or 'fail on failure.
    Matching is one-directional: only variables on the ts1 side may be bound.
 
@@ -2142,8 +2139,8 @@ Examples
   (dassert (= (length ts1) (length ts2)) "ts1 and ts2 must have the same length")
   (if (null ts1)
       theta
-      (let ((new-theta (term-match theta (car ts1) (car ts2))))
-        (if (eq new-theta 'fail) 'fail (terms-match new-theta (cdr ts1) (cdr ts2))))))
+      (let ((new-theta (term-match (car ts1) (car ts2) theta)))
+        (if (eq new-theta 'fail) 'fail (terms-match (cdr ts1) (cdr ts2) new-theta))))))
 
 (defun clause-subsumes? (cl1 cl2)
   "cl1 subsumes cl2 if there exists some substitution θ such that θ(cl1) ⊆ cl2.
@@ -2160,7 +2157,7 @@ Examples
                  t ;; all literals matched — return t (not theta, which may be nil)
                  (let ((l1 (car remaining-cl1)))
                    (dolist (l2 cl2)
-                     (let ((new-theta (term-match theta l1 l2)))
+                     (let ((new-theta (term-match l1 l2 theta)))
                        (unless (eq new-theta 'fail)
                          (let ((result (try-match (cdr remaining-cl1) new-theta)))
                            (when result (return-from try-match result))))))
