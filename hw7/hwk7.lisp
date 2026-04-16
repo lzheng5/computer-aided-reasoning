@@ -2283,4 +2283,82 @@ Examples
 
 |#
 
-(defun fo-val (f) ...)
+(defun replace-eq-in-literal (l)
+  "Replace = with EQ in a literal."
+  (match l
+    ((list 'not a) `(not ,(replace-eq-in-literal a)))
+    ((list* '= args) `(EQ ,@args))
+    (_ l)))
+
+(defun replace-eq-in-clause (cl)
+  "Replace = with EQ in every literal of a clause."
+  (mapcar #'replace-eq-in-literal cl))
+
+(defun replace-eq-in-clauses (cls)
+  "Replace = with EQ in every clause."
+  (mapcar #'replace-eq-in-clause cls))
+
+;; TODO: fix when SK, TS, and EQ are all in the original formula already
+;; They should be excluded by genvar. 
+;; Here EQ should be generated fresh and not appear in the original formula, so we can safely replace all = with EQ without worrying about circularity.
+
+(defun reduce-equality (fsig rsig cls) 
+  "Replace = with a new relational symbol EQ. 
+
+   For each f symbol, add a new axiom clause enforcing congruence relations, 
+   if all arguments are equal, then the function applications are equal:
+   ((not (EQ x1 y1)) ... (not (EQ xn yn)) (EQ (f x1 ... xn) (f y1 ... yn))). 
+   
+   For each r symbol, add an axiom clause enforcing congruence relations,
+   if all arguments are equal, then the relation applications are equivalent:
+   ((not (EQ x1 y1)) ... (not (EQ xn yn)) (not (r x1 ... xn)) (r y1 ... yn)).
+   
+   Add reflexivity, symmetry, and transitivity axioms for equality:
+   ((EQ x x))
+   ((not (EQ x y)) (EQ y x))
+   ((not (EQ x y)) (not (EQ y z)) (EQ x z))"
+   
+  (let* ((x (genvar 'X)) (y (genvar 'X)) (z (genvar 'X))
+         ;; Equivalence axioms
+         (reflexivity  `((EQ ,x ,x)))
+         (symmetry     `((not (EQ ,x ,y)) (EQ ,y ,x)))
+         (transitivity `((not (EQ ,x ,y)) (not (EQ ,y ,z)) (EQ ,x ,z)))
+         ;; Function congruence axioms
+         (f-congruence
+          (loop for (f . arity) in fsig
+                when (> arity 0)
+                collect (let ((xs (genvars 'X arity))
+                              (ys (genvars 'X arity)))
+                          (append (mapcar (lambda (xi yi) `(not (EQ ,xi ,yi))) xs ys)
+                                  `((EQ (,f ,@xs) (,f ,@ys)))))))
+         ;; Relation congruence axioms (skip EQ itself to avoid circularity)
+         (r-congruence
+          (loop for (r . arity) in rsig
+                when (and (not (eq r 'EQ)) (> arity 0))
+                collect (let ((xs (genvars 'X arity))
+                              (ys (genvars 'X arity)))
+                          (append (mapcar (lambda (xi yi) `(not (EQ ,xi ,yi))) xs ys)
+                                  `((not (,r ,@xs)) (,r ,@ys)))))))
+    (append (replace-eq-in-clauses cls)
+            (list reflexivity symmetry transitivity)
+            f-congruence
+            r-congruence)))
+
+(defun fo-val (f) 
+  "Check if f is valid using U-Resolution, 
+   where for a FO sequent (Γ ⊢ φ), f = Γ ∧ ¬φ. 
+
+   Returns 'valid if f is valid (always true) or nil if f is unsatisfiable (always false). 
+   Loops if f is satisfiable but not valid (sometimes true but sometimes false).
+
+   Pre: f is a FO formula."
+  (dassert (fo-formulap f) "Input must be a FO formula")
+
+  (with-free-vars (free-vars f)
+    (let+ ((cnf (simp-skolem-pnf-cnf f))
+          ((&values res fsig rsig) (fo-formulap cnf)))
+      (solve 
+        (make-hash-set #'equal)  
+        (make-queue 
+          (reduce-equality fsig rsig
+           (to-clauses cnf))))))) 
