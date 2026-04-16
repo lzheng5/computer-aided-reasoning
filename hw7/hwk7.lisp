@@ -1765,6 +1765,158 @@ Examples
 
     (_ (tseitin-transform f))))
 
+(defun merge-quantified-vars (f)
+  "Bottom-up pass: merge same-quantifier nesting.
+   (Q vars1 (Q vars2 body)) -> (Q (vars1 ++ vars2) body) where both Q are identical.
+
+   Pre: formula is in NNF and fo-rename has been applied (unique bound vars)."
+  (labels ((walk (f)
+             (match f
+               ;; < quant-fo-formulap >: recurse into body first (bottom-up)
+               ((list (guard q (fo-quantifierp q)) vars body)
+                (let ((new-body (walk body)))
+                  ;; merge if body (after walking) is same quantifier
+                  (match new-body
+                    ((list (guard q2 (eq q2 q)) vars2 inner)
+                     `(,q ,(append vars vars2) ,inner))
+                    (_ `(,q ,vars ,new-body)))))
+
+               ;; < p-fo-formulap >
+               ((type boolean) f)
+               ((list* (guard op (p-funp op)) args)
+                `(,op ,@(mapcar #'walk args)))
+
+               ;; < fo-atomic-formulap >
+               (_ f))))
+    (walk f)))
+
+(defun unfold-universal (f)
+  "Bottom-up pass for universal quantifiers only.
+   (forall vars (and ...)) -> (and (forall vars arg1) (forall vars arg2) ...)
+   (forall vars (or ...))  -> partition vars per arg; rebuild with per-arg forall prefixes,
+                              shared vars on an outer forall; drops empty prefixes.
+
+   Pre: formula is in NNF and fo-rename has been applied."
+  (labels ((wrap-forall (vars body)
+             (if (null vars) body `(forall ,vars ,body)))
+           (walk (f)
+             (match f
+               ;; < quant-fo-formulap >: recurse first
+               ((list 'forall vars body)
+                (let ((new-body (walk body)))
+                  (match new-body
+                    ;; forall/and (matching): distribute unconditionally
+                    ((list* 'and args)
+                     `(and ,@(mapcar (lambda (a) `(forall ,vars ,a)) args)))
+                    ;; forall/or (cross-case): partition vars by free-vars of each arg
+                    ((list* 'or args)
+                     (let* ((arg-fvs (mapcar #'free-vars args))
+                            ;; shared: vars free in 2+ args — must stay on outer forall
+                            (shared (remove-if-not
+                                     (lambda (v)
+                                       (>= (count-if (lambda (fv) (member v fv)) arg-fvs) 2))
+                                     vars))
+                            ;; per-arg exclusive: in vars, free in this arg, not shared
+                            (new-args (mapcar (lambda (a fv)
+                                                (let ((excl (intersection vars (set-difference fv shared))))
+                                                  (wrap-forall excl a)))
+                                              args arg-fvs)))
+                       (wrap-forall shared `(or ,@new-args))))
+                    ;; otherwise: leave as-is
+                    (_ `(forall ,vars ,new-body)))))
+
+               ;; exists or p-fo: recurse into body/args
+               ((list 'exists vars body)
+                `(exists ,vars ,(walk body)))
+
+               ;; < p-fo-formulap >
+               ((type boolean) f)
+               ((list* (guard op (p-funp op)) args)
+                `(,op ,@(mapcar #'walk args)))
+
+               ;; < fo-atomic-formulap >
+               (_ f))))
+    (walk f)))
+
+(defun unfold-existential (f)
+  "Bottom-up pass for existential quantifiers only.
+   (exists vars (or ...))  -> (or (exists vars arg1) (exists vars arg2) ...)
+   (exists vars (and ...)) -> partition vars per arg; rebuild with per-arg exists prefixes,
+                              shared vars on an outer exists; drops empty prefixes.
+
+   Pre: formula is in NNF and fo-rename has been applied."
+  (labels ((wrap-exists (vars body)
+             (if (null vars) body `(exists ,vars ,body)))
+           (walk (f)
+             (match f
+               ;; < quant-fo-formulap >: recurse first
+               ((list 'exists vars body)
+                (let ((new-body (walk body)))
+                  (match new-body
+                    ;; exists/or (matching): distribute unconditionally
+                    ((list* 'or args)
+                     `(or ,@(mapcar (lambda (a) `(exists ,vars ,a)) args)))
+                    ;; exists/and (cross-case): partition vars by free-vars of each arg
+                    ((list* 'and args)
+                     (let* ((arg-fvs (mapcar #'free-vars args))
+                            ;; shared: vars free in 2+ args — must stay on outer exists
+                            (shared (remove-if-not
+                                     (lambda (v)
+                                       (>= (count-if (lambda (fv) (member v fv)) arg-fvs) 2))
+                                     vars))
+                            ;; per-arg exclusive: in vars, free in this arg, not shared
+                            (new-args (mapcar (lambda (a fv)
+                                                (let ((excl (intersection vars (set-difference fv shared))))
+                                                  (wrap-exists excl a)))
+                                              args arg-fvs)))
+                       (wrap-exists shared `(and ,@new-args))))
+                    ;; otherwise: leave as-is
+                    (_ `(exists ,vars ,new-body)))))
+
+               ;; forall or p-fo: recurse into body/args
+               ((list 'forall vars body)
+                `(forall ,vars ,(walk body)))
+
+               ;; < p-fo-formulap >
+               ((type boolean) f)
+               ((list* (guard op (p-funp op)) args)
+                `(,op ,@(mapcar #'walk args)))
+
+               ;; < fo-atomic-formulap >
+               (_ f))))
+    (walk f)))
+
+(defun minimize-scope (f)
+  "Minimize the scope of quantifiers by running four bottom-up passes to fixpoint:
+     1. merge-quantified-vars    -- (Q v1 (Q v2 body)) -> (Q (v1++v2) body)
+     2. unfold-universal         -- (forall v (and ...)) / (forall v (or ...))
+     3. unfold-existential       -- (exists v (or ...))  / (exists v (and ...))
+     4. fo-simplify-trivially-quantified -- remove vacuous quantifiers
+   Repeats until the formula stabilizes.
+
+   Pre: formula is in NNF and fo-rename has been applied (unique bound vars)."
+  (let ((new-f (fo-simplify-trivially-quantified
+                (unfold-existential
+                 (unfold-universal
+                  (merge-quantified-vars f))))))
+    (if (equal new-f f)
+        f
+        (minimize-scope new-f))))
+
+;; minimize-scope tests
+(assertf #'minimize-scope
+         '(forall (x) (forall (y) (P x y)))
+         '(forall (x y) (P x y)))
+(assertf #'minimize-scope
+         '(exists (x) (exists (y) (or (P x) (Q y))))
+         '(or (exists (x) (P x)) (exists (y) (Q y))))
+(assertf #'minimize-scope
+         '(forall (x) (and (P x) (Q y)))
+         '(and (forall (x) (P x)) (Q y)))
+(assertf #'minimize-scope
+         '(exists (x) (and (P x) (Q y)))
+         '(and (exists (x) (P x)) (Q y)))
+
 (defun merge-existentials (f)
   "Bottom-up pass: on each (or ...) node, group (exists vars body) children with
    identical var-lists and fold each group into (exists vars (or body...)).
@@ -1859,7 +2011,7 @@ Examples
                (_ f))))
     (walk f)))
 
-;; TODO: after nnf, fo-rename, minimize-scope, merge-existentials, skolemize, merge-universals, pnf, tseitin
+;; Pipeline: fo-simplify -> nnf -> fo-rename -> minimize-scope -> merge-existentials -> skolemize -> merge-universals -> pnf -> tseitin
 
 (defun simp-skolem-pnf-cnf (f)
   "Apply simplification, skolemization, prenex normal form conversion, and CNF transformation to f.
@@ -1873,8 +2025,10 @@ Examples
     (merge-universals
      (skolemize
       (merge-existentials
-       (nnf
-        (fo-simplify f))))))))
+       (minimize-scope
+        (fo-rename
+         (nnf
+          (fo-simplify f))))))))))
 
 ;; Some example problems
 (defconstant *mortal* '(and (forall x (implies (man x) (mortal x)))
