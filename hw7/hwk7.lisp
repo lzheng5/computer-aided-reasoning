@@ -1871,55 +1871,60 @@ Examples
      ((list* F args) (some (lambda (a) (occurs var a)) args))
      (_ nil)))
 
-(defun term-unify (sigma l)
-  "Given initial substitution sigma and a list of term pairs (conses (s . t)),
-   return an MGU extending sigma, or 'fail if no unifier exists."
-  (match l
-    (nil sigma)
-    ((cons pair rest)
-     (let ((s (subst-term (car pair) sigma))
-           (u (subst-term (cdr pair) sigma)))
-       (match (cons s u)
-         ;; Already equal after substitution: skip
-         ((guard _ (equal s u))
-          (term-unify sigma rest))
-         ;; s is a variable: bind s -> u
-         ((cons (satisfies variable-symbolp) _)
-          (if (occurs s u)
-              'fail
-              (let ((b `((,s . ,u))))
-                (term-unify (cons (cons s u)
-                                  (mapcar (lambda (e) (cons (car e) (subst-term (cdr e) b)))
-                                          sigma))
-                            rest))))
-         ;; u is a variable: bind u -> s
-         ((cons _ (satisfies variable-symbolp))
-          (if (occurs u s)
-              'fail
-              (let ((b `((,u . ,s))))
-                (term-unify (cons (cons u s)
-                                  (mapcar (lambda (e) (cons (car e) (subst-term (cdr e) b)))
-                                          sigma))
-                            rest))))
-         ;; Both compound with same functor and arity: decompose
-         ((cons (list* f1 a1) (list* f2 a2))
-          (if (and (eq f1 f2) (= (length a1) (length a2)))
-              (term-unify sigma (append (mapcar #'cons a1 a2) rest))
-              'fail))
-         ;; Clash
-         (_ 'fail))))))
+(defun term-unify (sigma t1 t2)
+  "Unify a single pair (t1, t2) under sigma: return extended sigma, or 'fail."
+  (let ((t1 (subst-term t1 sigma))
+        (t2 (subst-term t2 sigma)))
+    (match (cons t1 t2)
+      ;; Already equal after substitution: skip
+      ((guard _ (equal t1 t2))
+       sigma)
+      ;; t1 is a variable: bind t1 -> t2
+      ((cons (satisfies variable-symbolp) _)
+       (if (occurs t1 t2)
+           'fail
+           (let ((b `((,t1 . ,t2))))
+             (cons (cons t1 t2)
+                   (mapcar (lambda (e) (cons (car e) (subst-term (cdr e) b)))
+                           sigma)))))
+      ;; t2 is a variable: bind t2 -> t1
+      ((cons _ (satisfies variable-symbolp))
+       (if (occurs t2 t1)
+           'fail
+           (let ((b `((,t2 . ,t1))))
+             (cons (cons t2 t1)
+                   (mapcar (lambda (e) (cons (car e) (subst-term (cdr e) b)))
+                           sigma)))))
+      ;; Both compound with same functor and arity: decompose
+      ((cons (list* f1 a1) (list* f2 a2))
+       (if (and (eq f1 f2) (= (length a1) (length a2)))
+           (terms-unify sigma a1 a2)
+           'fail))
+      ;; Clash
+      (_ 'fail))))
 
-(defun unify (l)
-  "Given a non-empty list of terms, return an MGU
+(defun terms-unify (sigma ts1 ts2)
+  "Given substitution sigma and two lists of terms ts1 and ts2,
+   return an MGU extending sigma by unifying them pairwise, or 'fail.
+
+   Pre: ts1 and ts2 have the same length."
+  (dassert (= (length ts1) (length ts2)) "ts1 and ts2 must have the same length")
+  (if (null ts1)
+      sigma
+      (let ((new-sigma (term-unify sigma (car ts1) (car ts2))))
+        (if (eq new-sigma 'fail) 'fail (terms-unify new-sigma (cdr ts1) (cdr ts2))))))
+
+(defun unify (tps)
+  "Given a non-empty list of term pairs (conses (s . t)), return an MGU
    alist mapping variables to terms in solved forms, or 'fail if no unifier exists."
-  (term-unify nil l))
+  (terms-unify nil (mapcar #'car tps) (mapcar #'cdr tps)))
 
-(defun subst-valid? (l sigma)
-  "Returns t if applying sigma to both sides of each pair in l yields equal terms."
+(defun subst-valid? (tps sigma)
+  "Returns t if applying sigma to both sides of each pair in tps yields equal terms."
   (every (lambda (pair)
            (equal (subst-term (car pair) sigma)
                   (subst-term (cdr pair) sigma)))
-         l))
+         tps))
 
 ;; Trivial: single variable unified with a constant
 (assertf #'unify '((x . c0)) '((x . c0)))
