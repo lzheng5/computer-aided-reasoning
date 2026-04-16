@@ -939,17 +939,32 @@ Examples
   (loop for i from 0 below n
         collect (genvar prefix)))
 
-(defmacro with-free-vars (fvars &body body)
+(defmacro with-fo-formula-exclusions (fvars fsig rsig &body body)
   "Execute BODY with a fresh per-prefix counter map and *var-gen-exclusion-set*
-   pre-populated from fvars (a list of variable symbols, e.g. from free-vars).
+   pre-populated from fvars (a list of symbols), fsig, and rsig (an alist of symbols and arities).
    Prevents genvar from generating names that clash with the given variables."
-  `(let ((*var-gen-cnt-map*       (make-hash-table :test #'eq))
-         (*var-gen-exclusion-set* (list->hash-set ,fvars)))
-     ,@body))
+  (let ((entry1 (gensym "ENTRY"))
+        (entry2 (gensym "ENTRY")))
+    `(let ((*var-gen-cnt-map*       (make-hash-table :test #'eq))
+           (*var-gen-exclusion-set* (list->hash-set ,fvars)))
+       (dolist (,entry1 ,fsig) (hash-set-add *var-gen-exclusion-set* (car ,entry1)))
+       (dolist (,entry2 ,rsig) (hash-set-add *var-gen-exclusion-set* (car ,entry2)))
+       ,@body)))
+
+(defmacro with-fo-formula (f &body body)
+  "Execute BODY with a fresh per-prefix counter map and *var-gen-exclusion-set*
+   pre-populated from the free vars of f and fsig and rsig of f.
+   Prevents genvar from generating names that clash with the given variables."
+  (let ((res-var  (gensym "RES"))
+        (fsig-var (gensym "FSIG"))
+        (rsig-var (gensym "RSIG")))
+    `(let+ (((&values ,res-var ,fsig-var ,rsig-var) (fo-formulap ,f)))
+       (dassert ,res-var "Input formula is not a well-formed FO formula.")
+       (with-fo-formula-exclusions (free-vars ,f) ,fsig-var ,rsig-var
+         ,@body))))
 
 (defun assertv (f in out)
-  (dassert (fo-formulap in) "Input formula is not well-formed")
-  (with-free-vars (free-vars in)
+  (with-fo-formula in
     (== (funcall f in) out)))
 
 ;;; ============================================================
@@ -2261,11 +2276,10 @@ Examples
 
    Pre: f is a FO formula without equality."
 
-  (dassert (fo-formulap f) "Input must be a FO formula")
-  (with-free-vars (free-vars f)
-   (solve 
-    (make-hash-set #'equal)  
-    (make-queue (to-clauses (simp-skolem-pnf-cnf f)))))) 
+  (with-fo-formula f
+    (solve 
+      (make-hash-set #'equal)  
+      (make-queue (to-clauses (simp-skolem-pnf-cnf f)))))) 
 
 #|
 
@@ -2283,63 +2297,111 @@ Examples
 
 |#
 
-(defun replace-eq-in-literal (l)
-  "Replace = with EQ in a literal."
+(defun replace-=-in-literal (eq-sym l)
+  "Replace = with eq-sym in a literal."
   (match l
-    ((list 'not a) `(not ,(replace-eq-in-literal a)))
-    ((list* '= args) `(EQ ,@args))
+    ((list 'not a) `(not ,(replace-=-in-literal eq-sym a)))
+    ((list* '= args) `(,eq-sym ,@args))
     (_ l)))
 
-(defun replace-eq-in-clause (cl)
-  "Replace = with EQ in every literal of a clause."
-  (mapcar #'replace-eq-in-literal cl))
+(defun replace-=-in-clause (eq-sym cl)
+  "Replace = with eq-sym in every literal of a clause."
+  (mapcar (lambda (l) (replace-=-in-literal eq-sym l)) cl))
 
-(defun replace-eq-in-clauses (cls)
-  "Replace = with EQ in every clause."
-  (mapcar #'replace-eq-in-clause cls))
+(defun replace-=-in-clauses (eq-sym cls)
+  "Replace = with eq-sym in every clause."
+  (mapcar (lambda (cl) (replace-=-in-clause eq-sym cl)) cls))
 
-;; TODO: fix when SK, TS, and EQ are all in the original formula already
-;; They should be excluded by genvar. 
-;; Here EQ should be generated fresh and not appear in the original formula, so we can safely replace all = with EQ without worrying about circularity.
+(defun =-context-symbols (cls)
+  "Collect the function and relation symbols that appear inside = literals in cls.
+   Returns (values f-syms r-syms) where each is an alist of (symbol . arity)."
+  (let ((fsyms nil)
+        (rsyms nil))
+    (labels ((collect-from-term (tm)
+               (match tm
+                 ((list* (guard f (function-symbolp f)) args)
+                  (let ((arity (length args)))
+                    (unless (assoc f fsyms :test #'eq)
+                      (push (cons f arity) fsyms))
+                    (mapc #'collect-from-term args)))
+                 (_ nil)))
+             (collect-from-literal (l)
+               (match l
+                 ((list 'not a) (collect-from-literal a))
+                 ((list '= t1 t2)
+                  (collect-from-term t1)
+                  (collect-from-term t2))
+                 ;; For relation congruence: if a relation appears with args
+                 ;; that contain function symbols also in = context, we need it.
+                 ;; But more precisely, any relation that shares variables with
+                 ;; = literals may need congruence. Conservatively, collect all
+                 ;; relation symbols that appear in clauses containing =.
+                 (_ nil)))
+             (clause-has-eq? (cl)
+               (some (lambda (l)
+                       (match l
+                         ((list '= _ _) t)
+                         ((list 'not (list '= _ _)) t)
+                         (_ nil)))
+                     cl))
+             (collect-relations-from-clause (cl)
+               (dolist (l cl)
+                 (match l
+                   ((list 'not (list* (guard r (relation-symbolp r)) args))
+                    (unless (or (eq r '=) (assoc r rsyms :test #'eq))
+                      (push (cons r (length args)) rsyms)))
+                   ((list* (guard r (relation-symbolp r)) args)
+                    (unless (or (eq r '=) (assoc r rsyms :test #'eq))
+                      (push (cons r (length args)) rsyms)))
+                   (_ nil)))))
+      ;; Collect f-symbols from = arguments and r-symbols from clauses containing =
+      (dolist (cl cls)
+        (dolist (l cl) (collect-from-literal l))
+        (when (clause-has-eq? cl)
+          (collect-relations-from-clause cl))))
+    (values fsyms rsyms)))
 
-(defun reduce-equality (fsig rsig cls) 
-  "Replace = with a new relational symbol EQ. 
+(defun reduce-equality (cls)
+  "Replace = with a fresh relational symbol and add equality axioms.
 
-   For each f symbol, add a new axiom clause enforcing congruence relations, 
-   if all arguments are equal, then the function applications are equal:
-   ((not (EQ x1 y1)) ... (not (EQ xn yn)) (EQ (f x1 ... xn) (f y1 ... yn))). 
-   
-   For each r symbol, add an axiom clause enforcing congruence relations,
-   if all arguments are equal, then the relation applications are equivalent:
-   ((not (EQ x1 y1)) ... (not (EQ xn yn)) (not (r x1 ... xn)) (r y1 ... yn)).
-   
-   Add reflexivity, symmetry, and transitivity axioms for equality:
-   ((EQ x x))
-   ((not (EQ x y)) (EQ y x))
-   ((not (EQ x y)) (not (EQ y z)) (EQ x z))"
-   
-  (let* ((x (genvar 'X)) (y (genvar 'X)) (z (genvar 'X))
+   Collects the function and relation symbols that appear in the context of =,
+   and only generates congruence axioms for those symbols.
+
+   Equivalence axioms:
+   ((eq-sym x x))
+   ((not (eq-sym x y)) (eq-sym y x))
+   ((not (eq-sym x y)) (not (eq-sym y z)) (eq-sym x z))
+
+   Function congruence (one per f-symbol in = context with arity > 0):
+   ((not (eq-sym x1 y1)) ... (not (eq-sym xn yn)) (eq-sym (f x1...xn) (f y1...yn)))
+
+   Relation congruence (one per r-symbol in = context with arity > 0):
+   ((not (eq-sym x1 y1)) ... (not (eq-sym xn yn)) (not (r x1...xn)) (r y1...yn))"
+
+  (let+ ((eq-sym (genvar 'EQ))
+         ((&values eq-fsig eq-rsig) (=-context-symbols cls))
+         (x (genvar 'X)) (y (genvar 'X)) (z (genvar 'X))
          ;; Equivalence axioms
-         (reflexivity  `((EQ ,x ,x)))
-         (symmetry     `((not (EQ ,x ,y)) (EQ ,y ,x)))
-         (transitivity `((not (EQ ,x ,y)) (not (EQ ,y ,z)) (EQ ,x ,z)))
+         (reflexivity  `((,eq-sym ,x ,x)))
+         (symmetry     `((not (,eq-sym ,x ,y)) (,eq-sym ,y ,x)))
+         (transitivity `((not (,eq-sym ,x ,y)) (not (,eq-sym ,y ,z)) (,eq-sym ,x ,z)))
          ;; Function congruence axioms
          (f-congruence
-          (loop for (f . arity) in fsig
+          (loop for (f . arity) in eq-fsig
                 when (> arity 0)
                 collect (let ((xs (genvars 'X arity))
-                              (ys (genvars 'X arity)))
-                          (append (mapcar (lambda (xi yi) `(not (EQ ,xi ,yi))) xs ys)
-                                  `((EQ (,f ,@xs) (,f ,@ys)))))))
-         ;; Relation congruence axioms (skip EQ itself to avoid circularity)
+                              (ys (genvars 'Y arity)))
+                          (append (mapcar (lambda (xi yi) `(not (,eq-sym ,xi ,yi))) xs ys)
+                                  `((,eq-sym (,f ,@xs) (,f ,@ys)))))))
+         ;; Relation congruence axioms
          (r-congruence
-          (loop for (r . arity) in rsig
-                when (and (not (eq r 'EQ)) (> arity 0))
+          (loop for (r . arity) in eq-rsig
+                when (> arity 0)
                 collect (let ((xs (genvars 'X arity))
-                              (ys (genvars 'X arity)))
-                          (append (mapcar (lambda (xi yi) `(not (EQ ,xi ,yi))) xs ys)
+                              (ys (genvars 'Y arity)))
+                          (append (mapcar (lambda (xi yi) `(not (,eq-sym ,xi ,yi))) xs ys)
                                   `((not (,r ,@xs)) (,r ,@ys)))))))
-    (append (replace-eq-in-clauses cls)
+    (append (replace-=-in-clauses eq-sym cls)
             (list reflexivity symmetry transitivity)
             f-congruence
             r-congruence)))
@@ -2352,13 +2414,9 @@ Examples
    Loops if f is satisfiable but not valid (sometimes true but sometimes false).
 
    Pre: f is a FO formula."
-  (dassert (fo-formulap f) "Input must be a FO formula")
-
-  (with-free-vars (free-vars f)
-    (let+ ((cnf (simp-skolem-pnf-cnf f))
-          ((&values res fsig rsig) (fo-formulap cnf)))
-      (solve 
-        (make-hash-set #'equal)  
-        (make-queue 
-          (reduce-equality fsig rsig
-           (to-clauses cnf))))))) 
+  (with-fo-formula f
+    (solve 
+      (make-hash-set #'equal)  
+      (make-queue 
+        (reduce-equality
+          (to-clauses (simp-skolem-pnf-cnf f)))))))
