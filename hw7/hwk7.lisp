@@ -1627,13 +1627,15 @@ Examples
               ;; universal: extend scope and recurse
               ((eq q 'forall)
                `(forall ,vars ,(walk body (append vars forall-vars) exists-map)))
-              ;; existential: build Skolem terms capturing current forall-vars,
+              ;; existential: build Skolem terms capturing only forall-vars free in body
               ((eq q 'exists)
-               (let ((new-exist-map
-                       (reduce (lambda (m v)
-                                 (acons v `(,(genvar 'SK) ,@forall-vars) m))
-                               vars
-                               :initial-value exists-map)))
+               (let* ((fv-body (free-vars body))
+                      (relevant-forall-vars (intersection forall-vars fv-body))
+                      (new-exist-map
+                        (reduce (lambda (m v)
+                                  (acons v `(,(genvar 'SK) ,@relevant-forall-vars) m))
+                                vars
+                                :initial-value exists-map)))
                  (walk body forall-vars new-exist-map)))))
 
            ;; < p-fo-formulap >
@@ -1763,7 +1765,101 @@ Examples
 
     (_ (tseitin-transform f))))
 
-;; TODO: after nnf, fo-rename, minimize-scope, merge-existentials, skolemize, merge-universals, pnf, tseitin 
+(defun merge-existentials (f)
+  "Bottom-up pass: on each (or ...) node, group (exists vars body) children with
+   identical var-lists and fold each group into (exists vars (or body...)).
+   Non-∃ children remain in place.
+
+   Pre: formula is in NNF."
+  (labels ((walk (f)
+             (match f
+               ;; < quant-fo-formulap >: recurse into body
+               ((list (guard q (fo-quantifierp q)) vars body)
+                `(,q ,vars ,(walk body)))
+
+               ;; < p-fo-formulap >
+               ((type boolean) f)
+
+               ;; (or ...): recurse first (bottom-up), then fold ∃ groups
+               ((list* 'or args)
+                (let* ((walked (mapcar #'walk args))
+                       (groups (make-hash-table :test #'equal))
+                       (non-exists nil))
+                  (dolist (arg walked)
+                    (match arg
+                      ((list 'exists evars ebody)
+                       (setf (gethash evars groups)
+                             (cons ebody (gethash evars groups))))
+                      (_ (push arg non-exists))))
+                  (let ((folded nil))
+                    (maphash (lambda (evars bodies)
+                               (let ((bodies (nreverse bodies)))
+                                 (push (if (null (cdr bodies))
+                                           `(exists ,evars ,(car bodies))
+                                           `(exists ,evars (or ,@bodies)))
+                                       folded)))
+                             groups)
+                    (let ((all-args (append (nreverse non-exists) folded)))
+                      (if (null (cdr all-args))
+                          (car all-args)
+                          `(or ,@all-args))))))
+
+               ;; other p-fo-formulap (and, not, ...): recurse
+               ((list* (guard op (p-funp op)) args)
+                `(,op ,@(mapcar #'walk args)))
+
+               ;; < fo-atomic-formulap >
+               (_ f))))
+    (walk f)))
+
+(defun merge-universals (f)
+  "Bottom-up pass: on each (and ...) node, group (forall vars body) children with
+   identical var-lists and fold each group into (forall vars (and body...)).
+   Non-∀ children remain in place.
+
+   Pre: formula has been skolemized (no ∃)."
+  (labels ((walk (f)
+             (match f
+               ;; < quant-fo-formulap >: recurse into body
+               ((list (guard q (fo-quantifierp q)) vars body)
+                `(,q ,vars ,(walk body)))
+
+               ;; < p-fo-formulap >
+               ((type boolean) f)
+
+               ;; (and ...): recurse first (bottom-up), then fold ∀ groups
+               ((list* 'and args)
+                (let* ((walked (mapcar #'walk args))
+                       (groups (make-hash-table :test #'equal))
+                       (non-forall nil))
+                  (dolist (arg walked)
+                    (match arg
+                      ((list 'forall fvars fbody)
+                       (setf (gethash fvars groups)
+                             (cons fbody (gethash fvars groups))))
+                      (_ (push arg non-forall))))
+                  (let ((folded nil))
+                    (maphash (lambda (fvars bodies)
+                               (let ((bodies (nreverse bodies)))
+                                 (push (if (null (cdr bodies))
+                                           `(forall ,fvars ,(car bodies))
+                                           `(forall ,fvars (and ,@bodies)))
+                                       folded)))
+                             groups)
+                    (let ((all-args (append (nreverse non-forall) folded)))
+                      (if (null (cdr all-args))
+                          (car all-args)
+                          `(and ,@all-args))))))
+
+               ;; other p-fo-formulap (or, not, ...): recurse
+               ((list* (guard op (p-funp op)) args)
+                `(,op ,@(mapcar #'walk args)))
+
+               ;; < fo-atomic-formulap >
+               (_ f))))
+    (walk f)))
+
+;; TODO: after nnf, fo-rename, minimize-scope, merge-existentials, skolemize, merge-universals, pnf, tseitin
 
 (defun simp-skolem-pnf-cnf (f)
   "Apply simplification, skolemization, prenex normal form conversion, and CNF transformation to f.
@@ -1774,9 +1870,11 @@ Examples
 
   (tseitin
    (pnf
-    (skolemize
-     (nnf
-      (fo-simplify f))))))
+    (merge-universals
+     (skolemize
+      (merge-existentials
+       (nnf
+        (fo-simplify f))))))))
 
 ;; Some example problems
 (defconstant *mortal* '(and (forall x (implies (man x) (mortal x)))
