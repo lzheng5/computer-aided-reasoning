@@ -2250,7 +2250,6 @@ Examples
          '(forall (x) (R x (SK0 x))))
 
 ;; Some example problems
-;; TODO: fix naming * -> +
 (defconstant +mortal+
   '(implies (and (forall x (implies (man x) (mortal x)))
                  (man c))
