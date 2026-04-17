@@ -205,6 +205,17 @@
 (defun p-funp (x)
   (in x *p-funs*))
 
+(defun key-alist->val (k l)
+  (let* ((in (assoc k l :test #'equal)))
+    (values (cdr in) in)))
+
+(defun key-list->val (k l)
+  (let* ((in (member k l :test #'equal)))
+    (values (cadr in) in)))
+
+(defun pfun-key->val (fun key)
+  (key-list->val key (key-alist->val fun *p-ops*)))
+
 (defun get-alist (k l)
   (cdr (assoc k l :test #'equal)))
 
@@ -278,6 +289,7 @@
  has to match what ACL2s expects. We allow functions of 0-arity.
 
 |#
+
 
 (defun char-nat-symbolp (s chars)
   (and (symbolp s)
@@ -423,6 +435,7 @@ Examples
 
 |#
 
+;; TODO: typo
 (defun fo-atomic-formulap (f &optional (fsig nil) (rsig nil))
   (match f
     ((list '= t1 t2)
@@ -433,7 +446,7 @@ Examples
       (let* ((rsig-arity (get-alist r rsig))
              (acl2s-arity
               (or rsig-arity
-                  (acl2s::acl2s-arity (to-acl2s r))))
+                  (acl2s-arity (to-acl2s r))))
              (arity (or acl2s-arity (len args)))
              (rsig (if rsig-arity rsig (acons r arity rsig))))
         (mv-and (== arity (len args))
@@ -895,12 +908,12 @@ Examples
 (defun free-vars (f)
   "Return a set (list) of the free variables in f"
   (dassert (fo-formulap f) "Input formula is not well-formed")
-  (match f  
+  (match f
     ;; < quant-fo-formulap >
     ((list (guard q (fo-quantifierp q)) vars body)
      (let ((vars (if (variable-symbolp vars) (list vars) vars)))
        (set-difference (free-vars body) vars)))
-       
+
     ;; < p-fo-formulap >
     ((type boolean) nil)
     ((list* (guard op (p-funp op)) args)
@@ -1273,7 +1286,7 @@ Examples
                   (let* ((used (remove-if-not (lambda (v) (hash-set-contains? fvars v)) vars))
                          (new-fvars (let ((s (make-hash-set)))
                                       (hash-set-map (lambda (v)
-                                                      (unless (member v vars :test #'equal)
+                                                      (unless (member v vars :test #'eql)
                                                         (hash-set-add s v)))
                                                     fvars)
                                       s)))
@@ -1284,15 +1297,16 @@ Examples
                ;; < p-fo-formulap >
                ((type boolean) (values f (make-hash-set)))
                ((list* (guard op (p-funp op)) fs)
-                (let ((all-fvars (make-hash-set))
-                      (new-fs (loop for sub in fs
-                                  collect (let+ (((&values nf fv) (walk sub)))
-                                            (hash-set-union! all-fvars fv)
-                                            nf))))
+                (let* ((all-fvars (make-hash-set))
+                       (new-fs (loop for sub in fs
+                                     collect (let+ (((&values nf fv) (walk sub)))
+                                               (hash-set-union! all-fvars fv)
+                                               nf))))
                   (values `(,op ,@new-fs) all-fvars)))
 
                ;; < fo-atomic-formulap >
-               (_ (values f (if (consp f) (terms-vars (cdr f)) (make-hash-set)))))))
+               ;; TODO: collect variable?
+               ((list* F ts) (values f (terms-vars ts))))))
     (let+ (((&values new-f fvars) (walk f)))
       new-f)))
 
@@ -1363,10 +1377,12 @@ Examples
    (fo-preprocess f)))
 
 ;; Preprocessing
-(assertf #'fo-simplify '(implies a b) '(or (not a) b))
+(assertf #'fo-simplify '(implies (P x) (R y)) '(or (not (P x)) (R y)))
 (assertf #'fo-simplify '(forall x (P y z)) '(forall (x) (P y z)))
 
 ;; Simplification
+(assertf #'fo-simplify t t)
+(assertf #'fo-simplify nil nil)
 ;; Implies with constants simplifies
 (assertf #'fo-simplify '(implies t nil) 'nil)
 ;; Vacuous quantifier dropped
@@ -1485,30 +1501,33 @@ Examples
 ;; Double negation eliminated
 (assertf #'nnf '(not (not (P x))) '(P x))
 ;; implies eliminated
-(assertf #'nnf '(implies p q) '(or (not p) q))
+(assertf #'nnf '(implies (P x) (Q y)) '(or (not (P x)) (Q y)))
 ;; not-implies
-(assertf #'nnf '(not (implies p q)) '(and p (not q)))
+(assertf #'nnf '(not (implies (P x) (Q y))) '(and (P x) (not (Q y))))
 ;; De Morgan: not-and
-(assertf #'nnf '(not (and p q r)) '(or (not p) (not q) (not r)))
+(assertf #'nnf '(not (and (P x) (Q y) (R z))) '(or (not (P x)) (not (Q y)) (not (R z))))
 ;; De Morgan: not-or
-(assertf #'nnf '(not (or p q)) '(and (not p) (not q)))
+(assertf #'nnf '(not (or (P x) (Q y))) '(and (not (P x)) (not (Q y))))
 ;; iff elimination (binary)
-;; (iff p q) -> (or (and p q) (and (not p) (not q)))
-(assertf #'nnf '(iff p q)
-         '(or (and p q) (and (not p) (not q))))
+;; (iff (P) (Q)) -> (or (and (P) (Q)) (and (not (P)) (not (Q))))
+(assertf #'nnf '(iff (P) (Q))
+         '(or (and (P) (Q)) (and (not (P)) (not (Q)))))
+
 ;; n-ary iff is right-folded before NNF:
-;; (iff p q r) = (iff p (iff q r))
-;;   (iff q r) -> (or (and q r) (and (not q) (not r))) [call it B]
-;;   (iff p B) -> (or (and p B) (and (not p) (not B)))
-;;              = (or (and p (or (and q r) (and (not q) (not r))))
-;;                   (and (not p) (and (or (not q) (not r)) (or q r))))
-(assertf #'nnf '(iff p q r)
-         '(or (and p (or (and q r) (and (not q) (not r))))
-              (and (not p) (and (or (not q) (not r)) (or q r)))))
-;; not-iff: (not (iff p q)) = (and (or (not p) q) (or p (not q)))
-;;    i.e. p XOR q
-(assertf #'nnf '(not (iff p q))
-         '(and (or (not p) (not q)) (or p q)))
+;; (iff (P) (Q) (R)) = (iff (P) (iff (Q) (R)))
+;;   (iff (Q) (R)) -> (or (and (Q) (R)) (and (not (Q)) (not (R)))) [call it B]
+;;   (iff (P) B) -> (or (and (P) B) (and (not (P)) (not B)))
+;;              = (or (and (P) (or (and (Q) (R)) (and (not (Q)) (not (R)))))
+;;                   (and (not (P)) (and (or (not (Q)) (not (R))) (or (Q) (R)))))
+(assertf #'nnf '(iff (P) (Q) (R))
+         '(or (and (P) (or (and (Q) (R)) (and (not (Q)) (not (R)))))
+              (and (not (P)) (and (or (not (Q)) (not (R))) (or (Q) (R))))))
+
+;; not-iff: (not (iff (P) (Q))) = (and (or (not (P)) (Q)) (or (P) (not (Q))))
+;;    i.e. (P) XOR (Q)
+(assertf #'nnf '(not (iff (P) (Q)))
+         '(and (or (not (P)) (not (Q))) (or (P) (Q))))
+
 ;; forall: quantifier preserved
 (assertf #'nnf '(forall (x) (implies (P x) (Q x)))
          '(forall (x) (or (not (P x)) (Q x))))
@@ -1518,32 +1537,34 @@ Examples
 ;; not-exists flips to forall
 (assertf #'nnf '(not (exists (x) (P x)))
          '(forall (x) (not (P x))))
-;; if eliminated
-(assertf #'nnf '(if a b c)
-         '(or (and a b) (and (not a) c)))
+
+;; if elimination
+(assertf #'nnf '(if (P) (Q) (R))
+         '(or (and (P) (Q)) (and (not (P)) (R))))
+
 ;; nested iff — exponential blowup:
-;;     (iff (iff a b) (iff c d))
-;;     Right-fold: it's already binary — p=(iff a b), q=(iff c d)
+;;     (iff (iff (P) (Q)) (iff (R) (S)))
+;;     Right-fold: it's already binary — p=(iff (P) (Q)), q=(iff (R) (S))
 ;;     positive: (or (and P Q) (and (not P) (not Q))), substituting nnf of p and q:
-;;       P_pos = (or (and a b) (and (not a) (not b)))
-;;       Q_pos = (or (and c d) (and (not c) (not d)))
-;;       P_neg = (and (or (not a) (not b)) (or a b))
-;;       Q_neg = (and (or (not c) (not d)) (or c d))
+;;       P_pos = (or (and (P) (Q)) (and (not (P)) (not (Q))))
+;;       Q_pos = (or (and (R) (S)) (and (not (R)) (not (S))))
+;;       P_neg = (and (or (not (P)) (not (Q))) (or (P) (Q)))
+;;       Q_neg = (and (or (not (R)) (not (S))) (or (R) (S)))
 ;;     result: (or (and P_pos Q_pos) (and P_neg Q_neg))
 ;; Each sub-iff is duplicated once => 2x blowup at each nesting level
-(assertf #'nnf '(iff (iff a b) (iff c d))
-         '(or (and (or (and a b) (and (not a) (not b)))
-                   (or (and c d) (and (not c) (not d))))
-              (and (and (or (not a) (not b)) (or a b))
-                   (and (or (not c) (not d)) (or c d)))))
+(assertf #'nnf '(iff (iff (P) (Q)) (iff (R) (S)))
+         '(or (and (or (and (P) (Q)) (and (not (P)) (not (Q))))
+                   (or (and (R) (S)) (and (not (R)) (not (S)))))
+              (and (and (or (not (P)) (not (Q))) (or (P) (Q)))
+                   (and (or (not (R)) (not (S))) (or (R) (S))))))
 ;; (iff) = t
 (assertf #'nnf '(iff) t)
 ;; (not (iff)) = nil
 (assertf #'nnf '(not (iff)) nil)
-;; (iff p) = p
-(assertf #'nnf '(iff p) 'p)
-;; (not (iff p)) = (not p)
-(assertf #'nnf '(not (iff p)) '(not p))
+;; (iff (P)) = (P)
+(assertf #'nnf '(iff (P)) '(P))
+;; (not (iff (P))) = (not (P))
+(assertf #'nnf '(not (iff (P))) '(not (P)))
 
 #|
 
@@ -1570,10 +1591,10 @@ Examples
 
  Test your functions using at least 10 interesting formulas.
 
- CNF Matrix Form Syntax 
+ CNF Matrix Form Syntax
 
  f := m | (forall (v1 ... vn) m)
- m := <bool> | l 
+ m := <bool> | l
     | (and c1 ... cn)
  c := l | (or l1 ... ln)
 
@@ -1608,8 +1629,8 @@ Examples
 
                ;; < fo-atomic-formulap >
                ((list* R ts)
-                `(,R ,@(mapcar #'(lambda (tm) (subst-term tm var-map)) ts)))))
-           (rename f nil))))
+                `(,R ,@(mapcar #'(lambda (tm) (subst-term tm var-map)) ts))))))
+    (rename f nil)))
 
 (defun skolemize (f)
   "Skolemize f.
@@ -1712,9 +1733,9 @@ Examples
     (labels ((transform-subf (subf)
                "Transform subformula; return a 0-arity predicate (TSn) as its representative.
                 TSn starts with T so it is a relational symbol, not a variable symbol. Note (TSn) is valid FO.
-                
+
                 Since after simplification and nnf, the subformula can either be a literal, and, or. "
-               
+
                (dassert (not (booleanp subf)) "Subformula should not be a boolean constant due to simplification")
                (match subf
                  ((satisfies literalp) subf)
@@ -1729,7 +1750,7 @@ Examples
         ;; < p-fo-formulap >
         ((type boolean) f)
 
-        ;; already a literal 
+        ;; already a literal
         ((satisfies literalp) f)
 
         ;; (and ...) = each conjunct must hold independently
@@ -1789,6 +1810,11 @@ Examples
                ;; < fo-atomic-formulap >
                (_ f))))
     (walk f)))
+
+(assertf #'merge-quantified-vars '(forall (x) (forall (y) (P x y)))
+         '(forall (x y) (P x y)))
+(assertf #'merge-quantified-vars '(forall (x) (exists (y) (P x y)))
+         '(forall (x) (exists (y) (P x y))))
 
 (defun unfold-universal (f)
   "Bottom-up pass for universal quantifiers only.
@@ -2010,6 +2036,9 @@ Examples
                ;; < fo-atomic-formulap >
                (_ f))))
     (walk f)))
+
+;; TODO: define simp-skolem-pnf-cnf-basic and simp-skolem-pnf-cnf-minimize
+;; and redirect simp-skolem-pnf-cnf to point one of them by flip an +opt+ boolean constant
 
 ;; Pipeline: fo-simplify -> nnf -> fo-rename -> minimize-scope -> merge-existentials -> skolemize -> merge-universals -> pnf -> tseitin
 
@@ -2318,7 +2347,7 @@ Examples
  including the formulas from the following pages of the book: 178
  (p38, p34), 179 (ewd1062), 180 (barb), and 198 (the Los formula).
 
- Clausal Form Syntax: 
+ Clausal Form Syntax:
  cls := (cl ...)
  cl := (l ...)
 
@@ -2382,14 +2411,14 @@ Examples
     found))
 
 ;; ==============================================================
-;; To Clausal Form 
+;; To Clausal Form
 ;; ==============================================================
 
 (defun to-clauses-m (m)
   "Convert a CNF matrix m to a list of clauses satisfying the Clausal Form Syntax.
 
    Pre: m satisfies the CNF Matrix Form Syntax:
-        m := <bool> | l | (and c1 ... cn)  
+        m := <bool> | l | (and c1 ... cn)
         c := l | (or l1 ... ln)"
   (flet ((clause-of (c)
            (match c
@@ -2501,7 +2530,7 @@ Examples
    Remove all other unused clauses in unusedQ subsumed by cl.
    If no such unused-cl exists, enqueue cl into unusedQ.
    This way preserves the relative ordering of clauses in unusedQ.
-   
+
    Pre: cl and all clauses in unusedQ are non-empty (since trivial clauses should never be enqueued)."
 
   (dassert (not (null cl)) "cl should be non-empty for replacement")
@@ -2523,10 +2552,10 @@ Examples
     (replace cl unusedQ)))
 
 (defun resolve-clauses (cl1 cl2 used unusedQ)
-  "Compute resolvants by considering all pairs of literals (l1, l2) where l1 in cl1, l2 in cl2, and l1 is the negation of l2 
+  "Compute resolvants by considering all pairs of literals (l1, l2) where l1 in cl1, l2 in cl2, and l1 is the negation of l2
    Push the resolvants derived from resolving cl1 and cl2 into unusedQ.
    Return nil if empty clause is derived, otherwise return the updated unusedQ.
-   
+
    Pre: both cl1 and cl2 are already in used."
    (dassert (hash-set-contains? used cl1) "cl1 should already be in used for presolve")
    (dassert (hash-set-contains? used cl2) "cl2 should already be in used for presolve")
@@ -2535,10 +2564,10 @@ Examples
          (new-cl2 (rename-clause cl2)))
       (dolist (l1 new-cl1)
         (let ((ps2 (filter #'(lambda (l) (unifiable? l1 (negate l))) new-cl2)))
-          (if (null ps2) 
-              nil 
+          (if (null ps2)
+              nil
               (let ((ps1 (filter #'(lambda (l) (and (not (equal l1 l)) (unifiable? l1 l))) new-cl1)))
-                ;; try all possible subsets of ps1 and ps2 to resolve with l1 and enqueue the valid resolvants 
+                ;; try all possible subsets of ps1 and ps2 to resolve with l1 and enqueue the valid resolvants
                 (dolist (pl1 (subsets ps1))
                   (let ((s1 `(,l1 . ,pl1)))
                     (dolist (s2 (subsets ps2))
@@ -2563,8 +2592,8 @@ Examples
 (defun presolve-clauses (cl1 cl2 used unusedQ)
   "Apply positive resolution to CL1 and CL2 if they contain complementary literals.
    Push the resolvants derived from resolving cl1 and cl2 into unusedQ.
-   Return nil if empty clause is derived, otherwise return the updated unusedQ. 
-   
+   Return nil if empty clause is derived, otherwise return the updated unusedQ.
+
    Pre: both cl1 and cl2 are already in used."
   (dassert (hash-set-contains? used cl1) "cl1 should already be in used for presolve")
   (dassert (hash-set-contains? used cl2) "cl2 should already be in used for presolve")
@@ -2579,8 +2608,8 @@ Examples
    used: a set of clauses that have already been used for resolution
    unusedQ: a queue of clauses that have not yet been used for resolution"
   (if (queue-empty? unusedQ)
-      nil 
-      (progn 
+      nil
+      (progn
         (dbg "used: ~A, unused: ~A" (hash-set-size used) (length (queue->list unusedQ)))
         (let* ((cl (dequeue unusedQ)))
           (hash-set-add used cl) ;; necessary to handle factoring
@@ -2604,7 +2633,7 @@ Examples
     (with-fo-formula neg-f
       (solve
         (make-hash-set #'equal)
-        (make-queue (to-clauses (simp-skolem-pnf-cnf neg-f))))))) 
+        (make-queue (to-clauses (simp-skolem-pnf-cnf neg-f)))))))
 
 #|
 
