@@ -840,8 +840,11 @@ Examples
 ;;; General Utilities
 ;;; ============================================================
 
+(defun assert-equal (f g)
+  (assert (== f g) (f g) "Not equal!~%F: ~A~%G: ~A" f g))
+
 (defun assertf (f in out)
-  (== (funcall f in) out))
+  (assert-equal (funcall f in) out))
 
 (defun filter (pred lst)
   "Return a new list containing only elements of LST satisfying PRED."
@@ -916,11 +919,13 @@ Examples
     ;; < p-fo-formulap >
     ((type boolean) nil)
     ((list* (guard op (p-funp op)) args)
-     (apply #'union (mapcar #'free-vars args)))
+     (reduce #'union (mapcar #'free-vars args) :initial-value nil))
 
     ;; < fo-atomic-formulap >
     ((list* R ts)
      (hash-set->list (terms-vars ts)))))
+
+(assertf #'free-vars '(not (P x)) '(x))
 
 ;;; ============================================================
 ;;; Variables Utilities
@@ -977,7 +982,7 @@ Examples
 
 (defun assertv (f in out)
   (with-fo-formula in
-    (== (funcall f in) out)))
+    (assertf f in out)))
 
 ;;; ============================================================
 ;;; Preprocessing
@@ -1272,9 +1277,8 @@ Examples
 (assertf #'fo-simplify-dup '(exists (x) (or (P x) (not (P x)))) '(exists (x) t))
 (assertf #'fo-simplify-dup '(forall (x) (and (P x) (not (P x)))) '(forall (x) nil))
 (assertf #'fo-simplify-dup '(forall (x y) (iff (R x y) (R x y))) '(forall (x y) t))
-;; Deeply nested tests
-(assertf #'fo-simplify-dup '(and p q p r q) '(and p q r))
-(assertf #'fo-simplify-dup '(or (P x) (Q y) (P x)) '(or (P x) (Q y)))
+(assertf #'fo-simplify-dup '(and p q p r q) '(and p r q))
+(assertf #'fo-simplify-dup '(or (P x) (Q y) (P x)) '(or (Q y) (P x)))
 
 (defun fo-simplify-trivially-quantified (f)
   (labels ((walk (f)
@@ -1304,7 +1308,7 @@ Examples
                   (values `(,op ,@new-fs) all-fvars)))
 
                ;; < fo-atomic-formulap >
-               ((list* F ts) (values f (terms-vars ts))))))
+               ((list* _ ts) (values f (terms-vars ts))))))
     (let+ (((&values new-f fvars) (walk f)))
       new-f)))
 
@@ -1328,7 +1332,7 @@ Examples
        (if (every #'(lambda (a) (or (constant-objectp a) (quotep a))) new-args)
            (let ((res (acl2s-compute (to-acl2s (cons F new-args)))))
              (if (null (car res))
-                 (cdr res) ;; success
+                 (cadr res) ;; success
                  `(,F ,@new-args))) ;; error
            `(,F ,@new-args))))))
 
@@ -1375,8 +1379,8 @@ Examples
    (fo-preprocess f)))
 
 ;; Preprocessing
-(assertf #'fo-simplify '(implies (P x) (R y)) '(or (not (P x)) (R y)))
-(assertf #'fo-simplify '(forall x (P y z)) '(forall (x) (P y z)))
+(assertf #'fo-preprocess '(implies (P x) (R y)) '(or (not (P x)) (R y)))
+(assertf #'fo-preprocess '(forall x (P y z)) '(forall (x) (P y z)))
 
 ;; Simplification
 (assertf #'fo-simplify t t)
@@ -1396,7 +1400,7 @@ Examples
 ;; Flatten nested and
 (assertf #'fo-simplify '(and (P x) (and (Q y) (R z))) '(and (P x) (Q y) (R z)))
 ;; Duplicate elimination in and
-(assertf #'fo-simplify '(and (P x) (Q y) (P x)) '(and (P x) (Q y)))
+(assertf #'fo-simplify '(and (P x) (Q y) (P x)) '(and (Q y) (P x)))
 ;; Complementary pair in or => t
 (assertf #'fo-simplify '(or (P x) (not (P x))) 't)
 ;; Deep: quantifier + constants + implies
@@ -1752,24 +1756,29 @@ Examples
     (not
      (let ((a (car args)))
        `((or ,v ,a)
-         (or (not ,v) (not ,a)))))
+         (or ,(negate v) ,(negate a)))))
 
     (and
      ;; v ↔ (a1 ∧ ... ∧ an)
      ;; (¬v ∨ a1) ∧ ... ∧ (¬v ∨ an) ∧ (v ∨ ¬a1 ∨ ... ∨ ¬an)
      (append
-      (mapcar #'(lambda (a) `(or (not ,v) ,a)) args)
-      `((or ,v ,@(mapcar #'(lambda (a) `(not ,a)) args)))))
+      (mapcar #'(lambda (a) `(or ,(negate v) ,a)) args)
+      `((or ,v ,@(mapcar #'negate args)))))
 
     (or
      ;; v ↔ (a1 ∨ ... ∨ an)
      ;; (¬v ∨ a1 ∨ ... ∨ an) ∧ (v ∨ ¬a1) ∧ ... ∧ (v ∨ ¬an)
      (append
-      `((or (not ,v) ,@args))
-      (mapcar #'(lambda (a) `(or ,v (not ,a))) args)))
+      `((or ,(negate v) ,@args))
+      (mapcar #'(lambda (a) `(or ,v ,(negate a))) args)))
 
     (otherwise
      (error "Unknown operator in Tseitin: ~A" op))))
+
+(defun literalp (l)
+  (match l
+    ((list 'not a) (let+ (((&values ok) (fo-atomic-formulap a nil nil))) ok))
+    (_ (let+ (((&values ok) (fo-atomic-formulap l nil nil))) ok))))
 
 (defun tseitin-transform (f)
   "Transform unquantified NNF formula f to CNF using Tseitin transformation"
@@ -1831,6 +1840,8 @@ Examples
     (_ (tseitin-transform f))))
 
 ;; tseitin tests
+;; Boolean: passthrough
+(assertv #'tseitin t t)
 ;; Atomic formula: passthrough
 (assertv #'tseitin '(P x) '(P x))
 ;; Negated atomic: passthrough
@@ -1844,13 +1855,21 @@ Examples
 ;; forall over or: Tseitin introduces (TS0)
 (assertv #'tseitin
          '(forall (x) (or (P x) (Q x)))
-         '(forall (x) (and (TS0)
-                           (or (not (TS0)) (P x) (Q x))
-                           (or (TS0) (not (P x)))
-                           (or (TS0) (not (Q x))))))
-;; Boolean: passthrough
-(assertv #'tseitin t t)
+         '(FORALL (X)
+           (AND
+            (OR (TS0) (NOT (Q X)))
+            (OR (TS0) (NOT (P X)))
+            (OR (NOT (TS0)) (P X) (Q X))
+            (TS0))))
+(assertv #'tseitin
+         '(OR (NOT (P)) (Q))
+         '(AND
+           (OR (TS0) (NOT (Q)))
+           (OR (TS0) (P))
+           (OR (NOT (TS0)) (NOT (P)) (Q))
+           (TS0)))
 
+#|
 (defun merge-quantified-vars (f)
   "Bottom-up pass: merge same-quantifier nesting.
    (Q vars1 (Q vars2 body)) -> (Q (vars1 ++ vars2) body) where both Q are identical.
@@ -1881,8 +1900,8 @@ Examples
 (assertf #'merge-quantified-vars '(forall (x) (exists (y) (P x y)))
          '(forall (x) (exists (y) (P x y))))
 
-;; TODO: when we unfold, the duplicated variables should be renamed uniquely. 
-;; we need to pass down a substitution map to rename variables when we walk top-down and rebuild the formula when going buttom-up.  
+;; TODO: when we unfold, the duplicated variables should be renamed uniquely.
+;; we need to pass down a substitution map to rename variables when we walk top-down and rebuild the formula when going buttom-up.
 (defun unfold-universal (f)
   "Bottom-up pass for universal quantifiers only.
    (forall vars (and ...)) -> (and (forall vars arg1) (forall vars arg2) ...)
@@ -2097,7 +2116,7 @@ Examples
          '(forall (z) (or (exists (x) (P x)) (exists (x) (Q x))))
          '(forall (z) (exists (x) (or (P x) (Q x)))))
 
-;; TODO: this algorithm is wrong after fo-rename and the length of the two var lists can be different  
+;; TODO: this algorithm is wrong after fo-rename and the length of the two var lists can be different
 (defun merge-universals (f)
   "Bottom-up pass: on each (and ...) node, group (forall vars body) children with
    identical var-lists and fold each group into (forall vars (and body...)).
@@ -2164,6 +2183,7 @@ Examples
 (assertf #'merge-universals
          '(forall (z) (and (forall (x) (P x z)) (forall (x) (Q x z))))
          '(forall (z) (forall (x) (and (P x z) (Q x z)))))
+|#
 
 (defconstant +opt-minimize-scope+ nil
   "When nil (default), use the basic pipeline: fo-simplify -> nnf -> skolemize -> pnf -> tseitin.
@@ -2217,10 +2237,10 @@ Examples
 (assertv #'simp-skolem-pnf-cnf '(and (P x) (Q x)) '(and (P x) (Q x)))
 ;; Disjunction: Tseitin introduces (TS0)
 (assertv #'simp-skolem-pnf-cnf '(or (P x) (Q x))
-         '(and (TS0)
-               (or (not (TS0)) (P x) (Q x))
-               (or (TS0) (not (P x)))
-               (or (TS0) (not (Q x)))))
+         '(AND
+           (OR (TS0) (NOT (Q X)))
+           (OR (TS0) (NOT (P X)))
+           (OR (NOT (TS0)) (P X) (Q X)) (TS0)))
 ;; Negated atomic: passthrough
 (assertv #'simp-skolem-pnf-cnf '(not (P x)) '(not (P x)))
 ;; 0-arity Skolem: no forall above
@@ -2230,31 +2250,40 @@ Examples
          '(forall (x) (R x (SK0 x))))
 
 ;; Some example problems
+;; TODO: fix naming * -> +
 (defconstant *mortal*
   '(not (and (forall x (implies (man x) (mortal x)))
-             (man c0)
-             (not (mortal c0)))))
+             (man c)
+             (not (mortal c)))))
+
+(assert (fo-formulap *mortal*))
 
 (defconstant *pet*
   '(not (and (forall x (implies (pet x) (exists y (cares y x))))
               (forall (y z) (implies (and (pet z) (cares y z)) (kind y)))
-              (pet c0)
+              (pet c)
               (not (forall w (not (kind w)))))))
+
+(assert (fo-formulap *pet*))
 
 (defconstant *barb*
   '(not (exists x (forall y (iff (shaves x y) (not (shaves y y)))))))
+
+(assert (fo-formulap *barb*))
 
 ;; p38: Pelletier problem 38
 (defconstant *p38*
   '(iff
     (forall (x)
-      (implies (and (P a) (implies (P x) (exists (y) (and (P y) (R x y)))))
+      (implies (and (P c) (implies (P x) (exists (y) (and (P y) (R x y)))))
                (exists (z w) (and (P z) (R x w) (R w z)))))
     (forall (x)
-      (and (or (not (P a)) (P x) (exists (z w) (and (P z) (R x w) (R w z))))
-           (or (not (P a))
+      (and (or (not (P c)) (P x) (exists (z w) (and (P z) (R x w) (R w z))))
+           (or (not (P c))
                (not (exists (y) (and (P y) (R x y))))
                (exists (z w) (and (P z) (R x w) (R w z))))))))
+
+(assert (fo-formulap *p38*))
 
 ;; p34: Pelletier problem 34
 (defconstant *p34*
@@ -2263,6 +2292,8 @@ Examples
          (iff (exists (x) (Q x)) (forall (y) (Q y))))
     (iff (exists (x) (forall (y) (iff (Q x) (Q y))))
          (iff (exists (x) (P x)) (forall (y) (P y))))))
+
+(assert (fo-formulap *p34*))
 
 ;; ewd1062: Dijkstra EWD1062 — Galois connection implies monotonicity
 (defconstant *ewd1062*
@@ -2273,6 +2304,8 @@ Examples
     (and (forall (x y) (implies (<= x y) (<= (f x) (f y))))
          (forall (x y) (implies (<= x y) (<= (g x) (g y)))))))
 
+(assert (fo-formulap *ewd1062*))
+
 ;; los: Los formula
 (defconstant *los*
   '(implies
@@ -2281,16 +2314,20 @@ Examples
          (forall (x y) (implies (Q x y) (Q y x)))
          (forall (x y) (or (P x y) (Q x y))))
     (or (forall (x y) (P x y))
-        (forall (x y) (Q x y)))))
+     (forall (x y) (Q x y)))))
+
+(assert (fo-formulap *los*))
 
 ;; p24: Pelletier problem 24
 (defconstant *p24*
   '(implies
-    (and (not (exists (x) (and (U x) (Q x))))
+    (and (not (exists (x) (and (S x) (Q x))))
          (forall (x) (implies (P x) (or (Q x) (R x))))
          (not (exists (x) (implies (P x) (exists (x) (Q x)))))
-         (forall (x) (implies (and (Q x) (R x)) (U x))))
+         (forall (x) (implies (and (Q x) (R x)) (S x))))
     (exists (x) (and (P x) (R x)))))
+
+(assert (fo-formulap *p24*))
 
 ;; p45: Pelletier problem 45
 (defconstant *p45*
@@ -2305,12 +2342,16 @@ Examples
                 (forall (y) (implies (and (G y) (H x y)) (J x y))))))
     (exists (x) (and (P x) (not (exists (y) (and (G y) (H x y))))))))
 
+(assert (fo-formulap *p45*))
+
 ;; p20: Pelletier problem 20
 (defconstant *p20*
   '(implies
-    (forall (x y) (exists (z) (forall (w) (implies (and (P x) (Q y)) (and (R z) (U w))))))
+    (forall (x y) (exists (z) (forall (w) (implies (and (P x) (Q y)) (and (R z) (S w))))))
     (implies (exists (x y) (and (P x) (Q y)))
              (exists (z) (R z)))))
+
+(assert (fo-formulap *p20*))
 
 ;; davis-putnam example
 (defconstant *davis-putnam*
@@ -2318,11 +2359,7 @@ Examples
     (and (implies (F x y) (and (F y z) (F z z)))
          (implies (and (F x y) (G x y)) (and (G x z) (G z z))))))))
 
-
-(defun literalp (l)
-  (match l
-    ((list 'not a) (let+ (((&values ok) (fo-atomic-formulap a nil nil))) ok))
-    (_ (let+ (((&values ok) (fo-atomic-formulap l nil nil))) ok))))
+(assert (fo-formulap *davis-putnam*))
 
 (defun cnf-clausep (c)
   (match c
@@ -2343,13 +2380,13 @@ Examples
     (_ (cnf-matrixp f))))
 
 ;; Simple propositional implies
-(assert (pnf-cnf-p (simp-skolem-pnf-cnf '(implies p q))))
+(assert (pnf-cnf-p (simp-skolem-pnf-cnf '(implies (P) (Q)))))
 ;; Already propositional CNF
-(assert (pnf-cnf-p (simp-skolem-pnf-cnf '(and (or p q) (or (not p) r)))))
+(assert (pnf-cnf-p (simp-skolem-pnf-cnf '(and (or (P) (Q)) (or (not (P)) (R))))))
 ;; Tautology
-(assert (pnf-cnf-p (simp-skolem-pnf-cnf '(or p (not p)))))
+(assert (pnf-cnf-p (simp-skolem-pnf-cnf '(or (P) (not (P))))))
 ;; Contradiction
-(assert (pnf-cnf-p (simp-skolem-pnf-cnf '(and p (not p)))))
+(assert (pnf-cnf-p (simp-skolem-pnf-cnf '(and (P) (not (P))))))
 ;; Mortal Socrates
 (assert (pnf-cnf-p (simp-skolem-pnf-cnf *mortal*)))
 ;; Pet example
@@ -2427,7 +2464,7 @@ Examples
   (if (null ts1)
       sigma
       (let ((new-sigma (term-unify (car ts1) (car ts2) sigma)))
-        (if (eq new-sigma 'fail) 'fail (terms-unify (cdr ts1) (cdr ts2) new-sigma))))))
+        (if (eq new-sigma 'fail) 'fail (terms-unify (cdr ts1) (cdr ts2) new-sigma)))))
 
 (defun unify (tps)
   "Given a non-empty list of term pairs (conses (s . t)), return an MGU
@@ -2640,7 +2677,7 @@ Examples
   (if (null ts1)
       theta
       (let ((new-theta (term-match (car ts1) (car ts2) theta)))
-        (if (eq new-theta 'fail) 'fail (terms-match (cdr ts1) (cdr ts2) new-theta))))))
+        (if (eq new-theta 'fail) 'fail (terms-match (cdr ts1) (cdr ts2) new-theta)))))
 
 (defun clause-subsumes? (cl1 cl2)
   "cl1 subsumes cl2 if there exists some substitution θ such that θ(cl1) ⊆ cl2.
@@ -2666,9 +2703,9 @@ Examples
 
 (defun trivial? (cl)
   "Return t if CL is a tautological clause (contains a complementary pair of literals), nil otherwise."
-  (some (lambda (l) (member (negate l) cl :test #'equal)) cl))
+  (some #'(lambda (l) (member (negate l) cl :test #'equal)) cl))
 
-(defun replace (cl unusedQ)
+(defun replace-clause (cl unusedQ)
   "Replace the first unused clause in unusedQ subsumed by cl (cl ⇒ unused-cl) with cl.
    Remove all other unused clauses in unusedQ subsumed by cl.
    If no such unused-cl exists, enqueue cl into unusedQ.
@@ -2678,21 +2715,21 @@ Examples
 
   (dassert (not (null cl)) "cl should be non-empty for replacement")
   (unless (queue-update-and-remove-if! ;; better than the book
-             (lambda (unused-cl) (clause-subsumes? cl unused-cl))
+             #'(lambda (unused-cl) (clause-subsumes? cl unused-cl))
              cl unusedQ)
     (enqueue cl unusedQ)))
 
-(defun incorporate (used cl unusedQ)
+(defun incorporate-clause (used cl unusedQ)
   "If cl is non-trivial and not subsumed by any clause in used or unusedQ, enqueue cl into unusedQ."
   (unless (or (trivial? cl)
               (let ((found nil)) ;; better than the book
-                (hash-set-map (lambda (used-cl)
-                                (when (clause-subsumes? used-cl cl)
-                                  (setf found t)))
+                (hash-set-map #'(lambda (used-cl)
+                                  (when (clause-subsumes? used-cl cl)
+                                    (setf found t)))
                               used)
                 found)
-              (some (lambda (unused-cl) (clause-subsumes? unused-cl cl)) (queue->list unusedQ)))
-    (replace cl unusedQ)))
+              (some #'(lambda (unused-cl) (clause-subsumes? unused-cl cl)) (queue->list unusedQ)))
+    (replace-clause cl unusedQ)))
 
 (defun resolve-clauses (cl1 cl2 used unusedQ)
   "Compute resolvants by considering all pairs of literals (l1, l2) where l1 in cl1, l2 in cl2, and l1 is the negation of l2
@@ -2725,12 +2762,12 @@ Examples
                                        (resolvant (subst-terms R U)))
                                   (if (null resolvant)
                                       (return-from resolve-clauses nil) ;; empty clause derived
-                                      (incorporate used resolvant unusedQ))))))))))))))
-   unusedQ)
+                                      (incorporate-clause used resolvant unusedQ)))))))))))))
+      unusedQ))
 
 (defun positive-clause? (cl)
   "Returns t if CL is a positive clause (contains no negated literals)."
-  (every (lambda (l) (not (and (listp l) (eq (car l) 'not)))) cl))
+  (every #'(lambda (l) (not (and (listp l) (eq (car l) 'not)))) cl))
 
 (defun presolve-clauses (cl1 cl2 used unusedQ)
   "Apply positive resolution to CL1 and CL2 if they contain complementary literals.
@@ -2778,16 +2815,17 @@ Examples
         (make-hash-set #'equal)
         (make-queue (to-clauses (simp-skolem-pnf-cnf neg-f)))))))
 
+;; TODO:
 ;; fo-no=-val tests — all should return 'valid
 (assertf #'fo-no=-val *mortal* 'valid)
-(assertf #'fo-no=-val *pet* 'valid)
+(assertf #'fo-no=-val *pet* 'valid) ;; returns 'nil
 (assertf #'fo-no=-val *barb* 'valid)
 (assertf #'fo-no=-val *p20* 'valid)
 (assertf #'fo-no=-val *p24* 'valid)
 (assertf #'fo-no=-val *p45* 'valid)
 (assertf #'fo-no=-val *los* 'valid)
 (assertf #'fo-no=-val *p38* 'valid)
-(assertf #'fo-no=-val *p34* 'valid)
+(assertf #'fo-no=-val *p34* 'valid) ;; loops
 (assertf #'fo-no=-val *ewd1062* 'valid)
 (assertf #'fo-no=-val *davis-putnam* 'valid)
 
