@@ -435,7 +435,6 @@ Examples
 
 |#
 
-;; TODO: typo
 (defun fo-atomic-formulap (f &optional (fsig nil) (rsig nil))
   (match f
     ((list '= t1 t2)
@@ -1305,7 +1304,6 @@ Examples
                   (values `(,op ,@new-fs) all-fvars)))
 
                ;; < fo-atomic-formulap >
-               ;; TODO: collect variable?
                ((list* F ts) (values f (terms-vars ts))))))
     (let+ (((&values new-f fvars) (walk f)))
       new-f)))
@@ -1632,6 +1630,18 @@ Examples
                 `(,R ,@(mapcar #'(lambda (tm) (subst-term tm var-map)) ts))))))
     (rename f nil)))
 
+;; fo-rename tests
+;; Free variables are preserved; bound variables renamed starting from X0.
+(assertv #'fo-rename '(forall (x) (P x y))           '(forall (X0) (P X0 y)))
+(assertv #'fo-rename '(exists (x) (Q x z))           '(exists (X0) (Q X0 z)))
+(assertv #'fo-rename '(forall (x) (exists (y) (R x y z))) '(forall (X0) (exists (X1) (R X0 X1 z))))
+;; Purely free formula: unchanged
+(assertv #'fo-rename '(P x y)                        '(P x y))
+;; Same var in sibling quantifiers gets distinct names
+(assertv #'fo-rename
+         '(and (forall (x) (P x)) (exists (x) (Q x)))
+         '(and (forall (X0) (P X0)) (exists (X1) (Q X1))))
+
 (defun skolemize (f)
   "Skolemize f.
    New function symbols generated have prefix SK.
@@ -1669,6 +1679,22 @@ Examples
             `(,R ,@(mapcar (lambda (a) (subst-term a exists-map)) args))))))
     (walk f nil nil)))
 
+;; skolemize tests
+;; No quantifiers: passthrough
+(assertv #'skolemize '(P x) '(P x))
+;; exists with no forall above: 0-arity Skolem constant
+(assertv #'skolemize '(exists (y) (R c0 y)) '(R c0 (SK0)))
+;; forall then exists: 1-arity Skolem
+(assertv #'skolemize '(forall (x) (exists (y) (R x y))) '(forall (x) (R x (SK0 x))))
+;; Two sibling exists: two distinct Skolem constants
+(assertv #'skolemize
+         '(and (exists (y) (P y)) (exists (z) (Q z)))
+         '(and (P (SK0)) (Q (SK1))))
+;; Free-vars filter: z not free in (P x y), so Skolem for y is (SK0 x) not (SK0 x z)
+(assertv #'skolemize
+         '(forall (x z) (exists (y) (P x y)))
+         '(forall (x z) (P x (SK0 x))))
+
 (defun pnf (f)
   "Convert f to prenex normal form.
    The variable ordering of the resulting prenex quantifier is the traversal order.
@@ -1697,8 +1723,26 @@ Examples
     (let+ (((&values new-f bound-vars) (walk f)))
        (if (null bound-vars)
            new-f
-           ;; TODO: remove remove-dups after fo-rename
+           ;; remove-dups is needed for the basic pipeline where there is no fo-rename
            `(forall ,(remove-dups bound-vars) ,new-f)))))
+
+;; pnf tests
+;; Atomic: passthrough
+(assertf #'pnf '(P x) '(P x))
+;; Already prenex: unchanged
+(assertf #'pnf '(forall (x) (P x)) '(forall (x) (P x)))
+;; Boolean: unchanged
+(assertf #'pnf t t)
+;; Universals float out of and
+(assertf #'pnf
+         '(and (forall (x) (P x)) (forall (y) (Q y)))
+         '(forall (x y) (and (P x) (Q y))))
+;; Universal floats out of or
+(assertf #'pnf
+         '(or (forall (x) (P x)) (Q y))
+         '(forall (x) (or (P x) (Q y))))
+;; No quantifiers in body: no wrapper
+(assertf #'pnf '(and (P x) (Q y)) '(and (P x) (Q y)))
 
 (defun tseitin-op (v op args)
   "Generate CNF clauses: v ↔ (op args...)
@@ -1785,6 +1829,27 @@ Examples
      `(forall ,vars ,(tseitin-transform body)))
 
     (_ (tseitin-transform f))))
+
+;; tseitin tests
+;; Atomic formula: passthrough
+(assertv #'tseitin '(P x) '(P x))
+;; Negated atomic: passthrough
+(assertv #'tseitin '(not (P x)) '(not (P x)))
+;; forall over literal: no Tseitin vars
+(assertv #'tseitin '(forall (x) (P x)) '(forall (x) (P x)))
+;; forall over and of literals: top-level and pushed as unit clauses, no Tseitin vars
+(assertv #'tseitin
+         '(forall (x) (and (P x) (Q x)))
+         '(forall (x) (and (P x) (Q x))))
+;; forall over or: Tseitin introduces (TS0)
+(assertv #'tseitin
+         '(forall (x) (or (P x) (Q x)))
+         '(forall (x) (and (TS0)
+                           (or (not (TS0)) (P x) (Q x))
+                           (or (TS0) (not (P x)))
+                           (or (TS0) (not (Q x))))))
+;; Boolean: passthrough
+(assertv #'tseitin t t)
 
 (defun merge-quantified-vars (f)
   "Bottom-up pass: merge same-quantifier nesting.
@@ -1930,17 +1995,36 @@ Examples
         (minimize-scope new-f))))
 
 ;; minimize-scope tests
+;; merge nested same-quantifier chains
 (assertf #'minimize-scope
          '(forall (x) (forall (y) (P x y)))
          '(forall (x y) (P x y)))
 (assertf #'minimize-scope
          '(exists (x) (exists (y) (or (P x) (Q y))))
          '(or (exists (x) (P x)) (exists (y) (Q y))))
+;; forall/and: unconditional unfold
 (assertf #'minimize-scope
          '(forall (x) (and (P x) (Q y)))
          '(and (forall (x) (P x)) (Q y)))
+;; exists/and: cross-case — x free in P only -> pushed in, outer exists removed
 (assertf #'minimize-scope
          '(exists (x) (and (P x) (Q y)))
+         '(and (exists (x) (P x)) (Q y)))
+;; forall/or: cross-case — x and y exclusive -> each pushed to its arg
+(assertf #'minimize-scope
+         '(forall (x y) (or (P x) (Q y)))
+         '(or (forall (x) (P x)) (forall (y) (Q y))))
+;; forall/or: shared var stays on outer forall
+(assertf #'minimize-scope
+         '(forall (x) (or (P x) (Q x)))
+         '(forall (x) (or (P x) (Q x))))
+;; exists/or: unconditional unfold
+(assertf #'minimize-scope
+         '(exists (x y) (or (P x) (Q y)))
+         '(or (exists (x) (P x)) (exists (y) (Q y))))
+;; forall then exists with irrelevant universal -> universal dropped by vacuous removal
+(assertf #'minimize-scope
+         '(forall (z) (exists (x) (and (P x) (Q y))))
          '(and (exists (x) (P x)) (Q y)))
 
 (defun merge-existentials (f)
@@ -1990,6 +2074,26 @@ Examples
                (_ f))))
     (walk f)))
 
+;; merge-existentials tests
+;; Base case: no existentials at all
+(assertf #'merge-existentials '(P x) '(P x))
+;; Two exists with identical var-list: folded
+(assertf #'merge-existentials
+         '(or (exists (x) (P x)) (exists (x) (Q x)))
+         '(exists (x) (or (P x) (Q x))))
+;; Different var-lists: not merged
+(assertf #'merge-existentials
+         '(or (exists (x) (P x)) (exists (y) (Q y)))
+         '(or (exists (x) (P x)) (exists (y) (Q y))))
+;; Non-exists arg remains
+(assertf #'merge-existentials
+         '(or (R z) (exists (x) (P x)) (exists (x) (Q x)))
+         '(or (R z) (exists (x) (or (P x) (Q x)))))
+;; Nested: or inside forall
+(assertf #'merge-existentials
+         '(forall (z) (or (exists (x) (P x)) (exists (x) (Q x))))
+         '(forall (z) (exists (x) (or (P x) (Q x)))))
+
 (defun merge-universals (f)
   "Bottom-up pass: on each (and ...) node, group (forall vars body) children with
    identical var-lists and fold each group into (forall vars (and body...)).
@@ -2037,18 +2141,53 @@ Examples
                (_ f))))
     (walk f)))
 
-;; TODO: define simp-skolem-pnf-cnf-basic and simp-skolem-pnf-cnf-minimize
-;; and redirect simp-skolem-pnf-cnf to point one of them by flip an +opt+ boolean constant
+;; merge-universals tests
+;; Base case: no universals at all
+(assertf #'merge-universals '(P x) '(P x))
+;; Two foralls with identical var-list: folded
+(assertf #'merge-universals
+         '(and (forall (x) (P x)) (forall (x) (Q x)))
+         '(forall (x) (and (P x) (Q x))))
+;; Different var-lists: not merged
+(assertf #'merge-universals
+         '(and (forall (x) (P x)) (forall (y) (Q y)))
+         '(and (forall (x) (P x)) (forall (y) (Q y))))
+;; Non-forall arg remains
+(assertf #'merge-universals
+         '(and (R z) (forall (x) (P x)) (forall (x) (Q x)))
+         '(and (R z) (forall (x) (and (P x) (Q x)))))
+;; Nested: and inside forall
+(assertf #'merge-universals
+         '(forall (z) (and (forall (x) (P x z)) (forall (x) (Q x z))))
+         '(forall (z) (forall (x) (and (P x z) (Q x z)))))
 
-;; Pipeline: fo-simplify -> nnf -> fo-rename -> minimize-scope -> merge-existentials -> skolemize -> merge-universals -> pnf -> tseitin
+(defconstant +opt-minimize-scope+ nil
+  "When nil (default), use the basic pipeline: fo-simplify -> nnf -> skolemize -> pnf -> tseitin.
+   When t, use the scope-minimizing pipeline which adds fo-rename, minimize-scope,
+   merge-existentials, and merge-universals to reduce Skolem function arities.")
 
-(defun simp-skolem-pnf-cnf (f)
-  "Apply simplification, skolemization, prenex normal form conversion, and CNF transformation to f.
-   Variables are NOT renamed here; clauses are renamed apart lazily during resolution.
+(defun simp-skolem-pnf-cnf-basic (f)
+  "Basic pipeline: fo-simplify -> nnf -> merge-existentials -> skolemize -> merge-universals -> pnf -> tseitin.
+   Bound variables are NOT renamed; Skolem arities are not minimized.
 
    Pre: (fo-formulap f)"
   (dassert (fo-formulap f) "Input must be a FO formula")
+  (tseitin
+   (pnf
+    (merge-universals
+     (skolemize
+      (merge-existentials
+       (nnf
+        (fo-simplify f))))))))
 
+(defun simp-skolem-pnf-cnf-minimize (f)
+  "Scope-minimizing pipeline:
+   fo-simplify -> nnf -> fo-rename -> minimize-scope -> merge-existentials
+               -> skolemize -> merge-universals -> pnf -> tseitin.
+   Produces smaller Skolem arities by minimizing existential scope before Skolemization.
+
+   Pre: (fo-formulap f)"
+  (dassert (fo-formulap f) "Input must be a FO formula")
   (tseitin
    (pnf
     (merge-universals
@@ -2058,6 +2197,35 @@ Examples
         (fo-rename
          (nnf
           (fo-simplify f))))))))))
+
+(defun simp-skolem-pnf-cnf (f)
+  "Apply simplification, skolemization, prenex normal form conversion, and CNF transformation to f.
+   Dispatches to simp-skolem-pnf-cnf-basic or simp-skolem-pnf-cnf-minimize
+   based on +opt-minimize-scope+.
+
+   Pre: (fo-formulap f)"
+  (if +opt-minimize-scope+
+      (simp-skolem-pnf-cnf-minimize f)
+      (simp-skolem-pnf-cnf-basic f)))
+
+;; simp-skolem-pnf-cnf tests
+;; Atomic formula: passthrough
+(assertv #'simp-skolem-pnf-cnf '(P x) '(P x))
+;; Conjunction of atomics: each conjunct as unit clause, no new vars
+(assertv #'simp-skolem-pnf-cnf '(and (P x) (Q x)) '(and (P x) (Q x)))
+;; Disjunction: Tseitin introduces (TS0)
+(assertv #'simp-skolem-pnf-cnf '(or (P x) (Q x))
+         '(and (TS0)
+               (or (not (TS0)) (P x) (Q x))
+               (or (TS0) (not (P x)))
+               (or (TS0) (not (Q x)))))
+;; Negated atomic: passthrough
+(assertv #'simp-skolem-pnf-cnf '(not (P x)) '(not (P x)))
+;; 0-arity Skolem: no forall above
+(assertv #'simp-skolem-pnf-cnf '(exists (y) (R c0 y)) '(R c0 (SK0)))
+;; 1-arity Skolem: forall/exists chain
+(assertv #'simp-skolem-pnf-cnf '(forall (x) (exists (y) (R x y)))
+         '(forall (x) (R x (SK0 x))))
 
 ;; Some example problems
 (defconstant *mortal*
@@ -2148,33 +2316,6 @@ Examples
     (and (implies (F x y) (and (F y z) (F z z)))
          (implies (and (F x y) (G x y)) (and (G x z) (G z z))))))))
 
-
-(assertv #'simp-skolem-pnf-cnf '(P x) '(P x))
-
-;; Conjunction of atomics: each conjunct pushed as unit clause, no new vars
-(assertv #'simp-skolem-pnf-cnf '(and (P x) (Q x)) '(and (P x) (Q x)))
-
-;; Disjunction: Tseitin introduces (TS0), definitional clauses
-;; (TS0) <-> (P x) v (Q x):
-;;   unit: (TS0)
-;;   forward: (or (not (TS0)) (P x) (Q x))
-;;   backward: (or (TS0) (not (P x))), (or (TS0) (not (Q x)))
-(assertv #'simp-skolem-pnf-cnf '(or (P x) (Q x))
-         '(and (TS0)
-               (or (not (TS0)) (P x) (Q x))
-               (or (TS0) (not (P x)))
-               (or (TS0) (not (Q x)))))
-
-;; Negated atomic: already a literal, returned as-is
-(assertv #'simp-skolem-pnf-cnf '(not (P x)) '(not (P x)))
-
-;; 0-arity Skolem: (exists (y) (R c0 y)) => y -> (SK0), no quantifier in result
-(assertv #'simp-skolem-pnf-cnf '(exists (y) (R c0 y))
-         '(R c0 (SK0)))
-
-;; 1-arity Skolem: (forall (x) (exists (y) (R x y))) => y -> (SK0 x)
-(assertv #'simp-skolem-pnf-cnf '(forall (x) (exists (y) (R x y)))
-         '(forall (x) (R x (SK0 x))))
 
 (defun literalp (l)
   (match l
@@ -2635,6 +2776,19 @@ Examples
         (make-hash-set #'equal)
         (make-queue (to-clauses (simp-skolem-pnf-cnf neg-f)))))))
 
+;; fo-no=-val tests — all should return 'valid
+(assertf #'fo-no=-val *mortal* 'valid)
+(assertf #'fo-no=-val *pet* 'valid)
+(assertf #'fo-no=-val *barb* 'valid)
+(assertf #'fo-no=-val *p20* 'valid)
+(assertf #'fo-no=-val *p24* 'valid)
+(assertf #'fo-no=-val *p45* 'valid)
+(assertf #'fo-no=-val *los* 'valid)
+(assertf #'fo-no=-val *p38* 'valid)
+(assertf #'fo-no=-val *p34* 'valid)
+(assertf #'fo-no=-val *ewd1062* 'valid)
+(assertf #'fo-no=-val *davis-putnam* 'valid)
+
 #|
 
  Question 6. Extra Credit (20 pts)
@@ -2737,3 +2891,26 @@ Examples
                  ((&values res fsig rsig) (fo-formulap cnf)))
             (reduce-equality fsig rsig
               (to-clauses cnf))))))))
+
+;; same old tests
+(assertf #'fo-val *mortal* 'valid)
+(assertf #'fo-val *pet* 'valid)
+(assertf #'fo-val *barb* 'valid)
+(assertf #'fo-val *p20* 'valid)
+(assertf #'fo-val *p24* 'valid)
+(assertf #'fo-val *p45* 'valid)
+(assertf #'fo-val *los* 'valid)
+(assertf #'fo-val *p38* 'valid)
+(assertf #'fo-val *p34* 'valid)
+(assertf #'fo-val *ewd1062* 'valid)
+(assertf #'fo-val *davis-putnam* 'valid)
+
+;; fo-val tests — formulas involving equality
+;; Reflexivity: (forall x. x = x)
+(assertf #'fo-val '(forall (x) (= x x)) 'valid)
+;; Symmetry: (forall x y. x=y => y=x)
+(assertf #'fo-val '(forall (x y) (implies (= x y) (= y x))) 'valid)
+;; Leibniz law: P(x) /\ x=y => P(y)
+(assertf #'fo-val '(forall (x y) (implies (and (P x) (= x y)) (P y))) 'valid)
+;; Function congruence: x=y => f(x)=f(y)
+(assertf #'fo-val '(forall (x y) (implies (= x y) (= (f x) (f y)))) 'valid)
