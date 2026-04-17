@@ -1869,7 +1869,6 @@ Examples
            (OR (NOT (TS0)) (NOT (P)) (Q))
            (TS0)))
 
-#|
 (defun merge-quantified-vars (f)
   "Bottom-up pass: merge same-quantifier nesting.
    (Q vars1 (Q vars2 body)) -> (Q (vars1 ++ vars2) body) where both Q are identical.
@@ -1901,108 +1900,192 @@ Examples
          '(forall (x) (exists (y) (P x y))))
 
 ;; TODO: when we unfold, the duplicated variables should be renamed uniquely.
-;; we need to pass down a substitution map to rename variables when we walk top-down and rebuild the formula when going buttom-up.
 (defun unfold-universal (f)
-  "Bottom-up pass for universal quantifiers only.
-   (forall vars (and ...)) -> (and (forall vars arg1) (forall vars arg2) ...)
-   (forall vars (or ...))  -> partition vars per arg; rebuild with per-arg forall prefixes,
-                              shared vars on an outer forall; drops empty prefixes.
+  "Top-down/bottom-up pass for universal quantifiers with substitution accumulator.
+   Matching case: (forall vars (and ...)) -> (and (forall vars arg1) (forall vars' arg2[vars/vars']) ...)
+     First child keeps original vars; subsequent children get fresh vars.
+   Cross-case:    (forall vars (or ...))  -> partition vars by free-vars per arg (no duplication, no fresh vars).
 
    Pre: formula is in NNF and fo-rename has been applied."
   (labels ((wrap-forall (vars body)
              (if (null vars) body `(forall ,vars ,body)))
-           (walk (f)
+           (fresh-rename (vars)
+             "Generate fresh vars and return (new-vars . alist) for subst-term."
+             (let* ((new-vars (mapcar (lambda (v) (declare (ignore v)) (genvar 'X)) vars))
+                    (alist (mapcar #'cons vars new-vars)))
+               (values new-vars alist)))
+           (walk (f sigma)
              (match f
-               ;; < quant-fo-formulap >: recurse first
                ((list 'forall vars body)
-                (let ((new-body (walk body)))
-                  (match new-body
-                    ;; forall/and (matching): distribute unconditionally
-                    ((list* 'and args)
-                     `(and ,@(mapcar (lambda (a) `(forall ,vars ,a)) args)))
-                    ;; forall/or (cross-case): partition vars by free-vars of each arg
-                    ((list* 'or args)
-                     (let* ((arg-fvs (mapcar #'free-vars args))
-                            ;; shared: vars free in 2+ args — must stay on outer forall
-                            (shared (remove-if-not
-                                     (lambda (v)
-                                       (>= (count-if (lambda (fv) (member v fv)) arg-fvs) 2))
-                                     vars))
-                            ;; per-arg exclusive: in vars, free in this arg, not shared
-                            (new-args (mapcar (lambda (a fv)
-                                                (let ((excl (intersection vars (set-difference fv shared))))
-                                                  (wrap-forall excl a)))
-                                              args arg-fvs)))
-                       (wrap-forall shared `(or ,@new-args))))
-                    ;; otherwise: leave as-is
-                    (_ `(forall ,vars ,new-body)))))
+                (match body
+                  ;; forall/and (matching): distribute with fresh vars
+                  ((list* 'and args)
+                   (let ((results nil)
+                         (first t))
+                     (dolist (a args)
+                       (if first
+                           (progn
+                             (push `(forall ,vars ,(walk a sigma)) results)
+                             (setf first nil))
+                           (multiple-value-bind (new-vars alist) (fresh-rename vars)
+                             (push `(forall ,new-vars ,(walk a (append alist sigma))) results))))
+                     `(and ,@(nreverse results))))
+                  ;; forall/or (cross-case): partition vars — no fresh vars needed
+                  ((list* 'or args)
+                   (let* ((arg-fvs (mapcar #'free-vars args))
+                          (shared (remove-if-not
+                                   (lambda (v)
+                                     (>= (count-if (lambda (fv) (member v fv)) arg-fvs) 2))
+                                   vars))
+                          (new-args (mapcar (lambda (a fv)
+                                              (let ((excl (intersection vars (set-difference fv shared))))
+                                                (wrap-forall excl (walk a sigma))))
+                                            args arg-fvs)))
+                     (wrap-forall shared `(or ,@new-args))))
+                  ;; otherwise: leave quantifier, recurse into body
+                  (_ `(forall ,vars ,(walk body sigma)))))
 
-               ;; exists or p-fo: recurse into body/args
                ((list 'exists vars body)
-                `(exists ,vars ,(walk body)))
+                `(exists ,vars ,(walk body sigma)))
 
                ;; < p-fo-formulap >
                ((type boolean) f)
                ((list* (guard op (p-funp op)) args)
-                `(,op ,@(mapcar #'walk args)))
+                `(,op ,@(mapcar (lambda (a) (walk a sigma)) args)))
 
                ;; < fo-atomic-formulap >
-               (_ f))))
-    (walk f)))
+               (_ (if sigma (subst-term f sigma) f)))))
+    (walk f nil)))
+
+;; unfold-universal tests
+;; matching: forall/and — first child keeps vars, second gets fresh
+(assertv #'unfold-universal
+         '(forall (x) (and (P x) (Q x)))
+         '(and (forall (x) (P x)) (forall (X0) (Q X0))))
+;; matching: forall/and with two vars
+(assertv #'unfold-universal
+         '(forall (x y) (and (P x y) (Q y)))
+         '(and (forall (x y) (P x y)) (forall (X0 X1) (Q X1))))
+;; matching: forall/and with three children — second and third get fresh
+(assertv #'unfold-universal
+         '(forall (x) (and (P x) (Q x) (R x)))
+         '(and (forall (x) (P x)) (forall (X0) (Q X0)) (forall (X1) (R X1))))
+;; cross-case: forall/or — partition vars, no fresh vars
+(assertf #'unfold-universal
+         '(forall (x y) (or (P x) (Q y)))
+         '(or (forall (x) (P x)) (forall (y) (Q y))))
+;; cross-case: forall/or — shared var stays on outer forall
+(assertf #'unfold-universal
+         '(forall (x) (or (P x) (Q x)))
+         '(forall (x) (or (P x) (Q x))))
+;; cross-case: forall/or — mixed shared and exclusive
+(assertf #'unfold-universal
+         '(forall (x y z) (or (P x y) (Q y z)))
+         '(forall (y) (or (forall (x) (P x y)) (forall (z) (Q y z)))))
+;; non-matching: forall with non-and/or body -> unchanged
+(assertf #'unfold-universal
+         '(forall (x) (P x))
+         '(forall (x) (P x)))
+;; exists untouched
+(assertf #'unfold-universal
+         '(exists (x) (or (P x) (Q x)))
+         '(exists (x) (or (P x) (Q x))))
 
 (defun unfold-existential (f)
-  "Bottom-up pass for existential quantifiers only.
-   (exists vars (or ...))  -> (or (exists vars arg1) (exists vars arg2) ...)
-   (exists vars (and ...)) -> partition vars per arg; rebuild with per-arg exists prefixes,
-                              shared vars on an outer exists; drops empty prefixes.
+  "Top-down/bottom-up pass for existential quantifiers with substitution accumulator.
+   Matching case: (exists vars (or ...)) -> (or (exists vars arg1) (exists vars' arg2[vars/vars']) ...)
+     First child keeps original vars; subsequent children get fresh vars.
+   Cross-case:    (exists vars (and ...)) -> partition vars by free-vars per arg (no duplication, no fresh vars).
 
    Pre: formula is in NNF and fo-rename has been applied."
   (labels ((wrap-exists (vars body)
              (if (null vars) body `(exists ,vars ,body)))
-           (walk (f)
+           (fresh-rename (vars)
+             (let* ((new-vars (mapcar (lambda (v) (declare (ignore v)) (genvar 'X)) vars))
+                    (alist (mapcar #'cons vars new-vars)))
+               (values new-vars alist)))
+           (walk (f sigma)
              (match f
-               ;; < quant-fo-formulap >: recurse first
                ((list 'exists vars body)
-                (let ((new-body (walk body)))
-                  (match new-body
-                    ;; exists/or (matching): distribute unconditionally
-                    ((list* 'or args)
-                     `(or ,@(mapcar (lambda (a) `(exists ,vars ,a)) args)))
-                    ;; exists/and (cross-case): partition vars by free-vars of each arg
-                    ((list* 'and args)
-                     (let* ((arg-fvs (mapcar #'free-vars args))
-                            ;; shared: vars free in 2+ args — must stay on outer exists
-                            (shared (remove-if-not
-                                     (lambda (v)
-                                       (>= (count-if (lambda (fv) (member v fv)) arg-fvs) 2))
-                                     vars))
-                            ;; per-arg exclusive: in vars, free in this arg, not shared
-                            (new-args (mapcar (lambda (a fv)
-                                                (let ((excl (intersection vars (set-difference fv shared))))
-                                                  (wrap-exists excl a)))
-                                              args arg-fvs)))
-                       (wrap-exists shared `(and ,@new-args))))
-                    ;; otherwise: leave as-is
-                    (_ `(exists ,vars ,new-body)))))
+                (match body
+                  ;; exists/or (matching): distribute with fresh vars
+                  ((list* 'or args)
+                   (let ((results nil)
+                         (first t))
+                     (dolist (a args)
+                       (if first
+                           (progn
+                             (push `(exists ,vars ,(walk a sigma)) results)
+                             (setf first nil))
+                           (multiple-value-bind (new-vars alist) (fresh-rename vars)
+                             (push `(exists ,new-vars ,(walk a (append alist sigma))) results))))
+                     `(or ,@(nreverse results))))
+                  ;; exists/and (cross-case): partition vars — no fresh vars needed
+                  ((list* 'and args)
+                   (let* ((arg-fvs (mapcar #'free-vars args))
+                          (shared (remove-if-not
+                                   (lambda (v)
+                                     (>= (count-if (lambda (fv) (member v fv)) arg-fvs) 2))
+                                   vars))
+                          (new-args (mapcar (lambda (a fv)
+                                              (let ((excl (intersection vars (set-difference fv shared))))
+                                                (wrap-exists excl (walk a sigma))))
+                                            args arg-fvs)))
+                     (wrap-exists shared `(and ,@new-args))))
+                  ;; otherwise: leave quantifier, recurse into body
+                  (_ `(exists ,vars ,(walk body sigma)))))
 
-               ;; forall or p-fo: recurse into body/args
                ((list 'forall vars body)
-                `(forall ,vars ,(walk body)))
+                `(forall ,vars ,(walk body sigma)))
 
                ;; < p-fo-formulap >
                ((type boolean) f)
                ((list* (guard op (p-funp op)) args)
-                `(,op ,@(mapcar #'walk args)))
+                `(,op ,@(mapcar (lambda (a) (walk a sigma)) args)))
 
                ;; < fo-atomic-formulap >
-               (_ f))))
-    (walk f)))
+               (_ (if sigma (subst-term f sigma) f)))))
+    (walk f nil)))
+
+;; unfold-existential tests
+;; matching: exists/or — first child keeps vars, second gets fresh
+(assertv #'unfold-existential
+         '(exists (x) (or (P x) (Q x)))
+         '(or (exists (x) (P x)) (exists (X0) (Q X0))))
+;; matching: exists/or with two vars
+(assertv #'unfold-existential
+         '(exists (x y) (or (P x y) (Q y)))
+         '(or (exists (x y) (P x y)) (exists (X0 X1) (Q X1))))
+;; matching: exists/or with three children
+(assertv #'unfold-existential
+         '(exists (x) (or (P x) (Q x) (R x)))
+         '(or (exists (x) (P x)) (exists (X0) (Q X0)) (exists (X1) (R X1))))
+;; cross-case: exists/and — partition vars, no fresh vars
+(assertf #'unfold-existential
+         '(exists (x y) (and (P x) (Q y)))
+         '(and (exists (x) (P x)) (exists (y) (Q y))))
+;; cross-case: exists/and — shared var stays on outer exists
+(assertf #'unfold-existential
+         '(exists (x) (and (P x) (Q x)))
+         '(exists (x) (and (P x) (Q x))))
+;; cross-case: exists/and — mixed shared and exclusive
+(assertf #'unfold-existential
+         '(exists (x y z) (and (P x y) (Q y z)))
+         '(exists (y) (and (exists (x) (P x y)) (exists (z) (Q y z)))))
+;; non-matching: exists with non-and/or body -> unchanged
+(assertf #'unfold-existential
+         '(exists (x) (P x))
+         '(exists (x) (P x)))
+;; forall untouched
+(assertf #'unfold-existential
+         '(forall (x) (and (P x) (Q x)))
+         '(forall (x) (and (P x) (Q x))))
 
 (defun minimize-scope (f)
-  "Minimize the scope of quantifiers by running four bottom-up passes to fixpoint:
-     1. merge-quantified-vars    -- (Q v1 (Q v2 body)) -> (Q (v1++v2) body)
-     2. unfold-universal         -- (forall v (and ...)) / (forall v (or ...))
-     3. unfold-existential       -- (exists v (or ...))  / (exists v (and ...))
+  "Minimize the scope of quantifiers by running four passes to fixpoint:
+     1. merge-quantified-vars    -- (Q v1 (Q v2 body)) -> (Q (v1++v2) body)  [bottom-up]
+     2. unfold-universal         -- (forall v (and/or ...))                   [top-down with sigma]
+     3. unfold-existential       -- (exists v (or/and ...))                   [top-down with sigma]
      4. fo-simplify-trivially-quantified -- remove vacuous quantifiers
    Repeats until the formula stabilizes.
 
@@ -2020,18 +2103,19 @@ Examples
 (assertf #'minimize-scope
          '(forall (x) (forall (y) (P x y)))
          '(forall (x y) (P x y)))
-(assertf #'minimize-scope
+;; exists nested then or: merge then unfold with fresh vars
+(assertv #'minimize-scope
          '(exists (x) (exists (y) (or (P x) (Q y))))
-         '(or (exists (x) (P x)) (exists (y) (Q y))))
-;; forall/and: unconditional unfold
-(assertf #'minimize-scope
+         '(or (exists (x y) (P x)) (exists (X0 X1) (Q X1))))
+;; forall/and: unconditional unfold — first child keeps x, second gets X0
+(assertv #'minimize-scope
          '(forall (x) (and (P x) (Q y)))
          '(and (forall (x) (P x)) (Q y)))
 ;; exists/and: cross-case — x free in P only -> pushed in, outer exists removed
 (assertf #'minimize-scope
          '(exists (x) (and (P x) (Q y)))
          '(and (exists (x) (P x)) (Q y)))
-;; forall/or: cross-case — x and y exclusive -> each pushed to its arg
+;; forall/or: cross-case — x and y exclusive -> each pushed to its arg (no fresh vars needed)
 (assertf #'minimize-scope
          '(forall (x y) (or (P x) (Q y)))
          '(or (forall (x) (P x)) (forall (y) (Q y))))
@@ -2039,151 +2123,208 @@ Examples
 (assertf #'minimize-scope
          '(forall (x) (or (P x) (Q x)))
          '(forall (x) (or (P x) (Q x))))
-;; exists/or: unconditional unfold
-(assertf #'minimize-scope
+;; exists/or: unconditional unfold — first child keeps (x y), second gets fresh (X0 X1)
+(assertv #'minimize-scope
          '(exists (x y) (or (P x) (Q y)))
-         '(or (exists (x) (P x)) (exists (y) (Q y))))
+         '(or (exists (x y) (P x)) (exists (X0 X1) (Q X1))))
 ;; forall then exists with irrelevant universal -> universal dropped by vacuous removal
-(assertf #'minimize-scope
+(assertv #'minimize-scope
          '(forall (z) (exists (x) (and (P x) (Q y))))
          '(and (exists (x) (P x)) (Q y)))
 
-;; TODO: refactoring merge-existentials and merge-universals to share code
 (defun merge-existentials (f)
-  "Bottom-up pass: on each (or ...) node, group (exists vars body) children with
-   identical var-lists and fold each group into (exists vars (or body...)).
-   Non-∃ children remain in place.
+  "Top-down/bottom-up pass with substitution accumulator.
+   On each (or ...) node: collect ∃-children, compute k = min var-list length,
+   rename each child's first k vars to canonical set (first child's vars win),
+   re-wrap leftover vars. Non-∃ children remain as siblings.
 
-   Pre: formula is in NNF."
-  (labels ((walk (f)
+   Pre: formula is in NNF and fo-rename has been applied."
+  (labels ((wrap-exists (vars body)
+             (if (null vars) body `(exists ,vars ,body)))
+           (walk (f sigma)
              (match f
                ;; < quant-fo-formulap >: recurse into body
                ((list (guard q (fo-quantifierp q)) vars body)
-                `(,q ,vars ,(walk body)))
+                `(,q ,vars ,(walk body sigma)))
 
                ;; < p-fo-formulap >
                ((type boolean) f)
 
-               ;; (or ...): recurse first (bottom-up), then fold ∃ groups
+               ;; (or ...): inspect children, merge ∃ groups, then walk bodies
                ((list* 'or args)
-                (let* ((walked (mapcar #'walk args))
-                       (groups (make-hash-table :test #'equal))
-                       (non-exists nil))
-                  (dolist (arg walked)
-                    (match arg
+                (let ((exists-children nil)
+                      (non-exists-children nil))
+                  ;; 1. Inspect (unwalked) children
+                  (dolist (a args)
+                    (match a
                       ((list 'exists evars ebody)
-                       (setf (gethash evars groups)
-                             (cons ebody (gethash evars groups))))
-                      (_ (push arg non-exists))))
-                  (let ((folded nil))
-                    (maphash (lambda (evars bodies)
-                               (let ((bodies (nreverse bodies)))
-                                 (push (if (null (cdr bodies))
-                                           `(exists ,evars ,(car bodies))
-                                           `(exists ,evars (or ,@bodies)))
-                                       folded)))
-                             groups)
-                    (let ((all-args (append (nreverse non-exists) folded)))
-                      (if (null (cdr all-args))
-                          (car all-args)
-                          `(or ,@all-args))))))
+                       (push (cons evars ebody) exists-children))
+                      (_ (push a non-exists-children))))
+                  (setf exists-children (nreverse exists-children))
+                  (setf non-exists-children (nreverse non-exists-children))
+
+                  (if (< (length exists-children) 2)
+                      ;; Not enough ∃-children to merge: just walk all with current sigma
+                      `(or ,@(mapcar (lambda (a) (walk a sigma)) args))
+                      ;; 2. Compute k = min var-list length
+                      (let* ((k (reduce #'min (mapcar (lambda (ec) (length (car ec))) exists-children)))
+                             ;; 3. Canonical vars: first ∃-child's first k vars
+                             (canonical (subseq (car (first exists-children)) 0 k))
+                             ;; 4. Process each ∃-child
+                             (merged-bodies
+                               (mapcar (lambda (ec)
+                                         (let* ((evars (car ec))
+                                                (ebody (cdr ec))
+                                                (child-k-vars (subseq evars 0 k))
+                                                (leftover (subseq evars k))
+                                                (rename-alist (mapcar #'cons child-k-vars canonical))
+                                                (new-sigma (append rename-alist sigma))
+                                                (walked (walk ebody new-sigma)))
+                                           (wrap-exists leftover walked)))
+                                       exists-children))
+                             ;; 5. Walk non-∃ children
+                             (walked-others (mapcar (lambda (a) (walk a sigma)) non-exists-children))
+                             ;; 6. Build result
+                             (inner (if (null (cdr merged-bodies))
+                                        (car merged-bodies)
+                                        `(or ,@merged-bodies)))
+                             (merged `(exists ,canonical ,inner))
+                             (all-args (if walked-others
+                                           (cons merged walked-others)
+                                           (list merged))))
+                        (if (null (cdr all-args))
+                            (car all-args)
+                            `(or ,@all-args))))))
 
                ;; other p-fo-formulap (and, not, ...): recurse
                ((list* (guard op (p-funp op)) args)
-                `(,op ,@(mapcar #'walk args)))
+                `(,op ,@(mapcar (lambda (a) (walk a sigma)) args)))
 
                ;; < fo-atomic-formulap >
-               (_ f))))
-    (walk f)))
+               (_ (if sigma (subst-term f sigma) f)))))
+    (walk f nil)))
 
 ;; merge-existentials tests
 ;; Base case: no existentials at all
 (assertf #'merge-existentials '(P x) '(P x))
-;; Two exists with identical var-list: folded
-(assertf #'merge-existentials
-         '(or (exists (x) (P x)) (exists (x) (Q x)))
-         '(exists (x) (or (P x) (Q x))))
-;; Different var-lists: not merged
-(assertf #'merge-existentials
+;; Two exists with same var-list: folded with renaming (second child's x renamed to first's x)
+(assertv #'merge-existentials
          '(or (exists (x) (P x)) (exists (y) (Q y)))
-         '(or (exists (x) (P x)) (exists (y) (Q y))))
-;; Non-exists arg remains
+         '(exists (x) (or (P x) (Q x))))
+;; Non-exists arg remains as sibling
+(assertv #'merge-existentials
+         '(or (R z) (exists (x) (P x)) (exists (y) (Q y)))
+         '(or (exists (x) (or (P x) (Q x))) (R z)))
+;; Different-length var-lists: min=1, leftover re-wrapped
+(assertv #'merge-existentials
+         '(or (exists (x y) (P x y)) (exists (z) (Q z)))
+         '(exists (x) (or (exists (y) (P x y)) (Q x))))
+;; Three ∃-children: min=1 across all
+(assertv #'merge-existentials
+         '(or (exists (a b) (P a b)) (exists (c) (Q c)) (exists (d e f) (R d e f)))
+         '(exists (a) (or (exists (b) (P a b)) (Q a) (exists (e f) (R a e f)))))
+;; Only one ∃-child: no merge
 (assertf #'merge-existentials
-         '(or (R z) (exists (x) (P x)) (exists (x) (Q x)))
-         '(or (R z) (exists (x) (or (P x) (Q x)))))
+         '(or (exists (x) (P x)) (Q y))
+         '(or (exists (x) (P x)) (Q y)))
 ;; Nested: or inside forall
-(assertf #'merge-existentials
-         '(forall (z) (or (exists (x) (P x)) (exists (x) (Q x))))
+(assertv #'merge-existentials
+         '(forall (z) (or (exists (x) (P x)) (exists (y) (Q y))))
          '(forall (z) (exists (x) (or (P x) (Q x)))))
 
 ;; TODO: this algorithm is wrong after fo-rename and the length of the two var lists can be different
 (defun merge-universals (f)
-  "Bottom-up pass: on each (and ...) node, group (forall vars body) children with
-   identical var-lists and fold each group into (forall vars (and body...)).
-   Non-∀ children remain in place.
+  "Top-down/bottom-up pass with substitution accumulator.
+   On each (and ...) node: collect ∀-children, compute k = max var-list length,
+   rename each child's vars to canonical set (longest child's vars win),
+   shorter children get extra vacuous vars. Non-∀ children remain as siblings.
 
    Pre: formula has been skolemized (no ∃)."
-  (labels ((walk (f)
+  (labels ((walk (f sigma)
              (match f
                ;; < quant-fo-formulap >: recurse into body
                ((list (guard q (fo-quantifierp q)) vars body)
-                `(,q ,vars ,(walk body)))
+                `(,q ,vars ,(walk body sigma)))
 
                ;; < p-fo-formulap >
                ((type boolean) f)
 
-               ;; (and ...): recurse first (bottom-up), then fold ∀ groups
+               ;; (and ...): inspect children, merge ∀ groups, then walk bodies
                ((list* 'and args)
-                (let* ((walked (mapcar #'walk args))
-                       (groups (make-hash-table :test #'equal))
-                       (non-forall nil))
-                  (dolist (arg walked)
-                    (match arg
+                (let ((forall-children nil)
+                      (non-forall-children nil))
+                  ;; 1. Inspect (unwalked) children
+                  (dolist (a args)
+                    (match a
                       ((list 'forall fvars fbody)
-                       (setf (gethash fvars groups)
-                             (cons fbody (gethash fvars groups))))
-                      (_ (push arg non-forall))))
-                  (let ((folded nil))
-                    (maphash (lambda (fvars bodies)
-                               (let ((bodies (nreverse bodies)))
-                                 (push (if (null (cdr bodies))
-                                           `(forall ,fvars ,(car bodies))
-                                           `(forall ,fvars (and ,@bodies)))
-                                       folded)))
-                             groups)
-                    (let ((all-args (append (nreverse non-forall) folded)))
-                      (if (null (cdr all-args))
-                          (car all-args)
-                          `(and ,@all-args))))))
+                       (push (cons fvars fbody) forall-children))
+                      (_ (push a non-forall-children))))
+                  (setf forall-children (nreverse forall-children))
+                  (setf non-forall-children (nreverse non-forall-children))
+
+                  (if (< (length forall-children) 2)
+                      ;; Not enough ∀-children to merge: just walk all with current sigma
+                      `(and ,@(mapcar (lambda (a) (walk a sigma)) args))
+                      ;; 2. Compute k = max var-list length
+                      (let* ((k (reduce #'max (mapcar (lambda (fc) (length (car fc))) forall-children)))
+                             ;; 3. Find the longest child's vars as canonical
+                             (longest (find k forall-children :key (lambda (fc) (length (car fc)))))
+                             (canonical (car longest))
+                             ;; 4. Process each ∀-child
+                             (merged-bodies
+                               (mapcar (lambda (fc)
+                                         (let* ((fvars (car fc))
+                                                (fbody (cdr fc))
+                                                (len (length fvars))
+                                                (rename-alist (mapcar #'cons fvars (subseq canonical 0 len)))
+                                                (new-sigma (append rename-alist sigma)))
+                                           (walk fbody new-sigma)))
+                                       forall-children))
+                             ;; 5. Walk non-∀ children
+                             (walked-others (mapcar (lambda (a) (walk a sigma)) non-forall-children))
+                             ;; 6. Build result
+                             (inner (if (null (cdr merged-bodies))
+                                        (car merged-bodies)
+                                        `(and ,@merged-bodies)))
+                             (merged `(forall ,canonical ,inner))
+                             (all-args (if walked-others
+                                           (cons merged walked-others)
+                                           (list merged))))
+                        (if (null (cdr all-args))
+                            (car all-args)
+                            `(and ,@all-args))))))
 
                ;; other p-fo-formulap (or, not, ...): recurse
                ((list* (guard op (p-funp op)) args)
-                `(,op ,@(mapcar #'walk args)))
+                `(,op ,@(mapcar (lambda (a) (walk a sigma)) args)))
 
                ;; < fo-atomic-formulap >
-               (_ f))))
-    (walk f)))
+               (_ (if sigma (subst-term f sigma) f)))))
+    (walk f nil)))
 
 ;; merge-universals tests
 ;; Base case: no universals at all
 (assertf #'merge-universals '(P x) '(P x))
-;; Two foralls with identical var-list: folded
-(assertf #'merge-universals
-         '(and (forall (x) (P x)) (forall (x) (Q x)))
-         '(forall (x) (and (P x) (Q x))))
-;; Different var-lists: not merged
-(assertf #'merge-universals
+;; Two foralls with same-length var-list: folded with renaming
+(assertv #'merge-universals
          '(and (forall (x) (P x)) (forall (y) (Q y)))
-         '(and (forall (x) (P x)) (forall (y) (Q y))))
-;; Non-forall arg remains
-(assertf #'merge-universals
-         '(and (R z) (forall (x) (P x)) (forall (x) (Q x)))
-         '(and (R z) (forall (x) (and (P x) (Q x)))))
+         '(forall (x) (and (P x) (Q x))))
+;; Max-length: longer var-list wins, shorter gets vacuous vars
+(assertv #'merge-universals
+         '(and (forall (x y z) (P x y z)) (forall (w u) (Q w u)))
+         '(forall (x y z) (and (P x y z) (Q x y))))
+;; Non-forall arg remains as sibling
+(assertv #'merge-universals
+         '(and (R z) (forall (x) (P x)) (forall (y) (Q y)))
+         '(and (forall (x) (and (P x) (Q x))) (R z)))
 ;; Nested: and inside forall
-(assertf #'merge-universals
-         '(forall (z) (and (forall (x) (P x z)) (forall (x) (Q x z))))
+(assertv #'merge-universals
+         '(forall (z) (and (forall (x) (P x z)) (forall (y) (Q y z))))
          '(forall (z) (forall (x) (and (P x z) (Q x z)))))
-|#
+;; Only one ∀-child: no merge
+(assertf #'merge-universals
+         '(and (forall (x) (P x)) (Q y))
+         '(and (forall (x) (P x)) (Q y)))
 
 (defconstant +opt-minimize-scope+ nil
   "When nil (default), use the basic pipeline: fo-simplify -> nnf -> skolemize -> pnf -> tseitin.
