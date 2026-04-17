@@ -2251,28 +2251,28 @@ Examples
 
 ;; Some example problems
 ;; TODO: fix naming * -> +
-(defconstant *mortal*
-  '(not (and (forall x (implies (man x) (mortal x)))
-             (man c)
-             (not (mortal c)))))
+(defconstant +mortal+
+  '(implies (and (forall x (implies (man x) (mortal x)))
+                 (man c))
+      (mortal c)))
 
-(assert (fo-formulap *mortal*))
+(assert (fo-formulap +mortal+))
 
-(defconstant *pet*
-  '(not (and (forall x (implies (pet x) (exists y (cares y x))))
-              (forall (y z) (implies (and (pet z) (cares y z)) (kind y)))
-              (pet c)
-              (not (forall w (not (kind w)))))))
+(defconstant +pet+
+  '(implies (and (forall x (implies (pet x) (exists y (cares y x))))
+                 (forall (y z) (implies (and (pet z) (cares y z)) (kind y)))
+                 (pet c))
+      (not (forall w (not (kind w))))))
 
-(assert (fo-formulap *pet*))
+(assert (fo-formulap +pet+))
 
-(defconstant *barb*
+(defconstant +barb+
   '(not (exists x (forall y (iff (shaves x y) (not (shaves y y)))))))
 
-(assert (fo-formulap *barb*))
+(assert (fo-formulap +barb+))
 
 ;; p38: Pelletier problem 38
-(defconstant *p38*
+(defconstant +p38+
   '(iff
     (forall (x)
       (implies (and (P c) (implies (P x) (exists (y) (and (P y) (R x y)))))
@@ -2283,20 +2283,20 @@ Examples
                (not (exists (y) (and (P y) (R x y))))
                (exists (z w) (and (P z) (R x w) (R w z))))))))
 
-(assert (fo-formulap *p38*))
+(assert (fo-formulap +p38+))
 
 ;; p34: Pelletier problem 34
-(defconstant *p34*
+(defconstant +p34+
   '(iff
     (iff (exists (x) (forall (y) (iff (P x) (P y))))
          (iff (exists (x) (Q x)) (forall (y) (Q y))))
     (iff (exists (x) (forall (y) (iff (Q x) (Q y))))
          (iff (exists (x) (P x)) (forall (y) (P y))))))
 
-(assert (fo-formulap *p34*))
+(assert (fo-formulap +p34+))
 
 ;; ewd1062: Dijkstra EWD1062 — Galois connection implies monotonicity
-(defconstant *ewd1062*
+(defconstant +ewd1062+
   '(implies
     (and (forall (x) (<= x x))
          (forall (x y z) (implies (and (<= x y) (<= y z)) (<= x z)))
@@ -2304,10 +2304,10 @@ Examples
     (and (forall (x y) (implies (<= x y) (<= (f x) (f y))))
          (forall (x y) (implies (<= x y) (<= (g x) (g y)))))))
 
-(assert (fo-formulap *ewd1062*))
+(assert (fo-formulap +ewd1062+))
 
 ;; los: Los formula
-(defconstant *los*
+(defconstant +los+
   '(implies
     (and (forall (x y z) (implies (and (P x y) (P y z)) (P x z)))
          (forall (x y z) (implies (and (Q x y) (Q y z)) (Q x z)))
@@ -2316,10 +2316,10 @@ Examples
     (or (forall (x y) (P x y))
      (forall (x y) (Q x y)))))
 
-(assert (fo-formulap *los*))
+(assert (fo-formulap +los+))
 
 ;; p24: Pelletier problem 24
-(defconstant *p24*
+(defconstant +p24+
   '(implies
     (and (not (exists (x) (and (S x) (Q x))))
          (forall (x) (implies (P x) (or (Q x) (R x))))
@@ -2327,10 +2327,10 @@ Examples
          (forall (x) (implies (and (Q x) (R x)) (S x))))
     (exists (x) (and (P x) (R x)))))
 
-(assert (fo-formulap *p24*))
+(assert (fo-formulap +p24+))
 
 ;; p45: Pelletier problem 45
-(defconstant *p45*
+(defconstant +p45+
   '(implies
     (and (forall (x)
            (implies (and (P x) (forall (y) (implies (and (G y) (H x y)) (J x y))))
@@ -2342,24 +2342,24 @@ Examples
                 (forall (y) (implies (and (G y) (H x y)) (J x y))))))
     (exists (x) (and (P x) (not (exists (y) (and (G y) (H x y))))))))
 
-(assert (fo-formulap *p45*))
+(assert (fo-formulap +p45+))
 
 ;; p20: Pelletier problem 20
-(defconstant *p20*
+(defconstant +p20+
   '(implies
     (forall (x y) (exists (z) (forall (w) (implies (and (P x) (Q y)) (and (R z) (S w))))))
     (implies (exists (x y) (and (P x) (Q y)))
              (exists (z) (R z)))))
 
-(assert (fo-formulap *p20*))
+(assert (fo-formulap +p20+))
 
 ;; davis-putnam example
-(defconstant *davis-putnam*
+(defconstant +davis-putnam+
   '(exists (x) (exists (y) (forall (z)
     (and (implies (F x y) (and (F y z) (F z z)))
          (implies (and (F x y) (G x y)) (and (G x z) (G z z))))))))
 
-(assert (fo-formulap *davis-putnam*))
+(assert (fo-formulap +davis-putnam+))
 
 (defun cnf-clausep (c)
   (match c
@@ -2388,9 +2388,9 @@ Examples
 ;; Contradiction
 (assert (pnf-cnf-p (simp-skolem-pnf-cnf '(and (P) (not (P))))))
 ;; Mortal Socrates
-(assert (pnf-cnf-p (simp-skolem-pnf-cnf *mortal*)))
+(assert (pnf-cnf-p (simp-skolem-pnf-cnf +mortal+)))
 ;; Pet example
-(assert (pnf-cnf-p (simp-skolem-pnf-cnf *pet*)))
+(assert (pnf-cnf-p (simp-skolem-pnf-cnf +pet+)))
 ;; iff with quantifiers
 (assert (pnf-cnf-p (simp-skolem-pnf-cnf '(forall (x) (iff (P x) (Q x))))))
 ;; Deeply nested: implies + quantifiers
@@ -2817,17 +2817,17 @@ Examples
 
 ;; TODO:
 ;; fo-no=-val tests — all should return 'valid
-(assertf #'fo-no=-val *mortal* 'valid)
-(assertf #'fo-no=-val *pet* 'valid) ;; returns 'nil
-(assertf #'fo-no=-val *barb* 'valid)
-(assertf #'fo-no=-val *p20* 'valid)
-(assertf #'fo-no=-val *p24* 'valid)
-(assertf #'fo-no=-val *p45* 'valid)
-(assertf #'fo-no=-val *los* 'valid)
-(assertf #'fo-no=-val *p38* 'valid)
-(assertf #'fo-no=-val *p34* 'valid) ;; loops
-(assertf #'fo-no=-val *ewd1062* 'valid)
-(assertf #'fo-no=-val *davis-putnam* 'valid)
+(assertf #'fo-no=-val +mortal+ 'valid)
+(assertf #'fo-no=-val +pet+ 'valid)
+(assertf #'fo-no=-val +barb+ 'valid)
+(assertf #'fo-no=-val +p20+ 'valid)
+(assertf #'fo-no=-val +p24+ 'valid)
+(assertf #'fo-no=-val +p45+ 'valid)
+(assertf #'fo-no=-val +los+ 'valid)
+(assertf #'fo-no=-val +p38+ 'valid)
+(assertf #'fo-no=-val +p34+ 'valid) ;; loops
+(assertf #'fo-no=-val +ewd1062+ 'valid)
+(assertf #'fo-no=-val +davis-putnam+ 'valid)
 
 ;; fo-no=-val — cases that return nil (formula is not valid; negation is satisfiable
 ;; and resolution terminates with an empty queue)
@@ -2980,17 +2980,17 @@ Examples
               (to-clauses cnf))))))))
 
 ;; same old tests
-(assertf #'fo-val *mortal* 'valid)
-(assertf #'fo-val *pet* 'valid)
-(assertf #'fo-val *barb* 'valid)
-(assertf #'fo-val *p20* 'valid)
-(assertf #'fo-val *p24* 'valid)
-(assertf #'fo-val *p45* 'valid)
-(assertf #'fo-val *los* 'valid)
-(assertf #'fo-val *p38* 'valid)
-(assertf #'fo-val *p34* 'valid)
-(assertf #'fo-val *ewd1062* 'valid)
-(assertf #'fo-val *davis-putnam* 'valid)
+(assertf #'fo-val +mortal+ 'valid)
+(assertf #'fo-val +pet+ 'valid)
+(assertf #'fo-val +barb+ 'valid)
+(assertf #'fo-val +p20+ 'valid)
+(assertf #'fo-val +p24+ 'valid)
+(assertf #'fo-val +p45+ 'valid)
+(assertf #'fo-val +los+ 'valid)
+(assertf #'fo-val +p38+ 'valid)
+(assertf #'fo-val +p34+ 'valid)
+(assertf #'fo-val +ewd1062+ 'valid)
+(assertf #'fo-val +davis-putnam+ 'valid)
 
 ;; fo-val tests — formulas involving equality
 ;; Reflexivity: (forall x. x = x)
