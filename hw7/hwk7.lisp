@@ -1881,6 +1881,8 @@ Examples
 (assertf #'merge-quantified-vars '(forall (x) (exists (y) (P x y)))
          '(forall (x) (exists (y) (P x y))))
 
+;; TODO: when we unfold, the duplicated variables should be renamed uniquely. 
+;; we need to pass down a substitution map to rename variables when we walk top-down and rebuild the formula when going buttom-up.  
 (defun unfold-universal (f)
   "Bottom-up pass for universal quantifiers only.
    (forall vars (and ...)) -> (and (forall vars arg1) (forall vars arg2) ...)
@@ -2027,6 +2029,7 @@ Examples
          '(forall (z) (exists (x) (and (P x) (Q y))))
          '(and (exists (x) (P x)) (Q y)))
 
+;; TODO: refactoring merge-existentials and merge-universals to share code
 (defun merge-existentials (f)
   "Bottom-up pass: on each (or ...) node, group (exists vars body) children with
    identical var-lists and fold each group into (exists vars (or body...)).
@@ -2094,6 +2097,7 @@ Examples
          '(forall (z) (or (exists (x) (P x)) (exists (x) (Q x))))
          '(forall (z) (exists (x) (or (P x) (Q x)))))
 
+;; TODO: this algorithm is wrong after fo-rename and the length of the two var lists can be different  
 (defun merge-universals (f)
   "Bottom-up pass: on each (and ...) node, group (forall vars body) children with
    identical var-lists and fold each group into (forall vars (and body...)).
@@ -2167,18 +2171,16 @@ Examples
    merge-existentials, and merge-universals to reduce Skolem function arities.")
 
 (defun simp-skolem-pnf-cnf-basic (f)
-  "Basic pipeline: fo-simplify -> nnf -> merge-existentials -> skolemize -> merge-universals -> pnf -> tseitin.
+  "Basic pipeline: fo-simplify -> nnf -> skolemize -> pnf -> tseitin.
    Bound variables are NOT renamed; Skolem arities are not minimized.
 
    Pre: (fo-formulap f)"
   (dassert (fo-formulap f) "Input must be a FO formula")
   (tseitin
    (pnf
-    (merge-universals
-     (skolemize
-      (merge-existentials
-       (nnf
-        (fo-simplify f))))))))
+    (skolemize
+     (nnf
+      (fo-simplify f))))))
 
 (defun simp-skolem-pnf-cnf-minimize (f)
   "Scope-minimizing pipeline:
@@ -2611,7 +2613,7 @@ Examples
   (match t1
     ;; t1 is a variable: look up in theta
     ((satisfies variable-symbolp)
-     (let ((binding (assoc t1 theta :test #'equal)))
+     (let ((binding (assoc t1 theta :test #'eql)))
        (cond
          ;; already bound: check consistency with t2
          (binding (if (equal (cdr binding) t2) theta 'fail))
@@ -2770,7 +2772,7 @@ Examples
    or loops if f is satisfiable but not valid.
 
    Pre: f is a FO formula without equality."
-  (let ((neg-f `(not ,f)))
+  (let ((neg-f (negate f)))
     (with-fo-formula neg-f
       (solve
         (make-hash-set #'equal)
@@ -2788,6 +2790,53 @@ Examples
 (assertf #'fo-no=-val *p34* 'valid)
 (assertf #'fo-no=-val *ewd1062* 'valid)
 (assertf #'fo-no=-val *davis-putnam* 'valid)
+
+;; fo-no=-val — cases that return nil (formula is not valid; negation is satisfiable
+;; and resolution terminates with an empty queue)
+
+;; An atomic formula with a constant: not a tautology.
+;; neg-f = {(not (P a))} — no positive clause, queue empties immediately.
+(assertf #'fo-no=-val '(P a) nil)
+
+;; "Everything has property P" is not a logical tautology.
+;; neg-f Skolemizes to {(not (P SK0))} — still no positive clause.
+(assertf #'fo-no=-val '(forall (x) (P x)) nil)
+
+;; Symmetry of R is not universally valid (no axioms about R are assumed).
+;; neg-f = {(R c0 c1)} and {(not (R c1 c0))}: the positive clause (R c0 c1)
+;; cannot resolve with (not (R c1 c0)) because c0 ≠ c1 as distinct constants.
+(assertf #'fo-no=-val '(forall (x y) (implies (R x y) (R y x))) nil)
+
+;; An explicit propositional contradiction: (and (P a) (not (P a))).
+;; neg-f = (or (not (P a)) (P a)) — a tautology — simplifies to `t` before
+;; Skolemization, so to-clauses produces no clauses at all and solve returns nil.
+(assertf #'fo-no=-val '(and (P a) (not (P a))) nil)
+
+;; fo-no=-val — cases that LOOP (formula is satisfiable but not valid;
+;; resolution keeps producing fresh terms and never terminates).
+;; These are commented out so the test suite does not hang.
+
+;; Mathematical-induction shape: P(a), ∀x.P(x)→P(f(x)) does NOT imply P(b)
+;; when b is outside the f-chain of a.  neg-f clauses:
+;;   {(P a)},  {(not (P X)) (P (f X))},  {(not (P b))}
+;; Resolution generates (P (f a)), (P (f (f a))), … but never unifies with (P b),
+;; so the queue never empties and the empty clause is never derived.
+;;
+;; (assertf #'fo-no=-val
+;;          '(implies (and (P a)
+;;                         (forall (x) (implies (P x) (P (f x)))))
+;;                    (P b))
+;;          'valid) ; <-- would loop; annotated only for documentation
+
+;; Same looping structure, written as a negated conjunction.
+;; neg-f = (and (P a) (forall (x) (implies (P x) (P (f x))))) gives the same
+;; two clauses above (minus the negative unit), which still loop since
+;; each positive resolvent generates a strictly larger term.
+;;
+;; (assertf #'fo-no=-val
+;;          '(not (and (P a)
+;;                     (forall (x) (implies (P x) (P (f x))))))
+;;          'valid) ; <-- would loop
 
 #|
 
@@ -2882,7 +2931,7 @@ Examples
    or loops if f is satisfiable but not valid.
 
    Pre: f is a FO formula."
-  (let ((neg-f `(not ,f)))
+  (let ((neg-f (negate f)))
     (with-fo-formula neg-f
       (solve
         (make-hash-set #'equal)
