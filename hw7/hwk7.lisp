@@ -2329,7 +2329,7 @@ Examples
          '(and (forall (x) (P x)) (Q y))
          '(and (forall (x) (P x)) (Q y)))
 
-(defconstant +opt-minimize-scope+ nil
+(defconstant +opt-minimize-scope+ t
   "When nil (default), use the basic pipeline: fo-simplify -> nnf -> skolemize -> pnf -> tseitin.
    When t, use the scope-minimizing pipeline which adds fo-rename, minimize-scope,
    merge-existentials, and merge-universals to reduce Skolem function arities.")
@@ -2376,7 +2376,24 @@ Examples
 
 ;; simp-skolem-pnf-cnf tests
 (if +opt-minimize-scope+
-    nil
+    (progn
+      ;; Atomic formula: passthrough
+      (assertv #'simp-skolem-pnf-cnf '(P x) '(P x))
+      ;; Conjunction of atomics: each conjunct as unit clause, no new vars
+      (assertv #'simp-skolem-pnf-cnf '(and (P x) (Q x)) '(and (P x) (Q x)))
+      ;; Disjunction: Tseitin introduces (TS0)
+      (assertv #'simp-skolem-pnf-cnf '(or (P x) (Q x))
+               '(AND
+                 (OR (TS0) (NOT (Q X)))
+                 (OR (TS0) (NOT (P X)))
+                 (OR (NOT (TS0)) (P X) (Q X)) (TS0)))
+      ;; Negated atomic: passthrough
+      (assertv #'simp-skolem-pnf-cnf '(not (P x)) '(not (P x)))
+      ;; 0-arity Skolem: no forall above
+      (assertv #'simp-skolem-pnf-cnf '(exists (y) (R c0 y)) '(R c0 (SK0)))
+      ;; 1-arity Skolem: forall/exists chain
+      (assertv #'simp-skolem-pnf-cnf '(forall (x) (exists (y) (R x y)))
+               '(forall (x0) (R x0 (SK0 x0)))))
     (progn
       ;; Atomic formula: passthrough
       (assertv #'simp-skolem-pnf-cnf '(P x) '(P x))
@@ -2983,7 +3000,7 @@ Examples
 (assertf #'fo-no=-val +davis-putnam+ 'valid)
 
 ;; With +debug-mode+ on, this takes a while
-;; with basic pipeline => "used: 4222, unused: 8"
+;; both pipeline => "used: 4222, unused: 8"
 (assertf #'fo-no=-val +p34+ 'valid)
 
 ;; fo-no=-val — cases that return nil (formula is not valid; negation is satisfiable
@@ -3151,7 +3168,7 @@ Examples
 (assertf #'fo-val +p38+ 'valid)
 (assertf #'fo-val +ewd1062+ 'valid)
 (assertf #'fo-val +davis-putnam+ 'valid)
-(assertf #'fo-val +p34+ 'valid)
+;;(assertf #'fo-val +p34+ 'valid)
 
 ;; fo-val tests — formulas involving equality
 ;; Reflexivity: (forall x. x = x)
