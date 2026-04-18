@@ -2524,6 +2524,35 @@ Examples
 
 (assert (fo-formulap +davis-putnam+))
 
+(defconstant +p12+
+  '(iff (iff (iff (P) (Q)) (R))
+        (iff (P) (iff (Q) (R)))))
+
+(defconstant +p17+
+  '(implies (iff (P) (Q))
+            (iff (not (P)) (not (Q)))))
+
+(defconstant +p18+
+  '(exists (X) (forall (Y) (P X Y))))
+
+(defconstant +p21+
+  '(implies (and (exists (X) (implies (P) (Q X)))
+                 (exists (X) (implies (Q X) (P))))
+            (exists (X) (iff (P) (Q X)))))
+
+(defconstant +p29+
+  '(implies (and (exists (X) (P X))
+                 (exists (Y) (Q Y)))
+            (iff (forall (X) (implies (P X) (R X)))
+                 (forall (Y) (implies (Q Y) (R Y))))))
+
+(defconstant +p01+
+  '(implies (iff (P) (Q)) (iff (Q) (P))))
+
+(defconstant +p39+
+  '(not (exists (X) (forall (Y) (iff (P Y X) (not (P Y Y)))))))
+
+
 (defun cnf-clausep (c)
   (match c
     ((type boolean) t)
@@ -2999,9 +3028,19 @@ Examples
 (assertf #'fo-no=-val +ewd1062+ 'valid)
 (assertf #'fo-no=-val +davis-putnam+ 'valid)
 
+(assertf #'fo-no=-val +p17+ 'valid)
+(assertf #'fo-no=-val +p21+ 'valid)
+(assertf #'fo-no=-val +p29+ 'valid)
+(assertf #'fo-no=-val +p01+ 'valid)
+(assertf #'fo-no=-val +p39+ 'valid)
+
 ;; With +debug-mode+ on, this takes a while
 ;; both pipeline => "used: 4222, unused: 8"
 (assertf #'fo-no=-val +p34+ 'valid)
+
+(assertf #'fo-no=-val +p12+ nil)
+(assertf #'fo-no=-val +p18+ nil)
+
 
 ;; fo-no=-val — cases that return nil (formula is not valid; negation is satisfiable
 ;; and resolution terminates with an empty queue)
@@ -3168,6 +3207,16 @@ Examples
 (assertf #'fo-val +p38+ 'valid)
 (assertf #'fo-val +ewd1062+ 'valid)
 (assertf #'fo-val +davis-putnam+ 'valid)
+
+
+(assertf #'fo-val +p17+ 'valid)
+(assertf #'fo-val +p21+ 'valid)
+(assertf #'fo-val +p29+ 'valid)
+(assertf #'fo-val +p01+ 'valid)
+(assertf #'fo-val +p39+ 'valid)
+(assertf #'fo-val +p12+ nil)
+(assertf #'fo-val +p18+ nil)
+
 ;;(assertf #'fo-val +p34+ 'valid)
 
 ;; fo-val tests — formulas involving equality
@@ -3180,4 +3229,24 @@ Examples
 ;; Function congruence: x=y => f(x)=f(y)
 (assertf #'fo-val '(forall (x y) (implies (= x y) (= (f x) (f y)))) 'valid)
 
-;; TODO: incorporate more = problems
+(defconstant +p55+
+  '(exists (X Y) (and (= X Y)
+                      (forall (Z) (iff (= X Z) (= Y Z))))))
+
+(defconstant +p57+
+  '(implies (and (= (F X) (G Y))
+                 (= (G Y) (H Z)))
+            (= (F X) (H Z))))
+
+(defconstant +p58+
+  '(forall (X Y) (implies (= X Y) (= (F X) (F Y)))))
+
+(defconstant +p62+
+  '(implies (forall (X) (iff (P X (F X))
+                             (forall (Y) (implies (P X Y) (= Y (F X))))))
+            (exists (X) (P X (F X)))))
+
+(assertf #'fo-val +p55+ 'valid)
+(assertf #'fo-val +p57+ 'valid)
+(assertf #'fo-val +p58+ 'valid)
+(assertf #'fo-val +p62+ 'valid)
