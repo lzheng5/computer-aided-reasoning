@@ -763,7 +763,7 @@ Examples
 
 ;; Mode: 'debug | 'stats | nil (default)
 ;; Note if we changed this, we should reload the file to recompile the definitions to include debugging/stats information
-(defconstant +debug-mode+ 'debug)
+(defconstant +debug-mode+ nil)
 
 (defmacro dbg (fmt &rest args)
   "Print debug message when +debug-mode+ is 'debug"
@@ -2554,7 +2554,10 @@ Examples
       (simp-skolem-pnf-cnf-opt f)
       (simp-skolem-pnf-cnf-basic f)))
 
-;; TODO: show case the difference with the exam problem. 
+(defconstant +e1+
+  '(and (not (exists (Z) (forall (W) (exists (V) (R (F Z W) V)))))
+    (forall (X) (implies (Q X) (exists (Y) (P Y))))))
+
 ;; simp-skolem-pnf-cnf tests
 (if +opt-mode+
     (progn
@@ -2574,7 +2577,16 @@ Examples
       (assertv #'simp-skolem-pnf-cnf '(exists (y) (R c0 y)) '(R c0 (SK0)))
       ;; 1-arity Skolem: forall/exists chain
       (assertv #'simp-skolem-pnf-cnf '(forall (x) (exists (y) (R x y)))
-               '(forall (x0) (R x0 (SK0 x0)))))
+               '(forall (x0) (R x0 (SK0 x0))))
+
+      (assertv #'simp-skolem-pnf-cnf +e1+
+               '(FORALL (X0 X2 X3)
+                 (AND
+                  (NOT (R (F X0 (SK0 X0)) X2))
+                  (OR (TS0) (NOT (P (SK1))))
+                  (OR (TS0) (Q X3))
+                  (OR (NOT (TS0)) (NOT (Q X3)) (P (SK1)))
+                  (TS0)))))
     (progn
       ;; Atomic formula: passthrough
       (assertv #'simp-skolem-pnf-cnf '(P x) '(P x))
@@ -2592,7 +2604,16 @@ Examples
       (assertv #'simp-skolem-pnf-cnf '(exists (y) (R c0 y)) '(R c0 (SK0)))
       ;; 1-arity Skolem: forall/exists chain
       (assertv #'simp-skolem-pnf-cnf '(forall (x) (exists (y) (R x y)))
-               '(forall (x) (R x (SK0 x))))))
+               '(forall (x) (R x (SK0 x))))
+
+      (assertv #'simp-skolem-pnf-cnf +e1+
+               '(FORALL (Z V X)
+                 (AND
+                  (NOT (R (F Z (SK0 Z)) V))
+                  (OR (TS0) (NOT (P (SK1))))
+                  (OR (TS0) (Q X))
+                  (OR (NOT (TS0)) (NOT (Q X)) (P (SK1)))
+                  (TS0))))))
 
 ;; Some example problems
 (defconstant +mortal+
@@ -2771,7 +2792,7 @@ Examples
 
     (let ((*print-level* nil)
           (*print-length* nil))
-      ;; This is a giant CNF
+      ;; This becomes smaller with the opt pipeline
       (pprint p34))))
 
 ;; iff with quantifiers
@@ -3216,8 +3237,9 @@ Examples
 (assertf #'fo-no=-val +p01+ 'valid)
 (assertf #'fo-no=-val +p39+ 'valid)
 
-;; With +debug-mode+ on, this takes a while
-;; both pipeline => "used: 4222, unused: 8"
+;; With +debug-mode+ on,
+;; basic pipeline => "used: 4222, unused: 8"
+;; opt pipeline => "used: 1335, unused: 25" and a lot faster
 (assertf #'fo-no=-val +p34+ 'valid)
 
 (assertf #'fo-no=-val +p12+ nil)
@@ -3399,7 +3421,7 @@ Examples
 (assertf #'fo-val +p12+ nil)
 (assertf #'fo-val +p18+ nil)
 
-;;(assertf #'fo-val +p34+ 'valid)
+(assertf #'fo-val +p34+ 'valid)
 
 ;; fo-val tests — formulas involving equality
 ;; Reflexivity: (forall x. x = x)
