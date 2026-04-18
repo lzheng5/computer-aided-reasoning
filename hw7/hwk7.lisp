@@ -2507,11 +2507,9 @@ Examples
          '(and (forall (x) (P x)) (Q y))
          '(and (forall (x) (P x)) (Q y)))
 
-;; TODO: rename +opt-minimize-scope+ to +opt-mode+ 
-;;       rename 'Scope-minimizing pipeline' to be 'Optimized pipeline' 
-(defconstant +opt-minimize-scope+ t
+(defconstant +opt-mode+ t
   "When nil (default), use the basic pipeline: fo-simplify -> nnf -> skolemize -> pnf -> tseitin.
-   When t, use the scope-minimizing pipeline which adds fo-rename, minimize-scope,
+   When t, use the optimized pipeline which adds unchain-iff, lift-iff, fo-rename, minimize-scope,
    merge-existentials, and merge-universals to reduce Skolem function arities.")
 
 (defun simp-skolem-pnf-cnf-basic (f)
@@ -2526,8 +2524,8 @@ Examples
      (nnf
       (fo-simplify f))))))
 
-(defun simp-skolem-pnf-cnf-minimize (f)
-  "Scope-minimizing pipeline:
+(defun simp-skolem-pnf-cnf-opt (f)
+  "Optimized pipeline:
    fo-simplify -> unchain-iff -> lift-iff -> nnf -> fo-rename -> minimize-scope
                -> merge-existentials -> skolemize -> merge-universals -> pnf -> tseitin.
    Produces smaller Skolem arities by minimizing existential scope before Skolemization.
@@ -2548,17 +2546,17 @@ Examples
 
 (defun simp-skolem-pnf-cnf (f)
   "Apply simplification, skolemization, prenex normal form conversion, and CNF transformation to f.
-   Dispatches to simp-skolem-pnf-cnf-basic or simp-skolem-pnf-cnf-minimize
-   based on +opt-minimize-scope+.
+   Dispatches to simp-skolem-pnf-cnf-basic or simp-skolem-pnf-cnf-opt
+   based on +opt-mode+.
 
    Pre: (fo-formulap f)"
-  (if +opt-minimize-scope+
-      (simp-skolem-pnf-cnf-minimize f)
+  (if +opt-mode+
+      (simp-skolem-pnf-cnf-opt f)
       (simp-skolem-pnf-cnf-basic f)))
 
 ;; TODO: show case the difference with the exam problem. 
 ;; simp-skolem-pnf-cnf tests
-(if +opt-minimize-scope+
+(if +opt-mode+
     (progn
       ;; Atomic formula: passthrough
       (assertv #'simp-skolem-pnf-cnf '(P x) '(P x))
@@ -2767,14 +2765,14 @@ Examples
 ;; Pet example
 (assert (pnf-cnf-p (simp-skolem-pnf-cnf +pet+)))
 
-;; TODO: wrap with-fo-formula 
-(let ((p34 (simp-skolem-pnf-cnf +p34+)))
-  (assert (pnf-cnf-p p34))
+(with-fo-formula +p34+
+  (let ((p34 (simp-skolem-pnf-cnf +p34+)))
+    (assert (pnf-cnf-p p34))
 
-  (let ((*print-level* nil)
-        (*print-length* nil))
-    ;; This is a giant CNF
-    (pprint p34)))
+    (let ((*print-level* nil)
+          (*print-length* nil))
+      ;; This is a giant CNF
+      (pprint p34))))
 
 ;; iff with quantifiers
 (assert (pnf-cnf-p (simp-skolem-pnf-cnf '(forall (x) (iff (P x) (Q x))))))
