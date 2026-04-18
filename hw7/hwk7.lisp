@@ -1406,184 +1406,6 @@ Examples
 ;; Deep: quantifier + constants + implies
 (assertf #'fo-simplify '(forall (x y) (implies t (and (P x) nil))) 'nil)
 
-(defun unchain-iff (f)
-  "Recursively convert n-ary iff to left-associative binary form.
-   (iff a b c d) -> (iff (iff (iff a b) c) d)
-   Handles FOL quantifiers and all propositional connectives.
-
-   Pre: (fo-formulap f)"
-  (match f
-    ;; quantifiers
-    ((list (guard q (fo-quantifierp q)) vars body)
-     `(,q ,vars ,(unchain-iff body)))
-    ;; booleans
-    ((type boolean) f)
-    ;; propositional operators
-    ((list* (guard op (p-funp op)) args)
-     (let ((args (mapcar #'unchain-iff args)))
-       (if (and (eq op 'iff) (> (length args) 2))
-           (reduce #'(lambda (acc x) `(iff ,acc ,x))
-                   (cddr args)
-                   :initial-value `(iff ,(first args) ,(second args)))
-           `(,op ,@args))))
-    ;; atomic
-    (_ f)))
-
-;; unchain-iff tests
-(assertf #'unchain-iff '(and (P x) (Q y)) '(and (P x) (Q y)))
-(assertf #'unchain-iff '(iff (P) (Q)) '(iff (P) (Q)))
-(assertf #'unchain-iff '(iff (P) (Q) (R)) '(iff (iff (P) (Q)) (R)))
-(assertf #'unchain-iff '(iff (P) (Q) (R) (S)) '(iff (iff (iff (P) (Q)) (R)) (S)))
-(assertf #'unchain-iff
-         '(forall (x) (iff (P x) (Q x) (R x)))
-         '(forall (x) (iff (iff (P x) (Q x)) (R x))))
-(assertf #'unchain-iff
-         '(iff (and (P) (Q)) (R) (S))
-         '(iff (iff (and (P) (Q)) (R)) (S)))
-
-(defun lift-iff (f)
-  "Bottom-up walk that lifts iff-containing operands of binary iff nodes
-   into fresh LF predicate definitions. Returns formula with definitions
-   conjoined at the top level.
-
-   The walk returns three values: (transformed-formula, defs, has-iff).
-   - transformed-formula: formula with iff-containing operands replaced by LF atoms
-   - defs: list of (forall fvs (iff (LFi fvs...) body)) definitions
-   - has-iff: whether the original subformula contains iff
-
-   Pre: (fo-formulap f), all iff nodes are binary (run unchain-iff first)"
-  (labels
-      ((walk (f)
-         (match f
-           ;; booleans: no iff
-           ((type boolean) (values f nil nil))
-
-           ;; quantifiers: recurse into body
-           ((list (guard q (fo-quantifierp q)) vars body)
-            (let+ (((&values body* defs has-iff) (walk body)))
-              (values `(,q ,vars ,body*) defs has-iff)))
-
-           ;; binary iff: recurse, then lift operands that contain iff
-           ((list 'iff a b)
-            (let+ (((&values a* a-defs a-has-iff) (walk a))
-                    ((&values b* b-defs b-has-iff) (walk b)))
-              (let ((defs (append a-defs b-defs)))
-                ;; Lift operand a if it still contains iff
-                (when a-has-iff
-                  (let* ((fvs (free-vars a*))
-                         (lf  (genvar 'LF))
-                         (lf-app (if fvs `(,lf ,@fvs) `(,lf)))
-                         (def (if fvs
-                                  `(forall ,fvs (iff ,lf-app ,a*))
-                                  `(iff ,lf-app ,a*))))
-                    (push def defs)
-                    (setf a* lf-app)))
-                ;; Lift operand b if it still contains iff
-                (when b-has-iff
-                  (let* ((fvs (free-vars b*))
-                         (lf  (genvar 'LF))
-                         (lf-app (if fvs `(,lf ,@fvs) `(,lf)))
-                         (def (if fvs
-                                  `(forall ,fvs (iff ,lf-app ,b*))
-                                  `(iff ,lf-app ,b*))))
-                    (push def defs)
-                    (setf b* lf-app)))
-                (values `(iff ,a* ,b*) defs t))))
-
-           ;; other propositional operators: recurse, propagate has-iff
-           ((list* (guard op (p-funp op)) args)
-            (let ((all-defs nil)
-                  (new-args nil)
-                  (any-has-iff nil))
-              (dolist (arg args)
-                (let+ (((&values arg* defs has-iff) (walk arg)))
-                  (push arg* new-args)
-                  (setf all-defs (append defs all-defs))
-                  (when has-iff (setf any-has-iff t))))
-              (values `(,op ,@(nreverse new-args)) all-defs any-has-iff)))
-
-           ;; atomic formulas: no iff
-           (_ (values f nil nil)))))
-
-    ;; Top-level: walk and wrap with definitions if any
-    (let+ (((&values f* defs _has-iff) (walk f)))
-      (if defs
-          `(and ,f* ,@(reverse defs))
-          f*))))
-
-;; lift-iff tests
-
-;; 1. iff-free formulas: unchanged
-(assertv #'lift-iff '(and (P x) (Q y)) '(and (P x) (Q y)))
-(assertv #'lift-iff '(iff (P x) (Q y)) '(iff (P x) (Q y)))
-(assertv #'lift-iff
-         '(iff (and (P) (Q)) (exists (x) (forall (y) (R x y))))
-         '(iff (and (P) (Q)) (exists (x) (forall (y) (R x y)))))
-
-;; 2. Nested binary iff: inner iff is an iff → lift it.
-(assertv #'lift-iff
-         '(iff (iff (P) (Q)) (R))
-         '(and (iff (LF0) (R))
-               (iff (LF0) (iff (P) (Q)))))
-
-;; 3. Quantifier whose body contains iff → must lift.
-(assertv #'lift-iff
-         '(iff (P x) (forall (y) (iff (R x y) (S x y))))
-         '(and (iff (P x) (LF0 x))
-               (forall (x) (iff (LF0 x) (forall (y) (iff (R x y) (S x y)))))))
-
-;; 4. 4-ary iff of atoms via unchain → lift pipeline.
-(assertv (lambda (f) (lift-iff (unchain-iff f)))
-         '(iff (P) (Q) (R) (S))
-         '(and (iff (LF1) (S))
-               (iff (LF0) (iff (P) (Q)))
-               (iff (LF1) (iff (LF0) (R)))))
-
-;; 5. 3-level deep iff nesting — exponential blowup case.
-(assertv #'lift-iff
-         '(iff (P) (iff (Q) (iff (R) (S))))
-         '(and (iff (P) (LF1))
-               (iff (LF0) (iff (R) (S)))
-               (iff (LF1) (iff (Q) (LF0)))))
-
-;; 6. iff-containing operand nested inside and.
-(assertv #'lift-iff
-         '(iff (P) (and (iff (Q) (R)) (S)))
-         '(and (iff (P) (LF0))
-               (iff (LF0) (and (iff (Q) (R)) (S)))))
-
-;; 7. Both operands contain iff → both lifted.
-(assertv #'lift-iff
-         '(iff (iff (P) (Q)) (iff (R) (S)))
-         '(and (iff (LF0) (LF1))
-               (iff (LF0) (iff (P) (Q)))
-               (iff (LF1) (iff (R) (S)))))
-
-;; 8. iff inside quantifier body, operand contains iff → lift with free vars.
-(assertv #'lift-iff
-         '(forall (x) (iff (P x) (exists (y) (iff (R x y) (S x y)))))
-         '(and (forall (x) (iff (P x) (LF0 x)))
-               (forall (x) (iff (LF0 x) (exists (y) (iff (R x y) (S x y)))))))
-
-;; 9. iff nested inside or inside iff — has-iff propagates through or.
-(assertv #'lift-iff
-         '(iff (P) (or (iff (Q) (R)) (S)))
-         '(and (iff (P) (LF0))
-               (iff (LF0) (or (iff (Q) (R)) (S)))))
-
-;; 10. iff under not, operand contains iff — has-iff propagates through not.
-(assertv #'lift-iff
-         '(not (iff (iff (P) (Q)) (R)))
-         '(and (not (iff (LF0) (R)))
-               (iff (LF0) (iff (P) (Q)))))
-
-;; 11. Mixed: one operand iff-free (large), one contains iff.
-(assertv #'lift-iff
-         '(iff (exists (x) (forall (y) (and (R x y) (S x y))))
-               (iff (P) (Q)))
-         '(and (iff (exists (x) (forall (y) (and (R x y) (S x y)))) (LF0))
-               (iff (LF0) (iff (P) (Q)))))
-
 #|
 
  Question 2. (10 pts)
@@ -2046,6 +1868,184 @@ Examples
            (OR (TS0) (P))
            (OR (NOT (TS0)) (NOT (P)) (Q))
            (TS0)))
+
+(defun unchain-iff (f)
+  "Recursively convert n-ary iff to left-associative binary form.
+   (iff a b c d) -> (iff (iff (iff a b) c) d)
+   Handles FOL quantifiers and all propositional connectives.
+
+   Pre: (fo-formulap f)"
+  (match f
+    ;; quantifiers
+    ((list (guard q (fo-quantifierp q)) vars body)
+     `(,q ,vars ,(unchain-iff body)))
+    ;; booleans
+    ((type boolean) f)
+    ;; propositional operators
+    ((list* (guard op (p-funp op)) args)
+     (let ((args (mapcar #'unchain-iff args)))
+       (if (and (eq op 'iff) (> (length args) 2))
+           (reduce #'(lambda (acc x) `(iff ,acc ,x))
+                   (cddr args)
+                   :initial-value `(iff ,(first args) ,(second args)))
+           `(,op ,@args))))
+    ;; atomic
+    (_ f)))
+
+;; unchain-iff tests
+(assertf #'unchain-iff '(and (P x) (Q y)) '(and (P x) (Q y)))
+(assertf #'unchain-iff '(iff (P) (Q)) '(iff (P) (Q)))
+(assertf #'unchain-iff '(iff (P) (Q) (R)) '(iff (iff (P) (Q)) (R)))
+(assertf #'unchain-iff '(iff (P) (Q) (R) (S)) '(iff (iff (iff (P) (Q)) (R)) (S)))
+(assertf #'unchain-iff
+         '(forall (x) (iff (P x) (Q x) (R x)))
+         '(forall (x) (iff (iff (P x) (Q x)) (R x))))
+(assertf #'unchain-iff
+         '(iff (and (P) (Q)) (R) (S))
+         '(iff (iff (and (P) (Q)) (R)) (S)))
+
+(defun lift-iff (f)
+  "Bottom-up walk that lifts iff-containing operands of binary iff nodes
+   into fresh LF predicate definitions. Returns formula with definitions
+   conjoined at the top level.
+
+   The walk returns three values: (transformed-formula, defs, has-iff).
+   - transformed-formula: formula with iff-containing operands replaced by LF atoms
+   - defs: list of (forall fvs (iff (LFi fvs...) body)) definitions
+   - has-iff: whether the original subformula contains iff
+
+   Pre: (fo-formulap f), all iff nodes are binary (run unchain-iff first)"
+  (labels
+      ((walk (f)
+         (match f
+           ;; booleans: no iff
+           ((type boolean) (values f nil nil))
+
+           ;; quantifiers: recurse into body
+           ((list (guard q (fo-quantifierp q)) vars body)
+            (let+ (((&values body* defs has-iff) (walk body)))
+              (values `(,q ,vars ,body*) defs has-iff)))
+
+           ;; binary iff: recurse, then lift operands that contain iff
+           ((list 'iff a b)
+            (let+ (((&values a* a-defs a-has-iff) (walk a))
+                    ((&values b* b-defs b-has-iff) (walk b)))
+              (let ((defs (append a-defs b-defs)))
+                ;; Lift operand a if it still contains iff
+                (when a-has-iff
+                  (let* ((fvs (free-vars a*))
+                         (lf  (genvar 'LF))
+                         (lf-app (if fvs `(,lf ,@fvs) `(,lf)))
+                         (def (if fvs
+                                  `(forall ,fvs (iff ,lf-app ,a*))
+                                  `(iff ,lf-app ,a*))))
+                    (push def defs)
+                    (setf a* lf-app)))
+                ;; Lift operand b if it still contains iff
+                (when b-has-iff
+                  (let* ((fvs (free-vars b*))
+                         (lf  (genvar 'LF))
+                         (lf-app (if fvs `(,lf ,@fvs) `(,lf)))
+                         (def (if fvs
+                                  `(forall ,fvs (iff ,lf-app ,b*))
+                                  `(iff ,lf-app ,b*))))
+                    (push def defs)
+                    (setf b* lf-app)))
+                (values `(iff ,a* ,b*) defs t))))
+
+           ;; other propositional operators: recurse, propagate has-iff
+           ((list* (guard op (p-funp op)) args)
+            (let ((all-defs nil)
+                  (new-args nil)
+                  (any-has-iff nil))
+              (dolist (arg args)
+                (let+ (((&values arg* defs has-iff) (walk arg)))
+                  (push arg* new-args)
+                  (setf all-defs (append defs all-defs))
+                  (when has-iff (setf any-has-iff t))))
+              (values `(,op ,@(nreverse new-args)) all-defs any-has-iff)))
+
+           ;; atomic formulas: no iff
+           (_ (values f nil nil)))))
+
+    ;; Top-level: walk and wrap with definitions if any
+    (let+ (((&values f* defs _has-iff) (walk f)))
+      (if defs
+          `(and ,f* ,@(reverse defs))
+          f*))))
+
+;; lift-iff tests
+
+;; 1. iff-free formulas: unchanged
+(assertv #'lift-iff '(and (P x) (Q y)) '(and (P x) (Q y)))
+(assertv #'lift-iff '(iff (P x) (Q y)) '(iff (P x) (Q y)))
+(assertv #'lift-iff
+         '(iff (and (P) (Q)) (exists (x) (forall (y) (R x y))))
+         '(iff (and (P) (Q)) (exists (x) (forall (y) (R x y)))))
+
+;; 2. Nested binary iff: inner iff is an iff → lift it.
+(assertv #'lift-iff
+         '(iff (iff (P) (Q)) (R))
+         '(and (iff (LF0) (R))
+               (iff (LF0) (iff (P) (Q)))))
+
+;; 3. Quantifier whose body contains iff → must lift.
+(assertv #'lift-iff
+         '(iff (P x) (forall (y) (iff (R x y) (S x y))))
+         '(and (iff (P x) (LF0 x))
+               (forall (x) (iff (LF0 x) (forall (y) (iff (R x y) (S x y)))))))
+
+;; 4. 4-ary iff of atoms via unchain → lift pipeline.
+(assertv (lambda (f) (lift-iff (unchain-iff f)))
+         '(iff (P) (Q) (R) (S))
+         '(and (iff (LF1) (S))
+               (iff (LF0) (iff (P) (Q)))
+               (iff (LF1) (iff (LF0) (R)))))
+
+;; 5. 3-level deep iff nesting — exponential blowup case.
+(assertv #'lift-iff
+         '(iff (P) (iff (Q) (iff (R) (S))))
+         '(and (iff (P) (LF1))
+               (iff (LF0) (iff (R) (S)))
+               (iff (LF1) (iff (Q) (LF0)))))
+
+;; 6. iff-containing operand nested inside and.
+(assertv #'lift-iff
+         '(iff (P) (and (iff (Q) (R)) (S)))
+         '(and (iff (P) (LF0))
+               (iff (LF0) (and (iff (Q) (R)) (S)))))
+
+;; 7. Both operands contain iff → both lifted.
+(assertv #'lift-iff
+         '(iff (iff (P) (Q)) (iff (R) (S)))
+         '(and (iff (LF0) (LF1))
+               (iff (LF0) (iff (P) (Q)))
+               (iff (LF1) (iff (R) (S)))))
+
+;; 8. iff inside quantifier body, operand contains iff → lift with free vars.
+(assertv #'lift-iff
+         '(forall (x) (iff (P x) (exists (y) (iff (R x y) (S x y)))))
+         '(and (forall (x) (iff (P x) (LF0 x)))
+               (forall (x) (iff (LF0 x) (exists (y) (iff (R x y) (S x y)))))))
+
+;; 9. iff nested inside or inside iff — has-iff propagates through or.
+(assertv #'lift-iff
+         '(iff (P) (or (iff (Q) (R)) (S)))
+         '(and (iff (P) (LF0))
+               (iff (LF0) (or (iff (Q) (R)) (S)))))
+
+;; 10. iff under not, operand contains iff — has-iff propagates through not.
+(assertv #'lift-iff
+         '(not (iff (iff (P) (Q)) (R)))
+         '(and (not (iff (LF0) (R)))
+               (iff (LF0) (iff (P) (Q)))))
+
+;; 11. Mixed: one operand iff-free (large), one contains iff.
+(assertv #'lift-iff
+         '(iff (exists (x) (forall (y) (and (R x y) (S x y))))
+               (iff (P) (Q)))
+         '(and (iff (exists (x) (forall (y) (and (R x y) (S x y)))) (LF0))
+               (iff (LF0) (iff (P) (Q)))))
 
 (defun merge-quantified-vars (f)
   "Bottom-up pass: merge same-quantifier nesting.
