@@ -1899,7 +1899,6 @@ Examples
 (assertf #'merge-quantified-vars '(forall (x) (exists (y) (P x y)))
          '(forall (x) (exists (y) (P x y))))
 
-;; TODO: when we unfold, the duplicated variables should be renamed uniquely.
 (defun unfold-universal (f)
   "Top-down/bottom-up pass for universal quantifiers with substitution accumulator.
    Matching case: (forall vars (and ...)) -> (and (forall vars arg1) (forall vars' arg2[vars/vars']) ...)
@@ -2106,7 +2105,7 @@ Examples
 ;; exists nested then or: merge then unfold with fresh vars
 (assertv #'minimize-scope
          '(exists (x) (exists (y) (or (P x) (Q y))))
-         '(or (exists (x y) (P x)) (exists (X0 X1) (Q X1))))
+         '(or (exists (x) (P x)) (exists (X1) (Q X1))))
 ;; forall/and: unconditional unfold — first child keeps x, second gets X0
 (assertv #'minimize-scope
          '(forall (x) (and (P x) (Q y)))
@@ -2126,7 +2125,7 @@ Examples
 ;; exists/or: unconditional unfold — first child keeps (x y), second gets fresh (X0 X1)
 (assertv #'minimize-scope
          '(exists (x y) (or (P x) (Q y)))
-         '(or (exists (x y) (P x)) (exists (X0 X1) (Q X1))))
+         '(or (exists (x) (P x)) (exists (X1) (Q X1))))
 ;; forall then exists with irrelevant universal -> universal dropped by vacuous removal
 (assertv #'minimize-scope
          '(forall (z) (exists (x) (and (P x) (Q y))))
@@ -2221,8 +2220,13 @@ Examples
          '(exists (x) (or (exists (y) (P x y)) (Q x))))
 ;; Three ∃-children: min=1 across all
 (assertv #'merge-existentials
-         '(or (exists (a b) (P a b)) (exists (c) (Q c)) (exists (d e f) (R d e f)))
-         '(exists (a) (or (exists (b) (P a b)) (Q a) (exists (e f) (R a e f)))))
+         '(or (exists (x0 x1) (P x0 x1))
+              (exists (x2) (Q x2))
+              (exists (x3 x4 x5) (R x3 x4 x5)))
+         '(exists (x0)
+                  (or (exists (x1) (P x0 x1))
+                      (Q x0)
+                      (exists (x4 x5) (R x0 x4 x5)))))
 ;; Only one ∃-child: no merge
 (assertf #'merge-existentials
          '(or (exists (x) (P x)) (Q y))
@@ -2232,7 +2236,6 @@ Examples
          '(forall (z) (or (exists (x) (P x)) (exists (y) (Q y))))
          '(forall (z) (exists (x) (or (P x) (Q x)))))
 
-;; TODO: this algorithm is wrong after fo-rename and the length of the two var lists can be different
 (defun merge-universals (f)
   "Top-down/bottom-up pass with substitution accumulator.
    On each (and ...) node: collect ∀-children, compute k = max var-list length,
@@ -2372,23 +2375,26 @@ Examples
       (simp-skolem-pnf-cnf-basic f)))
 
 ;; simp-skolem-pnf-cnf tests
-;; Atomic formula: passthrough
-(assertv #'simp-skolem-pnf-cnf '(P x) '(P x))
-;; Conjunction of atomics: each conjunct as unit clause, no new vars
-(assertv #'simp-skolem-pnf-cnf '(and (P x) (Q x)) '(and (P x) (Q x)))
-;; Disjunction: Tseitin introduces (TS0)
-(assertv #'simp-skolem-pnf-cnf '(or (P x) (Q x))
-         '(AND
-           (OR (TS0) (NOT (Q X)))
-           (OR (TS0) (NOT (P X)))
-           (OR (NOT (TS0)) (P X) (Q X)) (TS0)))
-;; Negated atomic: passthrough
-(assertv #'simp-skolem-pnf-cnf '(not (P x)) '(not (P x)))
-;; 0-arity Skolem: no forall above
-(assertv #'simp-skolem-pnf-cnf '(exists (y) (R c0 y)) '(R c0 (SK0)))
-;; 1-arity Skolem: forall/exists chain
-(assertv #'simp-skolem-pnf-cnf '(forall (x) (exists (y) (R x y)))
-         '(forall (x) (R x (SK0 x))))
+(if +opt-minimize-scope+
+    nil
+    (progn
+      ;; Atomic formula: passthrough
+      (assertv #'simp-skolem-pnf-cnf '(P x) '(P x))
+      ;; Conjunction of atomics: each conjunct as unit clause, no new vars
+      (assertv #'simp-skolem-pnf-cnf '(and (P x) (Q x)) '(and (P x) (Q x)))
+      ;; Disjunction: Tseitin introduces (TS0)
+      (assertv #'simp-skolem-pnf-cnf '(or (P x) (Q x))
+               '(AND
+                 (OR (TS0) (NOT (Q X)))
+                 (OR (TS0) (NOT (P X)))
+                 (OR (NOT (TS0)) (P X) (Q X)) (TS0)))
+      ;; Negated atomic: passthrough
+      (assertv #'simp-skolem-pnf-cnf '(not (P x)) '(not (P x)))
+      ;; 0-arity Skolem: no forall above
+      (assertv #'simp-skolem-pnf-cnf '(exists (y) (R c0 y)) '(R c0 (SK0)))
+      ;; 1-arity Skolem: forall/exists chain
+      (assertv #'simp-skolem-pnf-cnf '(forall (x) (exists (y) (R x y)))
+               '(forall (x) (R x (SK0 x))))))
 
 ;; Some example problems
 (defconstant +mortal+
@@ -2531,6 +2537,15 @@ Examples
 (assert (pnf-cnf-p (simp-skolem-pnf-cnf +mortal+)))
 ;; Pet example
 (assert (pnf-cnf-p (simp-skolem-pnf-cnf +pet+)))
+
+(let ((p34 (simp-skolem-pnf-cnf +p34+)))
+  (assert (pnf-cnf-p p34))
+
+  (let ((*print-level* nil)
+        (*print-length* nil))
+    ;; This is a giant CNF
+    (pprint p34)))
+
 ;; iff with quantifiers
 (assert (pnf-cnf-p (simp-skolem-pnf-cnf '(forall (x) (iff (P x) (Q x))))))
 ;; Deeply nested: implies + quantifiers
@@ -2955,7 +2970,6 @@ Examples
         (make-hash-set #'equal)
         (make-queue (to-clauses (simp-skolem-pnf-cnf neg-f)))))))
 
-;; TODO:
 ;; fo-no=-val tests — all should return 'valid
 (assertf #'fo-no=-val +mortal+ 'valid)
 (assertf #'fo-no=-val +pet+ 'valid)
@@ -2965,16 +2979,19 @@ Examples
 (assertf #'fo-no=-val +p45+ 'valid)
 (assertf #'fo-no=-val +los+ 'valid)
 (assertf #'fo-no=-val +p38+ 'valid)
-(assertf #'fo-no=-val +p34+ 'valid) ;; loops
 (assertf #'fo-no=-val +ewd1062+ 'valid)
 (assertf #'fo-no=-val +davis-putnam+ 'valid)
+
+;; With +debug-mode+ on, this takes a while
+;; with basic pipeline => "used: 4222, unused: 8"
+(assertf #'fo-no=-val +p34+ 'valid)
 
 ;; fo-no=-val — cases that return nil (formula is not valid; negation is satisfiable
 ;; and resolution terminates with an empty queue)
 
 ;; An atomic formula with a constant: not a tautology.
 ;; neg-f = {(not (P a))} — no positive clause, queue empties immediately.
-(assertf #'fo-no=-val '(P a) nil)
+(assertf #'fo-no=-val '(P x) nil)
 
 ;; "Everything has property P" is not a logical tautology.
 ;; neg-f Skolemizes to {(not (P SK0))} — still no positive clause.
@@ -2988,7 +3005,7 @@ Examples
 ;; An explicit propositional contradiction: (and (P a) (not (P a))).
 ;; neg-f = (or (not (P a)) (P a)) — a tautology — simplifies to `t` before
 ;; Skolemization, so to-clauses produces no clauses at all and solve returns nil.
-(assertf #'fo-no=-val '(and (P a) (not (P a))) nil)
+(assertf #'fo-no=-val '(and (P x) (not (P x))) nil)
 
 ;; fo-no=-val — cases that LOOP (formula is satisfiable but not valid;
 ;; resolution keeps producing fresh terms and never terminates).
@@ -3000,22 +3017,26 @@ Examples
 ;; Resolution generates (P (f a)), (P (f (f a))), … but never unifies with (P b),
 ;; so the queue never empties and the empty clause is never derived.
 ;;
-;; (assertf #'fo-no=-val
-;;          '(implies (and (P a)
-;;                         (forall (x) (implies (P x) (P (f x)))))
-;;                    (P b))
-;;          'valid) ; <-- would loop; annotated only for documentation
+
+#|
+(assertf #'fo-no=-val
+         '(implies (and (P c0)
+                        (forall (x) (implies (P x) (P (f x)))))
+                   (P c1))
+         'valid) ; <-- would loop; annotated only for documentation
+|#
 
 ;; Same looping structure, written as a negated conjunction.
 ;; neg-f = (and (P a) (forall (x) (implies (P x) (P (f x))))) gives the same
 ;; two clauses above (minus the negative unit), which still loop since
 ;; each positive resolvent generates a strictly larger term.
 ;;
-;; (assertf #'fo-no=-val
-;;          '(not (and (P a)
-;;                     (forall (x) (implies (P x) (P (f x))))))
-;;          'valid) ; <-- would loop
-
+#|
+(assertf #'fo-no=-val
+         '(not (and (P c)
+                    (forall (x) (implies (P x) (P (f x))))))
+         'valid) ; <-- would loop
+|#
 #|
 
  Question 6. Extra Credit (20 pts)
@@ -3119,7 +3140,7 @@ Examples
             (reduce-equality fsig rsig
               (to-clauses cnf))))))))
 
-;; same old tests
+;; same old tests without =
 (assertf #'fo-val +mortal+ 'valid)
 (assertf #'fo-val +pet+ 'valid)
 (assertf #'fo-val +barb+ 'valid)
@@ -3128,9 +3149,9 @@ Examples
 (assertf #'fo-val +p45+ 'valid)
 (assertf #'fo-val +los+ 'valid)
 (assertf #'fo-val +p38+ 'valid)
-(assertf #'fo-val +p34+ 'valid)
 (assertf #'fo-val +ewd1062+ 'valid)
 (assertf #'fo-val +davis-putnam+ 'valid)
+(assertf #'fo-val +p34+ 'valid)
 
 ;; fo-val tests — formulas involving equality
 ;; Reflexivity: (forall x. x = x)
@@ -3141,3 +3162,5 @@ Examples
 (assertf #'fo-val '(forall (x y) (implies (and (P x) (= x y)) (P y))) 'valid)
 ;; Function congruence: x=y => f(x)=f(y)
 (assertf #'fo-val '(forall (x y) (implies (= x y) (= (f x) (f y)))) 'valid)
+
+;; TODO: incorporate more = problems
