@@ -9,7 +9,7 @@
     \mex{\kw{let} h = (f g) \kw{in}} \\
     \mex{(h 3)} \\
     \\
-    \invisible<1>{\textbf{which calls can apply which \lam}}
+    \invisible<1>{\textbf{which calls can apply which \lam?}}
   \end{array}
   \]
 
@@ -49,13 +49,13 @@
 
     \invisible<-1>{\{ (x, even), (y, odd), (z, $\bot$), (w, $\top$), ... \}}
 
-  \item \invisible<-2>{ Whether a variable is an alias of another (alias analysis)}
+  \item \invisible<-2>{Whether a variable is an alias of another (alias analysis)}
 
     \invisible<-2>{\{ (x, y), (y, z), (z, w), ... \}}
 
-  \item \invisible<-3>{Whether a type contract is always satisfied (gradual typing)}
+  \item \invisible<-3>{Whether a contract is always satisfied (contract verification)}
 
-    \invisible<-3>{The set of violated contracts / blames}
+    \invisible<-3>{\{ (x, even?), (y, odd?), (z, pos?), (w, cons?), ... \}}
 
   \end{itemize}
 
