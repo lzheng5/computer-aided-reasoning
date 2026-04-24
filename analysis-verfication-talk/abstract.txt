@@ -1,0 +1,343 @@
+Verification of Abstract Interpretations using Multi-Language Semantics
+
+With separate compilation and foreign language interfaces, two
+programs interact at program boundaries through imports and exports.
+When analyzing a program in isolation, a sound analysis must
+account for all possible imported values and downstream program
+behaviors depending on them.
+For example, abstract interpretations typically introduce 'unknown'
+values; imports are unknown, and applying an unknown function produces another unknown value.
+Argument values provided to unknown functions \emph{escape}.
+Unknown values precisely represent the values coming from the \emph{external}
+context, as well as the internal values that have escaped.
+But to precisely characterize the external context, we need a
+multi-language semantics that combines the two language semantics
+(which may be the same language for separate compilation) with
+appropriate boundary forms.
+The multi-language semantics enables us to distinguish values emerging
+from the different program contexts, and the boundary forms allow us
+to track values crossing the program boundary.
+
+Oftentimes, abstract interpretations do more than just run the
+program; they collect additional information about the program trace
+while running.
+For example, whether two values are always the same (alias analysis),
+which calls can apply which functions (control flow analysis),
+and whether a contract is always satisfied (gradual typing).
+Soundness of the analysis is proven against the concrete collecting
+semantics, which also collects information about the program trace:
+the events that the analysis observes must be a superset of the events
+the concrete semantics observes.
+The multi-language semantics naturally allows us to partition the
+observable events into "external," "internal," and "boundary," which
+allows the analysis to be proven sound.
+In this talk, we will present this technique in detail and describe
+how we are using it to mechanize program analyses for flow-directed
+transformations in CertiCoq.
+
+--------------------------------------------------
+
+
+Oftentimes, abstract interpretation discovers useful facts about
+programs by recording a series of observable trace events with a
+collecting semantics.
+
+In the above scenario, the analysis is
+interested in the events whenever a value cross the program boundary.
+
+But we can generalize the interests to talk about events such as the
+parity of integer variables (data flow analysis), at which call a
+function can be applied (0-CFA), whether a contract is always
+satisfied statically (gradual typing), etc.
+
+Modeling such collecting semantics in the style of the multi-language
+semantics naturally distinguishes events collected from different
+program context.
+
+Therefore, the soundness proof of any such analysis shall be
+carried out with the proper trace events and a more refined treatment
+of unknowns.
+
+------------------------------------------------------------------------
+
+Verification of Abstract Interpretation using Multi-Language Semantics
+
+In the context of separate compilation and foreign function
+interfaces, two different programs in the same or different languages
+interact at the program boundaries.
+BQ: {
+    I kind of like inserting something about dynamic/interpreted languages in here too (that's the gradual typing setting).
+    I think you had this before and you could add it back in --- just 3 or 4 words.
+}
+When analyzing each of the program, an abstract interpretation always
+has to make conservative decisions for any values that may cross the
+program boundary.
+BQ: {
+    I think the following gets the point across a bit better (don't worry about length)
+    When analyzing a program in isolation, an abstract interpretation
+    must treat values beyond its context (imports, etc.) soundly, and
+    have an appropriate treatment of internal values that escape.
+}
+Typically, the soundness proof of the analysis has to treat them as if
+they can behave as any values.
+BQ: {
+    What is "them"? (I think you should separate external values that
+    are crossing the boundary from the internal ones: in the analysis, the
+    former are abstracted to "<>" whereas the latter are standard abstract
+    values)
+}
+However, this notion of 'any values' can be made more precise if we
+can model how the two programs interact.
+By incorporating the two language semantics with appropriate
+boundaries, we can set up a multi-language semantics to model such
+interactions.
+BQ: {
+    Merge the above two sentences.
+}
+This naturally enables us to distinguish values emerging from
+different program contexts.
+BQ: {
+    Maybe merge this one in too.
+    For trace events, it's also about distinguishing *which context* the computation is happening in
+}
+Consequently, by separating values that never cross the program
+boundary from values that may cross, we can reason what happens at the
+program boundaries more accurately and soundly.
+BQ: {
+    You may be getting too abstract or technical here.
+    Really, we are being more accurate about the *concrete* world, and not the abstract?
+}
+In this talk, we will discuss this general technique for showing
+soundness of abstract interpretation using the style of multi-language semantics.
+
+Oftentimes, abstract interpretation discovers useful facts about
+programs by collecting a series of observable events during the program trace.
+For instance, whether integer variables are even or odd, which
+functions each call can apply, and which values could possibly cross
+the program boundary.
+As another example from gradual typing, what possible contracts a
+value needs to satisfy and whether a contract is always satisfied.
+BQ: {
+    This still sounds really weird.
+}
+Modeling such collecting semantics in the style of the multi-language
+semantics naturally distinguishes events collected from different
+program context.
+BQ: {
+    I think you're still missing the punchline.
+    What is distinguishing which context the events happen in useful?
+    Everytime you write a sentence, the next sentence should answer the question "why does this matter?"
+}
+
+```
+LING:
+The first paragraph has two objectives.
+1. point out the subtle treatment of 'any values'.
+2. answer why multi-language semantics?
+
+The second paragraph has two objectives.
+1. introduce the idea of observable trace events and give some examples
+2. answer how it is related to multi-language semantics
+```
+
+-------------------------------------------------------------------
+
+Verification of Abstract-interpretation Based Analysis with Separate Compilation and FFIs
+
+BQ: {
+    Don't need to used the word "based" around abstract interpretation analyses.
+    It's needlessly wordy for titles and abstracts.
+    We also don't need to mention FFIs in the title.
+}
+
+In the context of separate compilation, a static analysis always has
+to make conservative decisions for imported/exported values by
+assuming they can behave like any possible values. Similar situations
+also apply to values that may flow into or out of the program through
+foreign language interfaces (FFI)s. As a result, these values impose
+extra challenges for the soundness of any static analysis. In
+this talk, we will discuss a general technique to prove the
+soundness of abstract interpretations in the context of
+separate compilation and FFIs.
+
+by modeling an abstract collecting semantics in the style of
+a multi-language semantics, where same/different language interactions
+can be expressed naturally.
+
+More concretely, abstract-interpretation analyses reason about concrete values
+and program semantics by mapping them onto abstract domains and
+abstract semantics.
+Moreover, they allow us to collect a series of observable
+trace events and discover useful facts inside our programs.
+BQ: {
+    which technique? (rhetorical)
+    It's more that your analysis will need to collect facts, and in
+    order to prove that sound, it's necessary for your concrete
+    semantics to *also* do that, so that you can actually prove the
+    abstract semantics is an overapproximation of something.
+    The "collecting semantics" is the concrete semantics, plus these extra pieces.
+}
+For instance, in the context of flow analysis, whether an
+integer is even or odd, which calls an function may be applied at, and
+which values could possibly cross the program boundary.
+In terms of gradual typing, what possible contracts a value needs to
+satisfy and whether a contract is always correct.
+BQ: {
+    What is the point of this sentence at this point?
+    Is it to give an example?
+    I would say something along the lines "As another example, in the context of gradual typing, ..."
+    You write down contracts in order to catch invalid objects. Think of it as the code defending itself against bad objects.
+    In that sense, contracts aren't really "correct," but they can be satisfied or invalid.
+}
+However, the soundness proofs from previous approaches don't
+generalize well in the context of separate compilation and FFIs.
+BQ: {
+    Previous approaches of... abstract interpretations?
+    Just say soundness proofs for abstract interpretations.
+    Instead of "don't generalize well," maybe "don't na\"ively generalize"?
+    You can probably drop the FFIs here.
+}
+We show how to establish a unified proof technique for any such
+analysis by modeling an abstract collecting semantics in the style of
+a multi-language semantics, where same/different language interactions
+can be expressed naturally.
+BQ: {
+    Unified in what sense?
+    Again, abstract collecting semantics is not a thing.
+    There are the abstract semantics (the analysis), and the (concrete) collecting semantics.
+    I think it would be better to put the punchline (multilanguage semantics) earlier, and give some overview of how that helps you with the proofs.
+    This abstract is still "missing the point"
+    What's the point of using the multi-language semantics?
+    What does it do for you that helps you fix your soundness proofs?
+    As Pete taught me, technical abstracts and papers should not be a "mystery" --- the reader shouldn't be guessing or confused.
+    You should lay it out for them so they can understand as much as possible.
+    The abstract is all about balancing giving the reader an accurate overview of your ideas and presentation, while not getting technical.
+}
+
+multi-lang allows us to distinguish
+
+    separate such events from different programs
+
+-------------------------------------------------------------------------
+
+Verification of Abstract-interpretation Based Analysis with Separate Compilation and FFIs
+
+In the context of separate compilation, a static analysis always has to
+make conservative decisions with imported/exported values by assuming
+they can behave like any possible values. Similar situations also apply to
+values that may flow into or out of the program through foreign language
+interfaces (FFI)s.
+BQ: {
+    often? I would say almost always. What do you mean by "any other
+    values"? I would be more specific, saying something "since these values
+    are not known at compile time, the analysis must account for any possible value
+}
+Similarly, the analysis doesn't have more information for values that
+may flow into or out the program through foreign language interfaces
+(FFI)s either.
+BQ: {
+    No, you *can* figure out which values flow out through FFIs.
+}
+These values that may cross the program boundary can not only decrease
+the precision of the analysis but also impose extra challenges when it
+comes to compiler verfication.
+BQ: {
+    Not compiler verification, analysis soundness proofs.
+    Broaden and generalize our goal.
+    It decreases the precision, but in a way that is fundamentally impossible to overcome.
+    So I wouldn't really call that decreasing the precision.
+    I would combine this sentence with the previous.
+}
+A verified compiler cannot easily make specialized decisions
+for a particular value without a proof that the value never crosses
+such compilation unit boundary.
+BQ: {
+    This is a proof technique for all sorts of analyses, for all sorts of compilers, including paper proofs.
+    I wouldn't restrict to verified compilers.
+    Also, drop "framework."
+    "Make specialized decisions ..." -> "change the representation of values that cross compilation unit or FFI boundaries.
+}
+In this talk, we will discuss a general technique for verifying
+abstract-interpretation analyses in the context of separate
+compilation and FFIs.
+BQ: {
+    "framework" -> "technique"
+    verifying -> proving soundness of       (generalize our goal. we are just applying it to verified compilers. but people prove analyses sound by hand for papers too)
+}
+BQ paragraph: {
+   We should shorten up this paragraph a bit.
+}
+
+Abstract-interpretation analyses reason about
+program semantics and concrete values by mapping them onto
+finite abstract domains, (e.g. whether an integer is even or odd).
+BQ: {
+    "what call sites an λ might be applied, whether a value might cross the
+    program boundary, and what possible contracts a value needs to
+    satisfy, etc. "
+    "contracts a value needs to satisfy" this isn't good use of terminology. better to directly reference gradual typing and blame
+    these are not about finite abstract domains. these are auxiliary facts you want your analysis to discover
+    merge these into the next sentence instead.
+}
+All these events can be categorized as observable trace
+events the analysis is going to collect.
+BQ: {
+    Add something like "additionally, the concrete "collecting" semantics additionally collects additional facts about the program, in order to prove soundness of the abstraction."
+}
+We have noticed that if we can model such an abstract collecting
+semantics in the style of a multi-language semantics, then we can
+obtain a unified framework to tackle a series of interesting compiler
+verification problems, such as linking compatibility and FFI
+interpolation, once we incorporate such static analysis into our
+verified compiler framework.
+BQ: {
+    "We have noticed" pretty weak language. Maybe "by modelling the collecting semantics in the ..."
+    "abstract collecting semantics" - bad. There are the abstract semantics (the analysis), and the (concrete) collecting semantics.
+    "framework" -> "technique"
+    "compiler verification", etc. -> analysis soundness
+}
+BQ paragraph: {
+   Ok, so what's the point?
+   Why is this approach better than previous approaches? (answer: previous approaches are wrong, or don't generalize as well)
+   Probably want to mention that existing *implementations* aren't wrong, but the techniques used to reason about them may be unsound.
+   It feels like the abstract is missing a punchline. You set up everything, but don't tell me enough about what makes our thing cool, or about what it is. Like what is this multi-language semantics you reference?
+}
+
+(* Questions: *)
+(* For now, I regard this more of a proof technique for verifing abstract interpretation based analysis.
+   Still not quite clear to me whether having <> (Anything external + anything that may interact with the external world) will improve precision the of the actual analysis.
+   Can we actually incorporate such a notion in a realistic compiler, say 3CPS? *)
+
+It's not supposed to increase the precision (except to say that <> isn't *every* value)
+It's supposed to make your analysis sound, and be the right proof technique for doing that.
+The 3CPS compiler already has unknown values in it and push them through the analysis.
+
+
+
+
+```
+B:
+    f = fun x -> fun y -> x y
+
+    export f
+
+R:
+    import f from B
+
+    v1 = ..
+    v2 = ...
+    <> v1 v2
+ ~> <> v2
+
+ ~> <>
+ ~> <> (v2 <>)
+
+    <> v ~> <>
+    <> v ~> <> (v <>)
+```
+
+Trace properties with observable events like static anlysis properties (even/odd, control flow info, compilation unit/FFI boundary crossing) and gradual typing events (blame and contract verification)
+
+Collecting semantics in the style of multi-language semantics
+
+Verification of abstract interpretation based analysis in the context of separate compilation and FFIs

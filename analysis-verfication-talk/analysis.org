@@ -1,0 +1,449 @@
+#+title: Verification of Abstract Interpretations Using Multi-language Semantics
+#+author: Ling Zheng
+#+email: zheng.lingx@northeastern.edu
+
+* Introduction
+** Abstract Interpretation [cite]
+
+   Collect useful facts about our program *without executing the program*.
+
+** Example
+
+   In the context of higher-order control-flow analysis,
+   we are interested in *which calls can apply which λ*.
+
+   #+begin_src ocaml
+   let f = fun x -> x in
+   let succ = fun n -> n + 1 in
+   let g = fun m -> 2 * (succ m) in
+   let h = (f g) in
+   (h 3)
+   #+end_src ocaml
+
+** Example
+
+   #+begin_src ocaml
+   let f = [l1] fun x -> x in
+   let succ = [l2] fun n -> n + 1 in
+   let g = [l3] fun m -> 2 * [c1] (succ m) in
+   let h = [c2] (f g) in
+   [c3] (h 3)
+   #+end_src ocaml
+
+   The easiest way to discover the most precise information is to actually execute the program.
+
+   { (l1, c2), (l3, c3), (l2, c1) }
+
+   To ease the presentation, let's assume the log of information is always an unordered set.
+
+** Trace Events
+
+   1. Which calls can apply which λ (higher-order control flow analysis)
+
+      { (l1, c1), (l1, c2), (l2, c1), ... }
+
+   2. Whether an integer variable is even or odd (integer parity analysis)
+
+      { (x, even), (y, odd), (z, ⊤), (w, ⊥), ... }
+
+   3. Whether a variable is an alias of another (alias analysis)
+
+      { (x, y), (y, z), (z, w), ... }
+
+   4. Whether a type contract is always satisfied (gradual typing)
+
+      The set of violated contracts / blames.
+
+   ...
+
+** Collecting Semantics
+
+   1. Instrument a standard concrete semantics
+
+   2. Most precise facts
+
+   3. Uncomputable
+
+   [Following this intuition, one would typically instrument a standard programming language semantics, such as cbv λ, by logging these trace events. The resulting semantics is what we call the collecting semantics.
+
+   As we have noticed the collecting semantics allows us to get the most precise log of events.
+
+   But the precision would typically mean it might be uncomputable from an analysis perspective.
+   For instance, it may not terminate or it requires actual external inputs.]
+
+** Abstract Semantics
+
+   * Finite and computable
+
+   * ND and memory location reuse
+
+   * Abstract Abstract Machines (AAM) [cite]
+
+   [In general, we have to abstract the collecting semantics
+   by approximating the most precise information within a finite amount of time and space.
+
+   As a consequence of finiteness, we need to introduce ND and reuse of memory locations.
+
+   The Abstract Abstract Machines (AAM) approach [cite] described a systematic recipe to achieve this.
+
+   Once we have our abstract semantics, then we are ready to implement our program analysis.]
+
+** Soundness
+
+    The abstract semantics is a safe approximation of the collecting semantics.
+
+    =>
+
+    All concrete program traces are covered by some abstract program trace.
+
+* Separate Compilation
+
+  [What I have discussed so far works perfectly if we are only interested in doing whole-program compilation.
+  But today, softwares are typically built component by component;
+  One would compile each program component/module separately and link everything together to form an executable.
+
+  So how should we accomondate our analysis to work with separate compilation?]
+
+** Example
+
+   #+begin_src ocaml
+   (* f is defined in some module M *)
+   let succ = fun n -> n + 1 in
+   let g = fun m -> 2 * (succ m) in
+   let h = (M.f g) in
+   (h 3)
+   #+end_src ocaml
+
+   What can we say about =M.f and =h=?
+
+** Unknown Values
+
+   #+begin_src ocaml
+   let succ = fun n -> n + 1 in
+   let g = fun n -> 2 * (succ n) in
+   let h = (M.f g) in
+   (h 3)
+   #+end_src ocaml
+
+   1. =M.f= should be unknown (or ●).
+
+   2. Applying ● should produce another ●.
+
+   Based on these observations, it appears that ● can represent *any* values.
+
+   But is that really the case?
+
+   [No functional behavior difference external objects always have different behavior to the interna ones]
+** What are ●?
+
+   To be sure, how about let's link =M.f= with some concrete values and see what =M.f g= can return?
+
+*** Internal Escaping
+
+   #+begin_src ocaml
+   (* ------ M ------ *)
+   let f = fun x -> x
+
+   (* ------------ *)
+   let succ = fun n -> n + 1 in
+   let g = fun m -> 2 * (succ m) in
+   let h = (M.f g) in
+   (h 3)
+   #+end_src ocaml
+
+   =M.f g= produces =g=, which is defined internally.
+
+   ● can represent something internally.
+
+   [But what's more about =g= here?
+
+   The interesting thing here is that we have basically lost track of =g=; it has escaped and can be freely used in some other context.]
+
+*** External
+
+   #+begin_src ocaml
+   (* ------ M ------ *)
+   let f = fun _ ->
+               let square = fun x -> x * x in
+               square
+
+   (* ------------ *)
+   let succ = fun n -> n + 1 in
+   let g = fun m -> 2 * succ m in
+   let h = M.f g in
+   h 3
+   #+end_src ocaml
+
+   =f= is essentially bound to =const square=.
+
+   =M.f g= produces =square=, which is defined externally.
+
+   [But =square= can really be anything defined externally. ]
+
+   ● can produce something externally defined, which shouldn't be surprising.
+
+
+
+
+
+*** Internal Non-escaping
+
+   #+begin_src ocaml
+   let succ = fun n -> n + 1 in
+   let g = fun n -> 2 * (succ n) in
+   let h = (M.f g) in
+   (h 3)
+   #+end_src ocaml
+
+   But what about the λ bound by =succ=?
+
+   1. =M.f g= should never return it.
+
+      [ It can return something functionally behave the same as λ bound by =succ= but not the exact one. ]
+
+   2. it should never be called when we apply a ●.
+
+** Observation
+
+   ● are exactly the external values + the internal escaping values.
+** Working with ●
+
+   1. Imports are ●
+
+   2. [c] (● v)
+
+      c. record trace (l●, c)
+
+      d. record v escapes and (l_v, c●)
+
+      a. [c] (● v) -> ●
+
+      b. [c] (● v) -> (● (v ●))
+
+         [ d. v must take ●. ]
+
+
+   Please note that ● is opaque.
+
+   [This is a standard thing people has used]
+
+** Existing Works
+
+   [Figuring out the right way to work with ● is in fact quite tricky.
+
+   But it is crucial to have this right when it comes to verifying an abstract interpretation in the context of separate compilation.]
+
+*** [X] Soft Contract Verification (2014)
+
+     ● means any value.
+
+     #+begin_src ocaml
+     let succ = fun n -> n + 1 in
+     let g = fun n -> 2 * succ n in
+     let h = M.f g in
+     h 3
+     #+end_src ocaml
+
+     If ● means any value, then the analysis is going to record that the λ bound by =succ= might be called at =M.f g= (abstacted by =(l●, c)=), suggesting their analysis is overly approximating and can be improved.
+
+     But this work inspired us on how to work with ●.
+
+*** Shivers's Escape Technique (1991) [cite]
+
+    [shorten]
+
+    Finer grined tracking of the set of escaped values.
+
+    Does not buy your anything so people don't typically do it.
+
+    Basically, ● has been unfolded everywhere.
+
+    1. Very precise.
+
+       Imports only introduce external values.
+
+       But a lot harder to work with and verify.
+
+    2. Not efficient when analyzing an escaped λ since we have to range over the set of escaped values,
+       which itself can change as we discover more escaped values.
+
+       Observation:
+
+           The set of escaped values changes but ● doesn't.
+
+       So working with ● allows us to not worry about the escape set so that we can analyze an escaped λ only once.
+
+** Soundness Proof
+
+    [Midtgaard, Adams, and Might ???] presented a Galois connections based soundness proof for Shivers's Escape Technique.
+
+    Galois connections is a technique that allows us reason about the connections between the concrete and abstract semantics.
+
+    [The proof technique essentially breaks every language constructs into 'external' and 'internal'.]
+
+*** Limitations
+
+    1. It is hard to tell whether this proof technique can generalize to other types of trace events.
+
+    2. If we want to incorporate an abstract interpretation in a verified compiler framework, such as CertiCoq [cite], we need mechanizations.
+
+       But Galois connection based proofs are typically not easy to mechanize compared with a simulation based proof.
+
+    [To address above shortcomings, we believe a better generalization is necessary.
+
+    To motivate that, let's take a look at our proof goal.]
+
+*** Our Strategy
+
+     [Re-enforce the idea of distinguish external vs internal]
+
+     "All concrete program traces are covered by some abstract program trace."
+
+**** Internal Events
+
+     It should be easy to see that all internal concrete events are covered.
+
+**** External Events
+
+     Let's consider calling some external value,
+
+        =● [c] v=
+
+     The concrete trace records some (l_ext, c) and the abstract records (l●, c).
+
+     Then what are the possiblities before the control returns back?
+
+     1. ∅ => direct return
+
+        We are done as no traces are produced.
+
+     2. (l_ext, c_ext) => external call with an external λ
+
+        This may seem problematic as there can be arbitrary number of such external events produced by the concrete semantics.
+        But we can abstract all of them so that they are covered by (l●, c●), the initial event in our log.
+
+        [Remember our log is a set.]
+
+     3. (l_int, c_ext) => external call with an escaped λ
+
+        This event will be covered by (l●, c●).
+
+        The extra events after the control has entered the escaped λ are covered as the abstract interpretation explores all the escaped λs by supplying them with ●.
+
+        Note that it's okay to generate more trace events. The analysis has to overapproximate as we don't know exactly which escaped λ will be called.
+
+**** How to differentiate the context naturally?
+
+     Multi-language Semantics
+
+     [As we have then realized, we can set up a multi-language semantics to achieve this.]
+
+     [This is a natural thing even [cite] used in their proofs without realizing ]
+* Multi-language Semantics [cite]
+
+  [Multi-language semantics are often designed to talk about interactions between two programs in different languages.
+  For instance, to talk about gradual typing [cite] or to verify foreign function interfaces [cite].
+  Then, why cannot we apply this technique to talk about interactions between two programs in the *same* language?
+  By simply pretending they are different languages.]
+
+** Example
+
+   #+begin_src ocaml
+   (* ------ Red ------ *)
+   let f = fun f' ->
+               let double = fun y -> 2 * y in
+               fun x -> (double x) * (f' x)
+
+   (* ------- Blue ----- *)
+   let succ = fun n -> n + 1 in
+   let g = fun m -> 2 * (succ m) in
+   let h = (R.f g) in
+   (h 3)
+   #+end_src ocaml
+
+   Please note that the semantics naturally *distinguishes* the trace events.
+
+   1. =R.f g= => (l_red, c_blue) Boundary
+
+      =h= gets bound to a Red =fun x -> double x * B.g x=
+
+   2. =h 3= => (l_red, c_blue) Boundary
+
+      In the red context, =double 3 * B.g 3=.
+
+   3. =double 3= => (l_red, c_red) External
+
+   4. =B.g 3= => (l_blue, c_red) Boundary
+
+      In the blue context, =2 * succ 3=.
+
+   5. =succ 3= => (l_blue, c_blue) Internal
+
+** Soundness
+
+   1. Mechanizable simulation based soundness proof.
+
+   2. Should be generalizable to talk about other trace events.
+
+      [Once we have shown soundness for any whole-program analysis,
+      wouldn't it be nice to have a recipe to derive the soundness proof in the context of separate compilation and dynamic linking?]
+* [X] Misc
+** Generalization
+
+*** Different Languages in Different Programs
+
+    We add boundary forms, =ℛℬ vb= and =ℬℛ vr=, to handle values passed from one language to a different language.
+
+    #+begin_example
+     ℬℛ (ℛℬ (vb)) ⟶ vb
+     ℛℬ (ℬℛ (vr)) ⟶ vr
+    #+end_example
+
+    This allows us to verify linking of two programs compiled with flow-directed transformations but analyzed by different analyses (known-function analysis and 0CFA).
+
+    Similar to [Perconti and Ahmed, 2014], where they applied this technique to talk about linking between a target program compiled from a source program and another target program which is not expressible in the source language.
+
+*** Different Languages in The Same Program
+
+    Language Boundary <> Program Boundary
+
+    We have both external and internal values emerging from different languages.
+
+    Example: inline assembly
+
+    This most general scenario enables us to talk about compositions of different abstract interpretations in the context of separate compilations.
+
+    [Buro, Crole, and Mastroeni, 2023] described a general theory and presented a simple language interpolation example between the Imp language and a toy numeric language.
+
+    Limitations:
+
+    a. Not mechanizable.
+
+       Define everything from ground up. We think it shouldn't be necessary.
+
+    b. Assumed whole-program compilation, not generalizable to separate compilation.
+
+** Verification of Flow-directed Transformations [cite]
+** Problem
+
+   Given two source programs, we analyze each of them with two different analyses (known-function analysis and 0CFA) and perform flow-directed transformations (provided that our transformations only transform program constructs that won't be exposed to the external world), can we safely link the two compiled programs?
+
+   Intuitively, we should be able to since the flow-directed transformations only touch internal things.
+
+   But our existing linking preservation proof is only limited to the same analysis.
+
+   We believe the multi-language approach should be the right way to tackle this problem.
+
+** An Analogy
+
+   [Perconti and Ahmed, 2014] applied this technique to talk about linking between a target program, =t=, compiled from source, =s=, and another target program, =t'=.
+
+    #+begin_example
+    s ~~> t ⋈ t'
+    #+end_example
+
+    Our ultimate goal is to apply this technique to talk about linking between a program, =a=, analyzed by some analysis from source, =u=, and another program, =a'=, which has already been analyzed by *some other* analysis.
+
+    #+begin_example
+    u ~~> a ⋈ a'
+    #+end_example
