@@ -1,0 +1,196 @@
+\begin{frame}
+
+  \[
+  \Large
+  \begin{array}{@{}ll@{}}
+    \mex{\kw{let} f = \kw{fun} x \codearr x \kw{in}} \\
+    \mex{\kw{let} add1 = \kw{fun} n \codearr n + 1 \kw{in}} \\
+    \mex{\kw{let} g = \kw{fun} m \codearr 2 * (add1 m) \kw{in}} \\
+    \mex{\kw{let} h = (f g) \kw{in}} \\
+    \mex{(h 3)} \\
+    \\
+    \invisible<1>{\textbf{which calls can apply which \lam}}
+  \end{array}
+  \]
+
+  \only<2>{}
+
+\end{frame}
+
+\begin{frame}
+
+  \[
+  \Large
+  \begin{array}{@{}ll@{}}
+    \mex{\kw{let} f = ${}^{\lambdalabel{1}}$\kw{fun} x \codearr x \kw{in}} \\
+    \mex{\kw{let} add1 = ${}^{\lambdalabel{2}}$\kw{fun} n \codearr n + 1 \kw{in}} \\
+    \mex{\kw{let} g = ${}^{\lambdalabel{3}}$\kw{fun} m \codearr 2 * \altcolor{6-7}{blue}{${}^{\calllabel{1}}$(add1 m)} \kw{in}} \\
+    \mex{\kw{let} h = \altcolor{2-3}{blue}{${}^{\calllabel{2}}$(f g)} \kw{in}} \\
+    \mex{\altcolor{4-5}{blue}{${}^{\calllabel{3}}$(h 3)}} \\
+    \\
+    \invisible<-7>{\{} \invisible<-2>{(\lambdalabel{1}, \calllabel{2})} \invisible<-4>{, (\lambdalabel{3}, \calllabel{3})} \invisible<-6>{, (\lambdalabel{2}, \calllabel{1})} \invisible<-7>{\}}
+  \end{array}
+  \]
+
+  \only<8>{}
+
+\end{frame}
+
+\begin{frame}
+
+  \Large
+  \vspace{0.5em}
+  \begin{itemize}
+  \item Which calls can apply which \lam \ (control-flow analysis)
+
+    \{ (\lambdalabel{1}, \calllabel{1}), (\lambdalabel{1}, \calllabel{2}), (\lambdalabel{2}, \calllabel{1}), ... \}
+
+  \item \invisible<-1>{Whether an integer variable is even or odd (parity analysis)}
+
+    \invisible<-1>{\{ (x, even), (y, odd), (z, $\bot$), (w, $\top$), ... \}}
+
+  \item \invisible<-2>{ Whether a variable is an alias of another (alias analysis)}
+
+    \invisible<-2>{\{ (x, y), (y, z), (z, w), ... \}}
+
+  \item \invisible<-3>{Whether a type contract is always satisfied (gradual typing)}
+
+    \invisible<-3>{The set of violated contracts / blames}
+
+  \end{itemize}
+
+  \begin{center}
+    \invisible<-4>{Trace Events}
+  \end{center}
+
+  \only<5>{}
+\end{frame}
+
+\begin{frame}
+
+  \Large
+  \invisible<-1>{Collecting Semantics}
+  \vspace{1em}
+
+  \begin{itemize}
+  \item Instrument a standard concrete semantics
+  \item \invisible<-2>{Most precise}
+  \item \invisible<-3>{Uncomputable}
+  \end{itemize}
+
+  \only<4>{}
+
+\end{frame}
+
+%% \begin{frame}
+
+%%   \Large
+%%   Abstract Semantics
+%%   \vspace{1em}
+
+%%   \begin{itemize}
+%%   \item \invisible<-1>{Finite and computable}
+%%   %\item \invisible<-2>{Non-determinism and memory reuse}
+%%   %\item \invisible<-3>{Abstract Abstract Machines (Van Horn and Might 2010)}
+%%   \end{itemize}
+
+%%   \only<2>{}
+
+%% \end{frame}
+
+\begin{frame}
+
+  \Large
+  \visible<1->{
+  Collecting semantics: Uncomputable
+  \begin{center}
+  \begin{tikzpicture}[node distance = 0.3cm, thick]%
+    \node (1)               {$\boxalt<3 >{\altcolor{3-} {dkblue}  {${\varsigma}_1$}}$};
+    \node (2) [right=of 1]  {$\boxalt<4 >{\altcolor{4-} {dkgreen} {${\varsigma}_2$}}$  };
+    \node (3) [right=of 2]  {$\boxalt<5 >{\altcolor{5-} {dkyellow}{${\varsigma}_3$}}$  };
+    \node (4) [right=of 3]  {$\boxalt<6 >{\altcolor{6-} {dkred}   {${\varsigma}_4$}}$  };
+    \node (5) [right=of 4]  {$\boxalt<7 >{\altcolor{7-} {dkgreen} {${\varsigma}_5$}}$  };
+    \node (6) [right=of 5]  {$\boxalt<8 >{\altcolor{8-} {dkyellow}{${\varsigma}_6$}}$  };
+    \node (7) [right=of 6]  {$\boxalt<9 >{\altcolor{9-}{dkred}   {${\varsigma}_7$}}$  };
+    \node (8) [right=of 7]  {$\boxalt<10>{\altcolor{10-}{dkgreen} {${\varsigma}_8$}}$  };
+    \node (9) [right=of 8]  {$\boxalt<11>{\altcolor{11-}{dkpurple}{${\varsigma}_9$}}$  };
+    \node (10) [right=of 9]  {\ldots};
+    \draw[->] (1) -- (2);
+    \draw[->] (2) -- (3);
+    \draw[->] (3) -- (4);
+    \draw[->] (4) -- (5);
+    \draw[->] (5) -- (6);
+    \draw[->] (6) -- (7);
+    \draw[->] (7) -- (8);
+    \draw[->] (8) -- (9);
+    \draw[->] (9) -- (10);
+  \end{tikzpicture}%
+  \end{center}
+  }
+
+  \visible<2->{
+  Abstract to a \emph{finite} representation
+  \begin{center}
+  \begin{tikzpicture}[node distance = 0.5cm, thick]%
+    \node (a)                   {$\boxalt<3  >   {\altcolor{3-} {dkblue}  {$\til{\varsigma_a}$}}$};
+    \node (b) [right=of a]      {$\boxalt<4,7,10>{\altcolor{4-} {dkgreen} {$\til{\varsigma_b}$}}$};
+    \node (c) [below left=of b] {$\boxalt<5,8>   {\altcolor{5-} {dkyellow}{$\til{\varsigma_c}$}}$};
+    \node (d) [right=of c]      {$\boxalt<6,9>  {\altcolor{6-} {dkred}   {$\til{\varsigma_d}$}}$};
+    \node (e) [right=of b]      {$\boxalt<11>    {\altcolor{11-}{dkpurple}{$\til{\varsigma_e}$}}$};
+    \node (f) [right=of e]      {\ldots};
+    \draw[->] (a) -- (b);
+    \draw[->] (b) -- (c);
+    \draw[->] (c) -- (d);
+    \draw[->] (d) -- (b);
+    \draw[->] (b) -- (e);
+    \draw[->] (e) -- (f);
+  \end{tikzpicture}%
+  \end{center}
+  }
+
+  %% \invisible<-11>{
+  %% Maintain $\til{\textit{sh}}$ in the abstraction
+  %% \begin{itemize}
+  %% \item Play by the \textbf{Rules}, intersect when updating
+  %% \item \invisible<-12>{\textbf{Soundness:} $\til{\textit{sh}} \subseteq \textit{sh}$ (Rocq)}
+  %% \end{itemize}
+  %% }
+  \only<12>{}
+
+  %\invisible<-13>{
+  %Abstraction relation: $\invisible<-14>{(}\varsigma\invisible<-14>{,\textit{sh})} \lesssim \invisible<-14>{(}\til{\varsigma}\invisible<-14>{,\til{\textit{sh}})}$
+  %}
+  %\only<15>{}
+
+\end{frame}
+
+\begin{frame}
+
+  \Large
+  Abstract Semantics
+  \vspace{1em}
+
+  \begin{itemize}
+  \item Finite and computable
+  \item \invisible<-1>{Reuse resources}
+  \item \invisible<-2>{Non-deterministic}
+  \item \invisible<-3>{Abstract Abstract Machines (Van Horn and Might 2010)}
+  \end{itemize}
+
+  \only<4>{}
+
+\end{frame}
+
+
+\begin{frame}
+
+  \Large
+
+  \resizebox{0.99\linewidth}{!}{The abstract semantics safely approximates the collecting semantics.}
+
+  \vspace{1.5em}
+
+  \invisible<-1>{All concrete program traces are covered by some abstract trace.}
+
+  \only<2>{}
+\end{frame}

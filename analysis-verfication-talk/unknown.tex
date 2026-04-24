@@ -1,0 +1,317 @@
+\begin{frame}
+
+  \huge Separate Compilation
+
+\end{frame}
+
+\begin{frame}
+
+  \[
+  \Large
+  \begin{array}{@{}ll@{}}
+    \mex{\kw{let} add1 = \kw{fun} n \codearr n + 1 \kw{in}} \\
+    \mex{\kw{let} g = \kw{fun} m \codearr 2 * (add1 m) \kw{in}} \\
+    \mex{\kw{let} \altcolor{2}{blue}{h} = (\altcolor{2}{blue}{M.f} g) \kw{in}} \\
+    \mex{(h 3)} \\
+    \\
+    \invisible<-1>{\text{What can we say about \mex{M.f} and \mex{h}?}}
+  \end{array}
+  \]
+
+  \only<2>{}
+
+\end{frame}
+
+\begin{frame}
+
+  \Large
+  \[
+  \Large
+  \begin{array}{@{}ll@{}}
+    \mex{\kw{let} add1 = \kw{fun} n \codearr n + 1 \kw{in}} \\
+    \mex{\kw{let} g = \kw{fun} m \codearr 2 * (add1 m) \kw{in}} \\
+    \mex{\kw{let} \altcolor{3-4}{blue}{h} = (\altcolor{1-2}{blue}{M.f} g) \kw{in}} \\
+    \mex{(h 3)}
+  \end{array}
+  \]
+
+  \begin{itemize}
+  \item \invisible<-1>{\text{\mex{M.f} should be unknown (or \unknown)}}
+  \item \invisible<-3>{\text{Applying \unknown\ should produce another \unknown}}
+  \end{itemize}
+
+  \invisible<-4>{Nguyen, Tobin-Hochstadt, and Van Horn 2014 treated \unknown\ this way.}
+
+  \invisible<-5>{Does \unknown\ mean \textbf{any value}?}
+
+  \only<6>{}
+
+\end{frame}
+
+\begin{frame}
+
+  \Large
+  \begin{columns}[t]
+    \begin{column}{0.4\textwidth}
+      \[
+      \large
+      \begin{array}{@{}ll@{}}
+        \mex{\textcolor{dkcomment}{(* Main *)}}\\
+        \mex{\kw{let} add1 = \kw{fun} n \codearr n + 1 \kw{in}} \\
+        \mex{\kw{let} g = \altcolor{4-5}{blue}{\kw{fun} m \codearr 2 * (add1 m)} \kw{in}} \\
+        \mex{\kw{let} h = \altcolor{2-3}{blue}{(M.f g)} \kw{in}} \\
+        \mex{(h 3)}
+      \end{array}
+      \]
+    \end{column}
+
+    \begin{column}{0.45\textwidth}
+      \[
+      \large
+      \begin{array}{@{}ll@{}}
+        \\
+        \mex{\textcolor{dkcomment}{(* Module M *)}}\\
+        \invisible<-1>{\mex{\kw{let} f = \kw{fun} x \codearr x}}
+      \end{array}
+      \]
+    \end{column}
+  \end{columns}
+
+  \vspace{1em}
+
+  \begin{itemize}
+  \item \invisible<-1>{Link \mex{M.f} with \mex{id}}
+  \item \invisible<-2>{\unknown\ can represent something internally defined}
+  \item \invisible<-3>{\lam\ bound by \mex{g} has escaped!}
+  \end{itemize}
+
+  \only<4>{}
+
+\end{frame}
+
+\begin{frame}
+
+  \Large
+  \begin{columns}[t]
+    \begin{column}{0.45\textwidth}
+      \[
+      \large
+      \begin{array}{@{}ll@{}}
+        \mex{\textcolor{dkcomment}{(* Main *)}}\\
+        \mex{\kw{let} add1 = \kw{fun} n \codearr n + 1 \kw{in}} \\
+        \mex{\kw{let} g = \kw{fun} m \codearr 2 * (add1 m) \kw{in}} \\
+        \mex{\kw{let} h = \altcolor{2-3}{blue}{(M.f g)} \kw{in}} \\
+        \mex{(h 3)}
+      \end{array}
+      \]
+    \end{column}
+
+    \begin{column}{0.45\textwidth}
+      \[
+      \large
+      \begin{array}{@{}ll@{}}
+        \mex{\textcolor{dkcomment}{(* Module M *)}}\\
+        \invisible<-1>{\mex{\kw{let} f = \kw{fun} \_ \codearr}}\\
+        \invisible<-1>{\mex{                      \kw{let} sq = \altcolor{3-4}{red}{\kw{fun} x \codearr x * x} \kw{in}}}\\
+        \invisible<-1>{\mex{                      sq}}
+      \end{array}
+      \]
+    \end{column}
+  \end{columns}
+
+  \vspace{1em}
+
+  \begin{itemize}
+  \item \invisible<-1>{Link \mex{M.f} with some constant function}
+  \item \invisible<-2>{\unknown\ can represent anything externally defined}
+  \end{itemize}
+
+  \only<3>{}
+
+\end{frame}
+
+\begin{frame}
+
+  \Large
+  \vspace{1em}
+
+  \[
+  \Large
+  \begin{array}{@{}ll@{}}
+    \mex{\color{dkcomment}{(* f is defined in some module M *)}} \\
+    \mex{\kw{let} add1 = \altcolor{1}{blue}{\kw{fun} n \codearr n + 1} \kw{in}} \\
+    \mex{\kw{let} g = \kw{fun} m \codearr 2 * (add1 m) \kw{in}} \\
+    \mex{\kw{let} h = (M.f g) \kw{in}} \\
+    \mex{(h 3)} \\
+    \\
+    \text{What about the \lam\ bound by \mex{add1}?}
+  \end{array}
+  \]
+
+\end{frame}
+
+\begin{frame}
+
+  \Large
+  \[
+  \Large
+  \begin{array}{@{}ll@{}}
+    \mex{\color{dkcomment}{(* f is defined in some module M *)}} \\
+    \mex{\kw{let} add1 = \altcolor{1-2}{blue}{\kw{fun} n \codearr n + 1} \kw{in}} \\
+    \mex{\kw{let} g = \kw{fun} m \codearr 2 * (add1 m) \kw{in}} \\
+    \mex{\kw{let} h = \altcolor{1-2}{blue}{(M.f g)} \kw{in}} \\
+    \mex{(h 3)}
+    %\mex{\altcolor{3-4}{blue}{(h 3)}}
+  \end{array}
+  \]
+
+  \begin{itemize}
+  \item \invisible<-1>{Should \mex{(M.f g)} ever return it?}
+  \end{itemize}
+
+  \only<2>{}
+
+\end{frame}
+
+\begin{frame}
+
+  \Large
+  \vspace{1em}
+  \begin{columns}[t]
+    \begin{column}{0.45\textwidth}
+      \[
+      \large
+      \begin{array}{@{}ll@{}}
+        \mex{\textcolor{dkcomment}{(* Main *)}}\\
+        \mex{\kw{let} add1 = \altcolor{1}{blue}{\kw{fun} n \codearr n + 1} \kw{in}} \\
+        \mex{\kw{let} g = \kw{fun} m \codearr 2 * (add1 m) \kw{in}} \\
+        \mex{\kw{let} h = \bluebox{\mex{(M.f g)}} \kw{in}} \\
+        \mex{(h 3)}
+      \end{array}
+      \]
+    \end{column}
+
+    \begin{column}{0.45\textwidth}
+      \[
+      \large
+      \begin{array}{@{}ll@{}}
+        \mex{\textcolor{dkcomment}{(* Module M *)}} \\
+        \mex{\kw{let} f = \kw{fun} \_ \codearr}\\
+        \mex{             \kw{let} S = \altcolor{1}{red}{\kw{fun} x \codearr x + 1}\ \kw{in}}\\
+        \mex{              S}
+      \end{array}
+      \]
+    \end{column}
+  \end{columns}
+
+\end{frame}
+
+\begin{frame}
+
+  \Large
+  \[
+  \Large
+  \begin{array}{@{}ll@{}}
+    \mex{\color{dkcomment}{(* f is defined in some module M *)}} \\
+    \mex{\kw{let} add1 = \altcolor{1-3}{blue}{\kw{fun} n \codearr n + 1} \kw{in}} \\
+    \mex{\kw{let} g = \kw{fun} m \codearr 2 * (add1 m) \kw{in}} \\
+    \mex{\kw{let} h = \altcolor{1}{blue}{(M.f g)} \kw{in}} \\
+    \mex{\altcolor{2}{blue}{(h 3)}}
+  \end{array}
+  \]
+
+  \begin{itemize}
+  \item \mex{(M.f g)} should never return it
+  \item \invisible<-1>{It should never be called when we apply \mex{h} to 3}
+  \item \invisible<-2>{\unknown\ does \textbf{not} include internal non-escaping values}
+  \end{itemize}
+
+  \only<3>{}
+
+\end{frame}
+
+\begin{frame}
+
+  \Large
+  \unknown\ are exactly the external values + the internal escaping values.
+
+\end{frame}
+
+\begin{frame}
+
+  \Large
+  \begin{itemize}
+  \item \invisible<-1>{Imports are \unknown}
+  \item \invisible<-2>{\mex{[\calllabel{{}}] (\unknown\ v)}}
+    \begin{itemize}
+    \Large
+    \item \invisible<-4>{record trace (\unknownlambdalabel, \calllabel{{}})}
+    \item \invisible<-5>{record \mex{v} escaped}
+    \item \invisible<-6>{record trace (\lambdalabel{v}, \unknowncalllabel)}
+    \item \invisible<-7>{\mex{(\unknown\ v) -> \invisible<-8>{\invisible<-9>{(\unknown} (v \unknown)\invisible<-9>{)}}}}
+    \item \invisible<-3>{\mex{(\unknown\ v) -> \unknown}}
+    \end{itemize}
+  \end{itemize}
+
+  \vspace{1em}
+  \invisible<-10>{Please note that \unknown\ is opaque}
+
+  \only<11>{}
+
+\end{frame}
+
+\begin{frame}
+
+  \Large
+  Shivers' Escape Technique 1991
+
+  \vspace{1em}
+
+  \begin{itemize}
+  \item Much finer-grained
+  \item Work with the set of escaped values instead of \unknown
+  \end{itemize}
+
+\end{frame}
+
+\begin{frame}
+
+  \Large
+  Midtgaard, Adams, and Might 2012
+
+  \vspace{1em}
+
+  \begin{itemize}
+  \item \textbf{Internal} vs \textbf{External} \pause
+  \item Galois connections
+  \end{itemize}
+
+\end{frame}
+
+\begin{frame}
+
+  \Large
+  Midtgaard, Adams, and Might 2012
+
+  \vspace{1em}
+
+  \begin{itemize}
+  \item Mechanizations and verified compilation \pause
+  \item Generalization to other trace events
+  \end{itemize}
+
+\end{frame}
+
+\begin{frame}
+
+  \Large
+  Midtgaard, Adams, and Might 2012
+
+  \vspace{1em}
+
+  \begin{itemize}
+  \item Simulation based soundness proof \pause
+  \item Need a generic way to differentiate the \textbf{trace events}
+  \end{itemize}
+
+\end{frame}

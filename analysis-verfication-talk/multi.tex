@@ -1,0 +1,130 @@
+\begin{frame}
+
+  \huge Multi-Language Semantics \pause
+
+  \vspace{1em}
+  \begin{itemize}
+  \Large
+  \item Gradual typing \pause
+  \item Foreign function interfaces
+  \end{itemize}
+
+\end{frame}
+
+\begin{frame}
+
+  \Large
+  \begin{columns}[t]
+    \begin{column}{0.45\textwidth}
+      \[
+      \large
+      \begin{array}{@{}ll@{}}
+        \bluebox{\mex{\textcolor{dkcomment}{(* Main *)}}}\\
+        \bluebox{\mex{\kw{let} add1 = \kw{fun} n \codearr n + 1 \kw{in}}} \\
+        \bluebox{\mex{\kw{let} g = \kw{fun} m \codearr 2 * (add1 m) \kw{in}}} \\
+        \bluebox{\mex{\kw{let} h = (M.f g) \kw{in}}} \\
+        \bluebox{\mex{(h 3)}}
+      \end{array}
+      \]
+    \end{column}
+
+    \begin{column}{0.45\textwidth}
+      \[
+      \large
+      \begin{array}{@{}ll@{}}
+        \redbox{\mex{\textcolor{dkcomment}{(* Module M *)}}} \\
+        \invisible<-1>{\redbox{\mex{\kw{let} f = \kw{fun} g\codequote\ \codearr}}}\\
+        \invisible<-1>{\redbox{\mex{                      \kw{let} sq = \kw{fun} x \codearr x * x\ \kw{in}}}}\\
+        \invisible<-1>{\redbox{\mex{                      \kw{fun} y \codearr (sq y) * (g\codequote\ y)}}}
+      \end{array}
+      \]
+    \end{column}
+  \end{columns}
+
+  \only<2>{}
+
+\end{frame}
+
+\begin{frame}
+
+  \begin{columns}[t]
+    \begin{column}{0.45\textwidth}
+      \[
+      \begin{array}{@{}ll@{}}
+        \bluebox{\mex{\textcolor{dkcomment}{(* Main *)}}}\\
+        \bluebox{\mex{\kw{let} add1 = ${}^{\lambdalabel{1}}$\kw{fun} n \codearr n + 1 \kw{in}}} \\
+        \bluebox{\mex{\kw{let} g = ${}^{\lambdalabel{2}}$\kw{fun} m \codearr 2 * \altcolor{10-11}{green}{${}^{\calllabel{1}}$(add1 m)} \kw{in}}} \\
+        \bluebox{\mex{\kw{let} h = \altcolor{2-3}{green}{${}^{\calllabel{2}}$(M.f g)} \kw{in}}} \\
+        \bluebox{\altcolor{4-5}{green}{\mex{${}^{\calllabel{3}}$(h 3)}}}
+      \end{array}
+      \]
+    \end{column}
+
+    \begin{column}{0.45\textwidth}
+      \[
+      \begin{array}{@{}ll@{}}
+        \redbox{\mex{\textcolor{dkcomment}{(* Module M *)}}} \\
+        \redbox{\mex{\kw{let} f = ${}^{\lambdalabel{1}}$\kw{fun} g\codequote\ \codearr}}\\
+        \redbox{\mex{ \kw{let} sq = ${}^{\lambdalabel{2}}$\kw{fun} x \codearr} x * x\ \kw{in}}\\
+        \redbox{ \mex{${}^{\lambdalabel{3}}$\kw{fun} y \codearr \altcolor{6-7}{green}{${}^{\calllabel{1}}$(sq y)} * \altcolor{8-9}{green}{${}^{\calllabel{2}}$(g\codequote\ y)}}}\\
+      \end{array}
+      \]
+    \end{column}
+  \end{columns}
+
+  \Large
+  \vspace{0.5em}
+
+  \invisible<-11>{\{} \invisible<-2>{(\redbox{\lambdalabel{1}}, \bluebox{\calllabel{2}})}\invisible<-4>{, (\redbox{\lambdalabel{3}}, \bluebox{\calllabel{3}})}\invisible<-6>{, (\redbox{\lambdalabel{2}}, \redbox{\calllabel{1}})}\invisible<-8>{, (\bluebox{\lambdalabel{2}}, \redbox{\calllabel{2}})}\invisible<-10>{, (\bluebox{\lambdalabel{1}}, \bluebox{\calllabel{1}})} \invisible<-11>{\}}
+
+  \only<12>{}
+
+\end{frame}
+
+\begin{frame}
+
+  \Large
+  \{
+  \altcolor{1}{green}{(\redbox{\lambdalabel{1}}, \bluebox{\calllabel{2}})},
+  \altcolor{1}{green}{(\redbox{\lambdalabel{3}}, \bluebox{\calllabel{3}})},
+  \altcolor{2}{green}{(\redbox{\lambdalabel{2}}, \redbox{\calllabel{1}})},
+  \altcolor{1}{green}{(\bluebox{\lambdalabel{2}}, \redbox{\calllabel{2}})},
+  \altcolor{3}{green}{(\bluebox{\lambdalabel{1}}, \bluebox{\calllabel{1}})} \}
+
+  \vspace{0.5em}
+
+  \{
+  \altcolor{1}{green}{(\unknownlambdalabel, \bluebox{\calllabel{2}})},
+  \altcolor{1}{green}{(\unknownlambdalabel, \bluebox{\calllabel{3}})},
+  \invisible<-1>{\altcolor{2}{green}{(\unknownlambdalabel, \unknowncalllabel)}},
+  \altcolor{1}{green}{(\bluebox{\lambdalabel{2}}, \unknowncalllabel)},
+  \invisible<-2>{\altcolor{3}{green}{(\bluebox{\lambdalabel{1}}, \bluebox{\calllabel{1}})}} \}
+
+  \vspace{0.5em}
+
+  \begin{itemize}
+  \item \invisible<0>{Boundary}
+  \item \invisible<-1>{External}
+  \item \invisible<-2>{Internal}
+  \end{itemize}
+
+  \only<3>{}
+
+\end{frame}
+
+\begin{frame}
+
+  \Large
+  \begin{itemize}
+  \item Mechanizable simulation-based soundness proofs
+  \item Generalizable to other trace events
+  \end{itemize}
+  \vspace{2em}
+  \[
+  \begin{array}{cc}
+    \altborder{1-}{blue}{\mex{zheng.lingx@northeastern.edu}}\\
+    \mex{bquiring@umd.edu}
+  \end{array}
+  \]
+
+\end{frame}
