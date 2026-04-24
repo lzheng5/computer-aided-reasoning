@@ -36,13 +36,13 @@
   \]
 
   \begin{itemize}
-  \item \invisible<-1>{\text{\mex{M.f} should be unknown (or \unknown)}}
+  \item \invisible<-1>{\text{\mex{M.f} should be some unknown value, \unknown}}
   \item \invisible<-3>{\text{Applying \unknown\ should produce another \unknown}}
   \end{itemize}
 
   \invisible<-4>{Nguyen, Tobin-Hochstadt, and Van Horn 2014 treated \unknown\ this way.}
 
-  \invisible<-5>{Does \unknown\ mean \textbf{any value}?}
+  \invisible<-5>{Does \unknown\ really mean \textbf{any value}?}
 
   \only<6>{}
 
@@ -58,7 +58,7 @@
       \begin{array}{@{}ll@{}}
         \mex{\textcolor{dkcomment}{(* Main *)}}\\
         \mex{\kw{let} add1 = \kw{fun} n \codearr n + 1 \kw{in}} \\
-        \mex{\kw{let} g = \altcolor{4-5}{blue}{\kw{fun} m \codearr 2 * (add1 m)} \kw{in}} \\
+        \mex{\kw{let} g = \altcolor{3-4}{blue}{\kw{fun} m \codearr 2 * (add1 m)} \kw{in}} \\
         \mex{\kw{let} h = \altcolor{2-3}{blue}{(M.f g)} \kw{in}} \\
         \mex{(h 3)}
       \end{array}
@@ -166,7 +166,7 @@
   \]
 
   \begin{itemize}
-  \item \invisible<-1>{Should \mex{(M.f g)} ever return it?}
+  \item \invisible<-1>{Can \mex{(M.f g)} ever return it?}
   \end{itemize}
 
   \only<2>{}
@@ -221,7 +221,7 @@
   \]
 
   \begin{itemize}
-  \item \mex{(M.f g)} should never return it
+  \item \mex{(M.f g)} should never return it!
   \item \invisible<-1>{It should never be called when we apply \mex{h} to 3}
   \item \invisible<-2>{\unknown\ does \textbf{not} include internal non-escaping values}
   \end{itemize}
@@ -310,7 +310,7 @@
   \vspace{1em}
 
   \begin{itemize}
-  \item Simulation based soundness proof \pause
+  \item Logical relation based soundness proofs \pause
   \item Need a generic way to differentiate the \textbf{trace events}
   \end{itemize}
 
